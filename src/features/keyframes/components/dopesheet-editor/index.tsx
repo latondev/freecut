@@ -22,22 +22,14 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Braces,
   LineChart,
-  Link2,
   Lock,
   Scissors,
   Sparkles,
-  Timer,
-  Unlink,
-  Unlink2,
-  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/shared/ui/cn'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type {
   AnimatableProperty,
   BezierControlPoints,
@@ -93,6 +85,27 @@ import { DopesheetSheetBody } from './dopesheet-sheet-body'
 import { DopesheetInterpolationButtons } from './dopesheet-interpolation-buttons'
 import { DopesheetParameterMenu } from './dopesheet-parameter-menu'
 import { DopesheetLegendPopover } from './dopesheet-legend-popover'
+import { PropertyRowKeyframeNav } from './property-row-keyframe-nav'
+import {
+  resolvePropertyRowExpressionError,
+  resolvePropertyRowLabels,
+  resolvePropertyRowLinkable,
+  resolvePropertyRowPreExpressionValue,
+  resolvePropertyRowResetState,
+  resolvePropertyRowShellClassName,
+} from './property-row-view-model'
+import {
+  DopesheetResetButton,
+  PropertyRowAutoKeyButton,
+  PropertyRowAxisConstraintButton,
+  PropertyRowCompoundInput,
+  PropertyRowCurveButton,
+  PropertyRowExpressionButton,
+  PropertyRowLinkButton,
+  PropertyRowLockButton,
+  PropertyRowReset,
+  PropertyRowValueInput,
+} from './property-row-controls'
 import { DopesheetViewOptionsMenu } from './dopesheet-view-options-menu'
 import { DopesheetExpressionDock, EXPRESSION_DOCK_HEIGHT } from './dopesheet-expression-dock'
 import {
@@ -100,12 +113,8 @@ import {
   type DopesheetDimensionSeparationControl,
   type DopesheetDimensionSeparationEntry,
 } from './dopesheet-group-options-menu'
-import {
-  CompoundPropertyInputs,
-  type CompoundPropertyInputConfig,
-} from './compound-property-inputs'
+import type { CompoundPropertyInputConfig } from './compound-property-inputs'
 import { KeyframeTimingStrip } from './keyframe-timing-strip'
-import { PickWhipIcon } from './pick-whip-icon'
 import { setPointerCaptureSafely } from './dopesheet-utils'
 import { useMotionPickWhipDrag } from '@/shared/hooks/use-pick-whip-drag'
 import { PickWhipOverlay } from '@/shared/ui/pick-whip-overlay'
@@ -183,7 +192,6 @@ import {
 import {
   getKeyframeGroupLabel,
   getKeyframePropertyLabel,
-  getKeyframePropertyShortLabel,
 } from '@/features/keyframes/utils/property-i18n'
 import { useCoalescedScrub } from '../use-coalesced-scrub'
 import { getScrubbedPropertyValue } from './property-value-scrub'
@@ -653,24 +661,6 @@ function buildExpressionDockContext(params: {
   }
 }
 
-function DopesheetResetButton({ label, onReset }: { label: string; onReset: () => void }) {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className={cn(MINI_ICON_BUTTON_CLASS, 'text-muted-foreground hover:text-foreground')}
-      onClick={(event) => {
-        event.stopPropagation()
-        onReset()
-      }}
-      aria-label={label}
-      title={label}
-    >
-      <X className={MINI_ICON_CLASS} />
-    </Button>
-  )
-}
 const EMPTY_FRAME_GROUPS: DopesheetPropertyGroupStructure<StructureRow>['frameGroups'] = []
 
 function getMatchingDragState(
@@ -3559,98 +3549,58 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       const rowLocked = isPropertyLocked(row.property)
       const axisConstraint = axisConstraintByProperty[row.property]
       const compoundRow = compoundPropertyRows[row.property]
-      const curveVisible = singleCurveMode
-        ? (showGraphPane || selectedCurveVisibleExternally) && selectedProperty === row.property
-        : graphVisibleProperties.has(row.property)
-      const rowLabel =
-        propertyLabels[row.property] ??
-        compoundRow?.label ??
-        getKeyframePropertyLabel(t, row.property)
-      const rowDisplayLabel =
-        propertyLabels[row.property] ??
-        compoundRow?.label ??
-        getKeyframePropertyShortLabel(t, row.property)
-      const linkableProperty: DirectLinkableProperty | null =
-        compoundRow?.linkProperty ??
-        (isLinkableAnimatableProperty(row.property) ? row.property : null)
+      const { rowLabel, rowDisplayLabel } = resolvePropertyRowLabels(
+        row.property,
+        propertyLabels,
+        compoundRow,
+        t,
+      )
+      const linkableProperty = resolvePropertyRowLinkable(row.property, compoundRow)
       const propertyLink = linkableProperty
         ? resolvedPropertyLinks.find((link) => link.targetProperty === linkableProperty)
         : undefined
       const propertyExpression = linkableProperty
         ? propertyExpressions.find((expression) => expression.targetProperty === linkableProperty)
         : undefined
-      const preExpressionValue: ExpressionValue | undefined = compoundRow
-        ? (compoundRow.preExpressionValue ?? compoundRow.value)
-        : (preExpressionPropertyValues[row.property] ?? propertyValues[row.property])
-      const editedExpression =
-        linkableProperty && expressionEditor?.property === linkableProperty
-          ? expressionEditor
-          : null
-      const expressionPreview =
-        linkableProperty &&
-        preExpressionValue !== undefined &&
-        (editedExpression || propertyExpression)
-          ? evaluatePropertyExpression(
-              editedExpression?.source ?? propertyExpression?.source ?? 'value',
-              {
-                preValue: preExpressionValue,
-                globalFrame: globalFrame ?? itemFrom + currentFrame,
-                fps,
-                resolveProperty: (sourceItemId, sourceProperty) =>
-                  resolveExpressionReference?.(sourceItemId, sourceProperty) ?? null,
-              },
-            )
-          : undefined
-      const expressionError =
-        expressionPreview?.error ??
-        (linkableProperty &&
-        expressionPreview &&
-        !isExpressionValueCompatible(linkableProperty, expressionPreview.value)
-          ? 'Expression result has the wrong value type'
-          : undefined)
-      const canResetEffectProperty =
-        isEffectAnimatableProperty(row.property) &&
-        !!onResetPropertiesToDefault &&
-        !disabled &&
-        !rowLocked
-      const canResetRow = canResetEffectProperty || canClearRow(row)
-      const resetRowLabel = t(
-        canResetEffectProperty
-          ? 'timeline.keyframeEditor.resetEffectPropertyDefault'
-          : 'timeline.keyframeEditor.resetPropertyAnimation',
-        {
-          property: rowLabel,
-          defaultValue: canResetEffectProperty
-            ? `Reset ${rowLabel} to its default value`
-            : `Reset ${rowLabel} animation to its base value`,
-        },
+      const preExpressionValue = resolvePropertyRowPreExpressionValue(
+        row.property,
+        compoundRow,
+        preExpressionPropertyValues,
+        propertyValues,
       )
+      const expressionError = resolvePropertyRowExpressionError({
+        linkableProperty,
+        preExpressionValue,
+        expressionEditor,
+        propertyExpression,
+        globalFrame,
+        itemFrom,
+        currentFrame,
+        fps,
+        resolveExpressionReference,
+      })
+      const { canResetEffectProperty, canResetRow, resetRowLabel } = resolvePropertyRowResetState({
+        property: row.property,
+        rowLabel,
+        hasResetToDefault: !!onResetPropertiesToDefault,
+        disabled,
+        rowLocked,
+        canClear: canClearRow(row),
+        t,
+      })
 
       return (
         <div
-          className={cn(
-            'group h-full px-1 flex items-center gap-px bg-muted/8',
-            // Motion lanes sit beneath a layer row, so preserve that outer tree
-            // level before applying the existing property-group indentation.
-            presentation === 'lanes' &&
-              "relative before:absolute before:inset-y-0 before:left-3 before:w-px before:bg-border/40 before:content-['']",
-            presentation === 'lanes'
-              ? options?.indented
-                ? 'pl-9'
-                : 'pl-4'
-              : options?.indented && 'pl-6',
-            row.controls.hasKeyframeAtCurrentFrame &&
-              (presentation === 'lanes' ? 'bg-accent/70' : 'bg-primary/10'),
-            showGraphPane && graphVisibleProperties.has(row.property) && 'bg-accent/40',
-            selectedProperty === row.property && 'bg-accent/55',
-            !rowLocked && 'cursor-pointer',
-            rowLocked && 'opacity-70',
-            'data-[expression-link-eligible=true]:bg-primary/[0.06] data-[expression-link-eligible=true]:ring-1 data-[expression-link-eligible=true]:ring-inset data-[expression-link-eligible=true]:ring-primary/20',
-            'data-[expression-link-hover=true]:!bg-primary/20 data-[expression-link-hover=true]:ring-1 data-[expression-link-hover=true]:ring-inset data-[expression-link-hover=true]:!ring-primary/70',
-            'data-[expression-reference-hover=true]:bg-sky-500/15 data-[expression-reference-hover=true]:ring-1 data-[expression-reference-hover=true]:ring-inset data-[expression-reference-hover=true]:ring-sky-400/70',
-            'data-[expression-reference-pickable=true]:cursor-crosshair data-[expression-reference-pickable=true]:bg-sky-500/15 data-[expression-reference-pickable=true]:ring-1 data-[expression-reference-pickable=true]:ring-inset data-[expression-reference-pickable=true]:ring-sky-400/70',
-            'data-[expression-reference-unavailable=true]:opacity-45',
-          )}
+          className={resolvePropertyRowShellClassName({
+            isLanes: presentation === 'lanes',
+            rowOptions: options,
+            hasKeyframeAtCurrentFrame: row.controls.hasKeyframeAtCurrentFrame,
+            showGraphPane,
+            selectedProperty,
+            property: row.property,
+            graphProperties: graphVisibleProperties,
+            rowLocked,
+          })}
           data-expression-item-id={linkableProperty ? itemId : undefined}
           data-expression-property={linkableProperty ?? undefined}
           data-selected={selectedProperty === row.property ? 'true' : undefined}
@@ -3658,244 +3608,61 @@ export const DopesheetEditor = memo(function DopesheetEditor({
           onClick={!rowLocked ? () => activateProperty(row.property) : undefined}
         >
           <div className="flex items-center gap-px self-stretch">
-            {!classic && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  MINI_ICON_BUTTON_CLASS,
-                  'self-center text-muted-foreground hover:text-foreground',
-                  curveVisible
-                    ? 'text-orange-500 hover:text-orange-400'
-                    : 'opacity-30 hover:opacity-60',
-                )}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  if (singleCurveMode) {
-                    if (curveVisible) {
-                      onCurveVisibilityChange?.(row.property, false)
-                    } else {
-                      showSinglePropertyCurve(row.property)
-                    }
-                    return
-                  }
-                  togglePropertyCurve(row.property)
-                }}
-                title={t('timeline.keyframeEditor.showPropertyCurve', {
-                  property: rowLabel,
-                  defaultValue: `Show ${rowLabel} curve`,
-                })}
-                aria-label={t('timeline.keyframeEditor.showPropertyCurve', {
-                  property: rowLabel,
-                  defaultValue: `Show ${rowLabel} curve`,
-                })}
-                aria-pressed={curveVisible}
-              >
-                <LineChart className={MINI_ICON_CLASS} />
-              </Button>
-            )}
-            {!classic && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  MINI_ICON_BUTTON_CLASS,
-                  'self-center text-muted-foreground hover:text-foreground',
-                  rowLocked ? 'text-red-400 hover:text-red-300' : 'opacity-30 hover:opacity-60',
-                )}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  if (event.shiftKey) {
-                    setAllRowsLocked(!rowLocked)
-                    return
-                  }
-                  toggleLockedProperty(row.property)
-                }}
-                title={`${
-                  rowLocked
-                    ? t('timeline.keyframeEditor.unlockPropertyRow', {
-                        property: rowLabel,
-                        defaultValue: `Unlock ${rowLabel} row`,
-                      })
-                    : t('timeline.keyframeEditor.lockPropertyRow', {
-                        property: rowLabel,
-                        defaultValue: `Lock ${rowLabel} row`,
-                      })
-                } — ${t('timeline.keyframeEditor.lockAllRowsHint', {
-                  defaultValue: 'Shift-click to lock or unlock every row',
-                })}`}
-                aria-label={
-                  rowLocked
-                    ? t('timeline.keyframeEditor.unlockPropertyRow', {
-                        property: rowLabel,
-                        defaultValue: `Unlock ${rowLabel} row`,
-                      })
-                    : t('timeline.keyframeEditor.lockPropertyRow', {
-                        property: rowLabel,
-                        defaultValue: `Lock ${rowLabel} row`,
-                      })
-                }
-                aria-pressed={rowLocked}
-              >
-                <Lock className={MINI_ICON_CLASS} />
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={cn(
-                MINI_ICON_BUTTON_CLASS,
-                'self-center text-muted-foreground hover:text-foreground',
-                autoKeyEnabledByProperty[row.property] &&
-                  'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground',
-              )}
-              onClick={() => handleRowAutoKeyToggle(row.property)}
-              disabled={disabled || rowLocked || !onPropertyValueCommit}
-              title={
-                autoKeyEnabledByProperty[row.property]
-                  ? t('timeline.keyframeEditor.autoKeyEnabledFor', {
-                      target: rowLabel,
-                      defaultValue: `Auto-key enabled for ${rowLabel}`,
-                    })
-                  : t('timeline.keyframeEditor.enableAutoKeyFor', {
-                      target: rowLabel,
-                      defaultValue: `Enable auto-key for ${rowLabel}`,
-                    })
-              }
-              aria-label={
-                autoKeyEnabledByProperty[row.property]
-                  ? t('timeline.keyframeEditor.autoKeyEnabledFor', {
-                      target: rowLabel,
-                      defaultValue: `Auto-key enabled for ${rowLabel}`,
-                    })
-                  : t('timeline.keyframeEditor.enableAutoKeyFor', {
-                      target: rowLabel,
-                      defaultValue: `Enable auto-key for ${rowLabel}`,
-                    })
-              }
-              aria-pressed={autoKeyEnabledByProperty[row.property] ?? false}
-            >
-              <Timer className={MINI_ICON_CLASS} />
-            </Button>
-            {!classic && linkableProperty && beginPropertyLink ? (
-              propertyLink ? (
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className={cn(
-                        MINI_ICON_BUTTON_CLASS,
-                        'self-center text-orange-400 hover:bg-orange-500/10 hover:text-orange-300',
-                      )}
-                      onPointerDown={(event) => {
-                        event.stopPropagation()
-                        beginPropertyLink(event, linkableProperty)
-                      }}
-                      title={t('timeline.keyframeEditor.linkedExpression', {
-                        source:
-                          resolvedPropertyLinkSourceLabels[linkableProperty] ??
-                          propertyLink.sourceProperty,
-                        defaultValue: `Linked to ${resolvedPropertyLinkSourceLabels[linkableProperty] ?? propertyLink.sourceProperty}. Drag to re-link or click for options.`,
-                      })}
-                      aria-label={t('timeline.keyframeEditor.linkedExpression', {
-                        source:
-                          resolvedPropertyLinkSourceLabels[linkableProperty] ??
-                          propertyLink.sourceProperty,
-                        defaultValue: `Linked to ${resolvedPropertyLinkSourceLabels[linkableProperty] ?? propertyLink.sourceProperty}`,
-                      })}
-                    >
-                      <PickWhipIcon className={MINI_ICON_CLASS} data-testid="pick-whip-icon" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent side="right" align="start" className="w-56 space-y-2 p-2">
-                    <div className="text-[10px] font-medium text-foreground">
-                      {t('timeline.keyframeEditor.propertyLink', {
-                        defaultValue: 'Property link',
-                      })}
-                    </div>
-                    <div className="truncate text-[10px] text-muted-foreground">
-                      {resolvedPropertyLinkSourceLabels[linkableProperty] ??
-                        propertyLink.sourceProperty}
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-full justify-start px-2 text-[10px] text-destructive hover:text-destructive"
-                      onClick={() => removePropertyLink?.(linkableProperty)}
-                    >
-                      <Unlink className="mr-1.5 h-3 w-3" />
-                      {t('timeline.keyframeEditor.removePropertyLink', {
-                        defaultValue: 'Remove property link',
-                      })}
-                    </Button>
-                  </PopoverContent>
-                </Popover>
-              ) : (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    MINI_ICON_BUTTON_CLASS,
-                    'self-center touch-none text-muted-foreground opacity-30 hover:text-foreground hover:opacity-70',
-                  )}
-                  onPointerDown={(event) => {
-                    event.stopPropagation()
-                    beginPropertyLink(event, linkableProperty)
-                  }}
-                  title={t('timeline.keyframeEditor.dragToLinkProperty', {
-                    property: rowLabel,
-                    defaultValue: `Drag to link ${rowLabel} to another property`,
-                  })}
-                  aria-label={t('timeline.keyframeEditor.dragToLinkProperty', {
-                    property: rowLabel,
-                    defaultValue: `Drag to link ${rowLabel} to another property`,
-                  })}
-                >
-                  <PickWhipIcon className={MINI_ICON_CLASS} data-testid="pick-whip-icon" />
-                </Button>
-              )
-            ) : null}
-            {!classic && linkableProperty && onSetPropertyExpression ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={disabled || rowLocked}
-                className={cn(
-                  MINI_ICON_BUTTON_CLASS,
-                  'self-center hover:bg-sky-500/10 hover:text-sky-300',
-                  expressionError
-                    ? 'text-red-400'
-                    : propertyExpression?.enabled
-                      ? 'text-sky-400'
-                      : 'text-muted-foreground opacity-30 hover:opacity-70',
-                )}
-                title={
-                  expressionError
-                    ? `${rowLabel} expression error: ${expressionError}`
-                    : propertyExpression
-                      ? `Edit ${rowLabel} expression (Advanced)`
-                      : `Add ${rowLabel} expression (Advanced)`
-                }
-                aria-label={
-                  expressionError
-                    ? `Edit ${rowLabel} expression: ${expressionError}`
-                    : propertyExpression
-                      ? `Edit ${rowLabel} expression`
-                      : `Add ${rowLabel} expression`
-                }
-                onClick={() => openPropertyExpressionEditor(linkableProperty, propertyExpression)}
-              >
-                <Braces className={MINI_ICON_CLASS} />
-              </Button>
-            ) : null}
+              <PropertyRowCurveButton
+                property={row.property}
+                rowLabel={rowLabel}
+                singleCurveMode={singleCurveMode ?? false}
+                showGraphPane={showGraphPane}
+                selectedCurveVisibleExternally={selectedCurveVisibleExternally}
+                selectedProperty={selectedProperty}
+                graphProperties={graphVisibleProperties}
+                visible={!classic}
+                onCurveVisibilityChange={onCurveVisibilityChange}
+                showSinglePropertyCurve={showSinglePropertyCurve}
+                togglePropertyCurve={togglePropertyCurve}
+                t={t}
+              />
+            <PropertyRowLockButton
+              rowLocked={rowLocked}
+              property={row.property}
+              rowLabel={rowLabel}
+              visible={!classic}
+              setAllRowsLocked={setAllRowsLocked}
+              toggleLockedProperty={toggleLockedProperty}
+              t={t}
+            />
+            <PropertyRowAutoKeyButton
+              property={row.property}
+              rowLabel={rowLabel}
+              autoKeyEnabled={autoKeyEnabledByProperty[row.property]}
+              disabled={disabled}
+              rowLocked={rowLocked}
+              canCommit={!!onPropertyValueCommit}
+              onToggleAutoKey={handleRowAutoKeyToggle}
+              t={t}
+            />
+              <PropertyRowLinkButton
+                linkableProperty={linkableProperty}
+                rowLabel={rowLabel}
+                visible={!classic}
+                hasPropertyLink={!!propertyLink}
+                sourceLabels={resolvedPropertyLinkSourceLabels}
+                linkSource={propertyLink}
+                onBeginLink={beginPropertyLink}
+                onRemoveLink={removePropertyLink}
+                t={t}
+              />
+            <PropertyRowExpressionButton
+              linkableProperty={linkableProperty}
+              rowLabel={rowLabel}
+              visible={!classic}
+              canEdit={!!onSetPropertyExpression}
+                expressionError={expressionError}
+                disabled={disabled}
+              rowLocked={rowLocked}
+              propertyExpression={propertyExpression}
+              onOpenExpression={openPropertyExpressionEditor}
+            />
           </div>
           <div
             className={cn(
@@ -3905,302 +3672,86 @@ export const DopesheetEditor = memo(function DopesheetEditor({
             title={rowLabel}
           >
             <span className="min-w-0 truncate">{rowDisplayLabel}</span>
-            {classic && axisConstraint ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  MINI_ICON_BUTTON_CLASS,
-                  'ml-0.5 self-center text-muted-foreground hover:text-foreground',
-                  axisConstraint.constrained && 'text-orange-400 hover:text-orange-300',
-                )}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  axisConstraint.onChange(!axisConstraint.constrained)
-                }}
-                disabled={disabled || rowLocked}
-                title={
-                  axisConstraint.constrained
-                    ? `Unconstrain ${axisConstraint.label} axes`
-                    : `Constrain ${axisConstraint.label} axes`
-                }
-                aria-label={
-                  axisConstraint.constrained
-                    ? `Unconstrain ${axisConstraint.label} axes`
-                    : `Constrain ${axisConstraint.label} axes`
-                }
-                aria-pressed={axisConstraint.constrained}
-              >
-                {axisConstraint.constrained ? (
-                  <Link2 className={MINI_ICON_CLASS} />
-                ) : (
-                  <Unlink2 className={MINI_ICON_CLASS} />
-                )}
-              </Button>
-            ) : null}
+            <PropertyRowAxisConstraintButton
+              axisConstraint={axisConstraint}
+              visible={classic}
+              disabled={disabled}
+              rowLocked={rowLocked}
+            />
           </div>
           <div className="ml-auto flex items-center gap-0">
             {compoundRow ? (
-              <CompoundPropertyInputs
+              <PropertyRowCompoundInput
+                property={row.property}
+                compoundRow={compoundRow}
+                compoundSecondaryProperties={compoundSecondaryProperties}
                 spacious={spacious}
-                config={{
-                  ...compoundRow,
-                  disabled:
-                    compoundRow.disabled ||
-                    disabled ||
-                    rowLocked ||
-                    !!propertyLink ||
-                    (!row.controls.hasKeyframeAtCurrentFrame && isCurrentFrameBlocked),
-                  linked: !!propertyLink,
-                  allowCreateOnBlur: autoKeyEnabledByProperty[row.property] ?? false,
-                  onScrubStart: (axis) => {
-                    const scrubProperty =
-                      axis === 'y'
-                        ? (compoundSecondaryProperties[row.property] ?? row.property)
-                        : row.property
-                    activateProperty(scrubProperty)
-                    if (compoundRow.onScrubStart) compoundRow.onScrubStart(axis)
-                    else onDragStart?.()
-                  },
-                  onScrubPreview:
-                    compoundRow.onScrubPreview || onPropertyValuePreview
-                      ? (axis, value) => {
-                          if (compoundRow.onScrubPreview) {
-                            compoundRow.onScrubPreview(axis, value)
-                            return
-                          }
-                          const scrubProperty =
-                            axis === 'y'
-                              ? (compoundSecondaryProperties[row.property] ?? row.property)
-                              : row.property
-                          onPropertyValuePreview?.(scrubProperty, value)
-                        }
-                      : undefined,
-                  onScrubEnd: compoundRow.onScrubEnd
-                    ? compoundRow.onScrubEnd
-                    : onPropertyValuePreview
-                      ? () => onDragEnd?.()
-                      : undefined,
-                  onScrubCancel: compoundRow.onScrubCancel
-                    ? compoundRow.onScrubCancel
-                    : onPropertyValuePreview
-                      ? () => onDragCancel?.()
-                      : undefined,
-                }}
+                disabled={disabled}
+                rowLocked={rowLocked}
+                hasPropertyLink={!!propertyLink}
+                hasKeyframeAtCurrentFrame={row.controls.hasKeyframeAtCurrentFrame}
+                isCurrentFrameBlocked={isCurrentFrameBlocked}
+                autoKeyEnabled={autoKeyEnabledByProperty[row.property] ?? false}
+                activateProperty={activateProperty}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+                onDragCancel={onDragCancel}
+                onPropertyValuePreview={onPropertyValuePreview}
               />
             ) : (
-              <Input
-                type={isColorAnimatableProperty(row.property) ? 'text' : 'number'}
-                autoComplete="off"
-                data-bwignore="true"
-                value={valueDrafts[row.property] ?? ''}
-                onChange={(event) => handleRowValueChange(row.property, event.target.value)}
-                onPointerDown={(event) => handleValueScrubStart(event, row.property)}
-                onPointerMove={(event) => handleValueScrubMove(event, row.property)}
-                onPointerUp={(event) => handleValueScrubEnd(event, row.property)}
-                onPointerCancel={(event) => handleValueScrubCancel(event, row.property)}
-                onFocus={() => {
-                  activateProperty(row.property)
-                  setEditingValueProperty(row.property)
-                  valueDraftAtFocusRef.current[row.property] = valueDrafts[row.property] ?? ''
-                }}
-                onBlur={() => {
-                  const draftChanged =
-                    valueDraftAtFocusRef.current[row.property] !== (valueDrafts[row.property] ?? '')
-                  delete valueDraftAtFocusRef.current[row.property]
-                  if (skipNextBlurCommitPropertyRef.current === row.property) {
-                    skipNextBlurCommitPropertyRef.current = null
-                  } else if (draftChanged) {
-                    handleRowValueCommit(row.property, {
-                      allowCreate: autoKeyEnabledByProperty[row.property] ?? false,
-                    })
-                  }
-                  setEditingValueProperty((current) => (current === row.property ? null : current))
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault()
-                    skipNextBlurCommitPropertyRef.current = row.property
-                    handleRowValueCommit(row.property, { allowCreate: true })
-                    setEditingValueProperty((current) =>
-                      current === row.property ? null : current,
-                    )
-                    event.currentTarget.blur()
-                  } else if (event.key === 'Escape') {
-                    event.preventDefault()
-                    skipNextBlurCommitPropertyRef.current = row.property
-                    setValueDrafts((prev) => ({
-                      ...prev,
-                      [row.property]: formatPropertyValue(
-                        row.property,
-                        propertyValues[row.property],
-                      ),
-                    }))
-                    setEditingValueProperty((current) =>
-                      current === row.property ? null : current,
-                    )
-                    event.currentTarget.blur()
-                  }
-                }}
-                step={
-                  isColorAnimatableProperty(row.property)
-                    ? undefined
-                    : (PROPERTY_VALUE_RANGES[row.property]?.decimals ?? 2) === 0
-                      ? 1
-                      : 0.1
-                }
-                min={
-                  isColorAnimatableProperty(row.property)
-                    ? undefined
-                    : PROPERTY_VALUE_RANGES[row.property]?.min
-                }
-                max={
-                  isColorAnimatableProperty(row.property)
-                    ? undefined
-                    : PROPERTY_VALUE_RANGES[row.property]?.max
-                }
-                inputMode={isColorAnimatableProperty(row.property) ? 'text' : 'decimal'}
-                className={cn(
-                  'h-5 border-border/70 bg-background/85 px-1.5 py-0 text-right text-[10px] leading-none tabular-nums md:text-[10px]',
-                  '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none',
-                  isColorAnimatableProperty(row.property)
-                    ? 'w-[68px]'
-                    : spacious
-                      ? 'w-[80px]'
-                      : 'w-[44px]',
-                  !isColorAnimatableProperty(row.property) && 'cursor-ew-resize select-none',
-                  propertyLink && 'text-orange-400',
-                )}
-                disabled={
-                  disabled ||
-                  rowLocked ||
-                  !!propertyLink ||
-                  !onPropertyValueCommit ||
-                  (!row.controls.hasKeyframeAtCurrentFrame && isCurrentFrameBlocked)
-                }
-                aria-label={t('timeline.keyframeEditor.propertyValueAtPlayhead', {
-                  property: rowLabel,
-                  defaultValue: `${rowLabel} value at playhead`,
-                })}
-                title={t('timeline.keyframeEditor.scrubPropertyValue', {
-                  property: rowLabel,
-                  defaultValue: `Drag horizontally to adjust ${rowLabel}. Hold Shift for fine or Alt for ultra-fine control.`,
-                })}
+              <PropertyRowValueInput
+                property={row.property}
+                rowLabel={rowLabel}
+                spacious={spacious}
+                hasPropertyLink={!!propertyLink}
+                disabled={disabled}
+                rowLocked={rowLocked}
+                canCommit={!!onPropertyValueCommit}
+                hasKeyframeAtCurrentFrame={row.controls.hasKeyframeAtCurrentFrame}
+                isCurrentFrameBlocked={isCurrentFrameBlocked}
+                autoKeyEnabled={autoKeyEnabledByProperty[row.property] ?? false}
+                propertyValues={propertyValues}
+                valueDrafts={valueDrafts}
+                valueDraftAtFocusRef={valueDraftAtFocusRef}
+                skipNextBlurCommitPropertyRef={skipNextBlurCommitPropertyRef}
+                onValueChange={handleRowValueChange}
+                onScrubStart={handleValueScrubStart}
+                onScrubMove={handleValueScrubMove}
+                onScrubEnd={handleValueScrubEnd}
+                onScrubCancel={handleValueScrubCancel}
+                onValueCommit={handleRowValueCommit}
+                onFocusProperty={activateProperty}
+                onEditingChange={setEditingValueProperty}
+                onDraftsChange={setValueDrafts}
+                formatDisplayValue={formatPropertyValue}
+                t={t}
               />
             )}
-            <div className="flex w-[60px] shrink-0 items-center gap-0 rounded-sm border border-border/70 bg-background/85 px-0">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
-                onClick={() => handleRowNavigate(row.property, row.controls.prevKeyframe)}
-                disabled={disabled || row.controls.prevKeyframe === null || !onNavigateToKeyframe}
-                title={t('timeline.keyframeEditor.previousPropertyKeyframe', {
-                  property: rowLabel,
-                  defaultValue: `Previous ${rowLabel} keyframe`,
-                })}
-                aria-label={t('timeline.keyframeEditor.previousPropertyKeyframe', {
-                  property: rowLabel,
-                  defaultValue: `Previous ${rowLabel} keyframe`,
-                })}
-              >
-                <ChevronLeft className="h-[9px] w-[9px]" />
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  'h-5 w-5 p-0 hover:bg-transparent',
-                  row.controls.hasKeyframeAtCurrentFrame
-                    ? 'text-neutral-200 hover:text-neutral-200'
-                    : 'text-muted-foreground hover:text-foreground',
-                  isCurrentFrameBlocked &&
-                    !row.controls.hasKeyframeAtCurrentFrame &&
-                    'opacity-40 cursor-not-allowed',
-                )}
-                onClick={() => handleRowToggleKeyframe(row.property, row.controls.currentKeyframes)}
-                disabled={
-                  disabled ||
-                  rowLocked ||
-                  (!row.controls.hasKeyframeAtCurrentFrame &&
-                    (isCurrentFrameBlocked || !onAddKeyframe))
-                }
-                title={
-                  !row.controls.hasKeyframeAtCurrentFrame && isCurrentFrameBlocked
-                    ? t('timeline.keyframeEditor.transitionBlocked')
-                    : row.controls.hasKeyframeAtCurrentFrame
-                      ? t('timeline.keyframeEditor.removePropertyKeyframeAtPlayhead', {
-                          property: rowLabel,
-                          defaultValue: `Remove ${rowLabel} keyframe at playhead`,
-                        })
-                      : t('timeline.keyframeEditor.togglePropertyKeyframeAtPlayhead', {
-                          property: rowLabel,
-                          defaultValue: `Toggle ${rowLabel} keyframe at playhead`,
-                        })
-                }
-                aria-label={
-                  !row.controls.hasKeyframeAtCurrentFrame && isCurrentFrameBlocked
-                    ? t('timeline.keyframeEditor.transitionBlocked')
-                    : row.controls.hasKeyframeAtCurrentFrame
-                      ? t('timeline.keyframeEditor.removePropertyKeyframeAtPlayhead', {
-                          property: rowLabel,
-                          defaultValue: `Remove ${rowLabel} keyframe at playhead`,
-                        })
-                      : t('timeline.keyframeEditor.togglePropertyKeyframeAtPlayhead', {
-                          property: rowLabel,
-                          defaultValue: `Toggle ${rowLabel} keyframe at playhead`,
-                        })
-                }
-              >
-                <span
-                  className={cn(
-                    'block h-[7px] w-[7px] rotate-45 border transition-colors',
-                    row.controls.hasKeyframeAtCurrentFrame
-                      ? 'border-neutral-200 bg-neutral-200'
-                      : 'border-current bg-transparent',
-                  )}
-                />
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
-                onClick={() => handleRowNavigate(row.property, row.controls.nextKeyframe)}
-                disabled={disabled || row.controls.nextKeyframe === null || !onNavigateToKeyframe}
-                title={t('timeline.keyframeEditor.nextPropertyKeyframe', {
-                  property: rowLabel,
-                  defaultValue: `Next ${rowLabel} keyframe`,
-                })}
-                aria-label={t('timeline.keyframeEditor.nextPropertyKeyframe', {
-                  property: rowLabel,
-                  defaultValue: `Next ${rowLabel} keyframe`,
-                })}
-              >
-                <ChevronRight className="h-[9px] w-[9px]" />
-              </Button>
-            </div>
-            {!classic && canResetRow ? (
-              <DopesheetResetButton
-                label={resetRowLabel}
-                onReset={() => {
-                  if (canResetEffectProperty) {
-                    onResetPropertiesToDefault?.([row.property])
-                  } else {
-                    handleClearProperty(row.property)
-                  }
-                }}
-              />
-            ) : !classic ? (
-              <span
-                aria-hidden="true"
-                className={MINI_ICON_BUTTON_CLASS}
-                data-testid={`dopesheet-row-reset-spacer-${row.property}`}
-              />
-            ) : null}
+            <PropertyRowKeyframeNav
+              property={row.property}
+              rowLabel={rowLabel}
+              prevKeyframe={row.controls.prevKeyframe}
+              nextKeyframe={row.controls.nextKeyframe}
+              currentKeyframes={row.controls.currentKeyframes}
+              hasKeyframeAtCurrentFrame={row.controls.hasKeyframeAtCurrentFrame}
+              disabled={disabled}
+              rowLocked={rowLocked}
+              isCurrentFrameBlocked={isCurrentFrameBlocked}
+              canNavigate={!!onNavigateToKeyframe}
+              canAddKeyframe={!!onAddKeyframe}
+              onNavigate={handleRowNavigate}
+              onToggleKeyframe={handleRowToggleKeyframe}
+              t={t}
+            />
+            <PropertyRowReset
+              classic={classic}
+              canResetRow={canResetRow}
+              resetRowLabel={resetRowLabel}
+              canResetEffectProperty={canResetEffectProperty}
+              property={row.property}
+              onResetToDefault={onResetPropertiesToDefault}
+              onClearProperty={handleClearProperty}
+            />
           </div>
         </div>
       )
