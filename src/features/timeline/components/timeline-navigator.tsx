@@ -8,6 +8,7 @@ import { notifyTimelineLiveScroll } from '@/shared/timeline/live-scroll-sync'
 import { getTimelineWidth } from '../utils/timeline-layout'
 import { perfMarkRender } from '@/shared/logging/perf-marks'
 import { cn } from '@/shared/ui/cn'
+import { attachWindowDragListeners } from '@/shared/utils/window-drag-listeners'
 import { getNavigatorResizeDragResult, getNavigatorThumbMetrics } from './timeline-navigator-utils'
 
 interface TimelineNavigatorProps {
@@ -505,16 +506,14 @@ export function TimelineNavigator({ actualDuration, scrollContainerRef }: Timeli
       setDragTarget(null)
     }
 
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
+    const detachWindowDragListeners = attachWindowDragListeners(
+      handleMouseMove,
+      handleMouseUp,
+      dragRafRef,
+    )
 
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-      if (dragRafRef.current !== null) {
-        cancelAnimationFrame(dragRafRef.current)
-        dragRafRef.current = null
-      }
+      detachWindowDragListeners()
       pendingPreviewRef.current = null
     }
   }, [

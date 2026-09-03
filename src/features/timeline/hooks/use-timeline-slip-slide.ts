@@ -33,6 +33,7 @@ import {
 } from '../utils/linked-items'
 import {
   canAddTransition,
+  clampDeltaToLastValidValue,
   clampSlipDeltaToPreserveTransitions,
   clampSlideDeltaToPreserveTransitions,
 } from '../utils/transition-utils'
@@ -183,30 +184,6 @@ function applyPreviewUpdate(
   previewUpdate: PreviewItemUpdate | null | undefined,
 ): TimelineItem {
   return previewUpdate ? ({ ...item, ...previewUpdate } as TimelineItem) : item
-}
-
-function clampDeltaToLastValidValue(
-  requestedDelta: number,
-  isValid: (delta: number) => boolean,
-): number {
-  if (!isValid(0)) return 0
-  if (isValid(requestedDelta)) return requestedDelta
-
-  const sign = requestedDelta < 0 ? -1 : 1
-  let low = 0
-  let high = Math.abs(requestedDelta)
-
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2)
-    const candidate = sign * mid
-    if (isValid(candidate)) {
-      low = mid
-    } else {
-      high = mid - 1
-    }
-  }
-
-  return sign * low
 }
 
 /**

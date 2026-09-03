@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useRef, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Move, RotateCcw, Link2, Link2Off } from 'lucide-react'
-import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import type { TimelineItem, VideoItem, CompositionItem } from '@/types/timeline'
@@ -23,6 +22,7 @@ import {
 } from '@/features/editor/deps/keyframes'
 import { PropertySection, PropertyRow, NumberInput, SliderInput } from '../components'
 import { applyAutoKeyframedTransformChange } from './auto-keyframe-transform'
+import { useKeyframesByItemId } from './use-keyframes-by-item-id'
 
 interface LayoutSectionProps {
   items: TimelineItem[]
@@ -224,18 +224,7 @@ export const LayoutSection = memo(function LayoutSection({
   // Get current playhead frame for keyframe animation (throttled to reduce re-renders)
   const currentFrame = useThrottledFrame()
 
-  const itemKeyframes = useKeyframesStore(
-    useShallow(
-      useCallback((s) => itemIds.map((itemId) => s.keyframesByItemId[itemId] ?? null), [itemIds]),
-    ),
-  )
-  const keyframesByItemId = useMemo(() => {
-    const map = new Map<string, (typeof itemKeyframes)[number]>()
-    for (const [index, itemId] of itemIds.entries()) {
-      map.set(itemId, itemKeyframes[index] ?? null)
-    }
-    return map
-  }, [itemIds, itemKeyframes])
+  const keyframesByItemId = useKeyframesByItemId(itemIds)
 
   // Gizmo store for live preview (both for properties panel and gizmo drag sync)
   const setTransformPreview = useGizmoStore((s) => s.setTransformPreview)

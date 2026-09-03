@@ -32,6 +32,7 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { formatHotkeyBinding } from '@/config/hotkeys'
 import { useTimelineStore } from '../stores/timeline-store'
+import { useInOutPoints } from '../hooks/use-in-out-points'
 import { useTimelineCommandStore } from '../stores/timeline-command-store'
 import { useZoomStore } from '../stores/zoom-store'
 import { usePlaybackStore } from '@/shared/state/playback'
@@ -456,10 +457,7 @@ export const TimelineHeader = memo(function TimelineHeader({
   const toggleSnap = useTimelineStore((s) => s.toggleSnap)
   const audioSkimmingEnabled = useTimelineStore((s) => s.audioSkimmingEnabled)
   const toggleAudioSkimming = useTimelineStore((s) => s.toggleAudioSkimming)
-  const inPoint = useTimelineStore((s) => s.inPoint)
-  const outPoint = useTimelineStore((s) => s.outPoint)
-  const setInPoint = useTimelineStore((s) => s.setInPoint)
-  const setOutPoint = useTimelineStore((s) => s.setOutPoint)
+  const { inPoint, outPoint, setInPoint, setOutPoint } = useInOutPoints()
   const clearInOutPoints = useTimelineStore((s) => s.clearInOutPoints)
   const addMarker = useTimelineStore((s) => s.addMarker)
   // Only subscribe to marker count for disabled state - avoids re-render on marker changes

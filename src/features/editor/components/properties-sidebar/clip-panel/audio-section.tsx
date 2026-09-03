@@ -1,10 +1,9 @@
 import { useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Music, RotateCcw, Volume2 } from 'lucide-react'
-import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@/components/ui/button'
 import type { TimelineItem } from '@/types/timeline'
-import { useKeyframesStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { useTimelineStore } from '@/features/editor/deps/timeline-store'
 import { useGizmoStore, useThrottledFrame } from '@/features/editor/deps/preview'
 import {
   getAutoKeyframeOperation,
@@ -16,6 +15,7 @@ import {
 import { PropertyRow, PropertySection, SliderInput } from '../components'
 import { getMixedValue } from '../utils'
 import { getAudioSectionItems } from './audio-section-utils'
+import { useKeyframesByItemId } from './use-keyframes-by-item-id'
 import { AudioEqPanelContent } from './audio-eq-panel-content'
 import {
   AUDIO_PITCH_CENTS_MAX,
@@ -57,18 +57,7 @@ export function AudioSection({ items }: AudioSectionProps) {
     () => new Map(audioItems.map((item) => [item.id, item])),
     [audioItems],
   )
-  const itemKeyframes = useKeyframesStore(
-    useShallow(
-      useCallback((s) => itemIds.map((itemId) => s.keyframesByItemId[itemId] ?? null), [itemIds]),
-    ),
-  )
-  const keyframesByItemId = useMemo(() => {
-    const map = new Map<string, (typeof itemKeyframes)[number]>()
-    for (const [index, itemId] of itemIds.entries()) {
-      map.set(itemId, itemKeyframes[index] ?? null)
-    }
-    return map
-  }, [itemIds, itemKeyframes])
+  const keyframesByItemId = useKeyframesByItemId(itemIds)
 
   const volume = useMemo(() => {
     if (audioItems.length === 0) return 0 as number | 'mixed'

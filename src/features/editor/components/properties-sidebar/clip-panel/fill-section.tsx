@@ -1,7 +1,6 @@
 import { useCallback, useMemo, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Droplet, RotateCcw } from 'lucide-react'
-import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -17,7 +16,7 @@ import type { BlendMode } from '@/types/blend-modes'
 import { BLEND_MODE_GROUPS, BLEND_MODE_LABELS } from '@/types/blend-modes'
 import type { TransformProperties, CanvasSettings } from '@/types/transform'
 import { useGizmoStore, useThrottledFrame } from '@/features/editor/deps/preview'
-import { useKeyframesStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { useTimelineStore } from '@/features/editor/deps/timeline-store'
 import { resolveTransform, getSourceDimensions } from '@/features/editor/deps/composition-runtime'
 import {
   getAutoKeyframeOperation,
@@ -27,6 +26,7 @@ import {
 } from '@/features/editor/deps/keyframes'
 import { PropertySection, PropertyRow, NumberInput, SliderInput } from '../components'
 import { applyAutoKeyframedTransformChange } from './auto-keyframe-transform'
+import { useKeyframesByItemId } from './use-keyframes-by-item-id'
 
 interface FillSectionProps {
   items: TimelineItem[]
@@ -52,18 +52,7 @@ export const FillSection = memo(function FillSection({
   // Get current playhead frame for keyframe animation (throttled to reduce re-renders)
   const currentFrame = useThrottledFrame()
 
-  const itemKeyframes = useKeyframesStore(
-    useShallow(
-      useCallback((s) => itemIds.map((itemId) => s.keyframesByItemId[itemId] ?? null), [itemIds]),
-    ),
-  )
-  const keyframesByItemId = useMemo(() => {
-    const map = new Map<string, (typeof itemKeyframes)[number]>()
-    for (const [index, itemId] of itemIds.entries()) {
-      map.set(itemId, itemKeyframes[index] ?? null)
-    }
-    return map
-  }, [itemIds, itemKeyframes])
+  const keyframesByItemId = useKeyframesByItemId(itemIds)
 
   // Item update for non-transform properties (blend mode)
   const updateItem = useTimelineStore((s) => s.updateItem)
