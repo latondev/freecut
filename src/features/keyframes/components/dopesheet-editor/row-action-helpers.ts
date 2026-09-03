@@ -62,3 +62,46 @@ export function getRemovableGroupCurrentKeyframes(
 ): CurrentGroupKeyframeLike[] {
   return currentKeyframes.filter(({ property }) => !isPropertyLocked(property))
 }
+
+/**
+ * Shift-click range selection: selects every keyframe between the clicked
+ * keyframe and the anchor (inclusive). Falls back to selecting just the
+ * clicked keyframe when either endpoint has no index.
+ */
+export function resolveShiftRangeSelection(
+  propertyKeyframes: readonly Keyframe[],
+  clickedKeyframeId: string,
+  anchorKeyframeId: string | undefined,
+  selectedKeyframeIds: ReadonlySet<string>,
+): Set<string> {
+  const nextSelection = new Set(selectedKeyframeIds)
+  const clickedIndex = propertyKeyframes.findIndex((keyframe) => keyframe.id === clickedKeyframeId)
+  const anchorIndex = anchorKeyframeId
+    ? propertyKeyframes.findIndex((keyframe) => keyframe.id === anchorKeyframeId)
+    : -1
+  if (clickedIndex >= 0 && anchorIndex >= 0) {
+    const start = Math.min(clickedIndex, anchorIndex)
+    const end = Math.max(clickedIndex, anchorIndex)
+    for (let i = start; i <= end; i++) {
+      const keyframe = propertyKeyframes[i]
+      if (keyframe) nextSelection.add(keyframe.id)
+    }
+  } else {
+    nextSelection.add(clickedKeyframeId)
+  }
+  return nextSelection
+}
+
+/** Ctrl/Cmd-click: toggles a single keyframe in the selection. */
+export function toggleKeyframeInSelection(
+  selectedKeyframeIds: ReadonlySet<string>,
+  keyframeId: string,
+): Set<string> {
+  const nextSelection = new Set(selectedKeyframeIds)
+  if (nextSelection.has(keyframeId)) {
+    nextSelection.delete(keyframeId)
+  } else {
+    nextSelection.add(keyframeId)
+  }
+  return nextSelection
+}

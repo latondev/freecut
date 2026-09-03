@@ -177,6 +177,8 @@ import {
   buildPropertyKeyframeRefs,
   buildRowKeyframeRefs,
   removeSelectionIds,
+  resolveShiftRangeSelection,
+  toggleKeyframeInSelection,
 } from './row-action-helpers'
 import {
   getKeyframeGroupLabel,
@@ -2726,35 +2728,20 @@ export const DopesheetEditor = memo(function DopesheetEditor({
 
       if (event.shiftKey && !event.ctrlKey && !event.metaKey) {
         const propertyKeyframes = rowKeyframesByProperty.get(property) ?? []
-        const clickedIndex = propertyKeyframes.findIndex((keyframe) => keyframe.id === keyframeId)
         const anchorId = selectionAnchorByPropertyRef.current.get(property)
-        const anchorIndex = anchorId
-          ? propertyKeyframes.findIndex((keyframe) => keyframe.id === anchorId)
-          : -1
-
-        const nextSelection = new Set(selectedKeyframeIds)
-        if (clickedIndex >= 0 && anchorIndex >= 0) {
-          const start = Math.min(clickedIndex, anchorIndex)
-          const end = Math.max(clickedIndex, anchorIndex)
-          for (let i = start; i <= end; i++) {
-            const keyframe = propertyKeyframes[i]
-            if (keyframe) nextSelection.add(keyframe.id)
-          }
-        } else {
-          nextSelection.add(keyframeId)
-        }
+        const nextSelection = resolveShiftRangeSelection(
+          propertyKeyframes,
+          keyframeId,
+          anchorId,
+          selectedKeyframeIds,
+        )
         onSelectionChange?.(nextSelection, { preserveExternalSelection: true })
         selectionAnchorByPropertyRef.current.set(property, keyframeId)
         return
       }
 
       if (event.ctrlKey || event.metaKey) {
-        const nextSelection = new Set(selectedKeyframeIds)
-        if (nextSelection.has(keyframeId)) {
-          nextSelection.delete(keyframeId)
-        } else {
-          nextSelection.add(keyframeId)
-        }
+        const nextSelection = toggleKeyframeInSelection(selectedKeyframeIds, keyframeId)
         onSelectionChange?.(nextSelection, { preserveExternalSelection: true })
         selectionAnchorByPropertyRef.current.set(property, keyframeId)
         return

@@ -1537,6 +1537,80 @@ export async function createCompositionRenderer(
     }
   }
 
+  /**
+   * Scans the visible tracks for any item needing the GPU path at `frame`
+   * (enabled GPU effects on the item or inside compound sub-compositions).
+   */
+  const detectFrameGpuEffects = (frame: number): boolean => {
+    for (const track of sortedTracks) {
+      if (!visibleTrackIds.has(track.id)) continue
+      for (const baseItem of track.items ?? []) {
+        const item = getCurrentItem(baseItem)
+        if (frame < item.from || frame >= item.from + item.durationInFrames) continue
+        if (
+          itemHasEnabledGpuEffect(
+            item,
+            renderMode === 'preview' ? getPreviewEffectsOverride : undefined,
+          )
+        ) {
+          return true
+        }
+        // Compound clips: also check GPU effects on sub-comp items and
+        // adjustment layers so the pipeline is initialized before
+        // renderCompositionItem needs it.
+        if (item.type === 'composition') {
+          if (
+            subCompositionRenderDataHasGpuEffects(item.compositionId, subCompRenderData, {
+              getCurrentItem,
+              getPreviewEffectsOverride:
+                renderMode === 'preview' ? getPreviewEffectsOverride : undefined,
+            })
+          ) {
+            return true
+          }
+        }
+      }
+    }
+    return false
+  }
+
+  /**
+   * Lazily initializes the GPU pipelines needed for a frame: effects (+ media)
+   * when any item needs the GPU path, and the transition pipeline (+ its
+   * companion media/shape/text/mask pipelines) when transitions are active.
+   */
+  const ensureFrameGpuPipelines = async (
+    hasAnyGpuEffects: boolean,
+    hasActiveTransitions: boolean,
+  ): Promise<void> => {
+    if (hasAnyGpuEffects || hasActiveTransitions) {
+      if (!itemRenderContext.gpuPipeline) {
+        itemRenderContext.gpuPipeline = await gpu.ensureEffects()
+      }
+      if (itemRenderContext.gpuPipeline) {
+        // Initialize GPU transition pipeline (shares device with effects pipeline)
+        if (hasAnyGpuEffects) {
+          if (!itemRenderContext.gpuMediaPipeline) gpu.ensureMedia()
+          itemRenderContext.gpuMediaPipeline = gpu.media
+        }
+        if (hasActiveTransitions) {
+          if (!itemRenderContext.gpuTransitionPipeline) gpu.ensureTransition()
+          if (!itemRenderContext.gpuMediaPipeline) gpu.ensureMedia()
+          if (!itemRenderContext.gpuMediaBlendPipeline) gpu.ensureMediaBlend()
+          if (!itemRenderContext.gpuShapePipeline) gpu.ensureShape()
+          if (!itemRenderContext.gpuTextPipeline) gpu.ensureText()
+          if (!itemRenderContext.gpuMaskCombinePipeline) gpu.ensureMaskCombine()
+          itemRenderContext.gpuTransitionPipeline = gpu.transition
+          itemRenderContext.gpuMediaPipeline = gpu.media
+          itemRenderContext.gpuMediaBlendPipeline = gpu.mediaBlend
+          itemRenderContext.gpuShapePipeline = gpu.shape
+          itemRenderContext.gpuTextPipeline = gpu.text
+          itemRenderContext.gpuMaskCombinePipeline = gpu.maskCombine
+        }
+      }
+    }
+  }
+
   return {
     async preload(
       options: {
@@ -2107,65 +2181,8 @@ export async function createCompositionRenderer(
         })
       }
 
-      let hasAnyGpuEffects = false
-      for (const track of sortedTracks) {
-        if (!visibleTrackIds.has(track.id)) continue
-        for (const baseItem of track.items ?? []) {
-          const item = getCurrentItem(baseItem)
-          if (frame < item.from || frame >= item.from + item.durationInFrames) continue
-          if (
-            itemHasEnabledGpuEffect(
-              item,
-              renderMode === 'preview' ? getPreviewEffectsOverride : undefined,
-            )
-          ) {
-            hasAnyGpuEffects = true
-            break
-          }
-          // Compound clips: also check GPU effects on sub-comp items and
-          // adjustment layers so the pipeline is initialized before
-          // renderCompositionItem needs it.
-          if (item.type === 'composition') {
-            if (
-              subCompositionRenderDataHasGpuEffects(item.compositionId, subCompRenderData, {
-                getCurrentItem,
-                getPreviewEffectsOverride:
-                  renderMode === 'preview' ? getPreviewEffectsOverride : undefined,
-              })
-            ) {
-              hasAnyGpuEffects = true
-              break
-            }
-          }
-        }
-        if (hasAnyGpuEffects) break
-      }
-      if (hasAnyGpuEffects || activeTransitions.length > 0) {
-        if (!itemRenderContext.gpuPipeline) {
-          itemRenderContext.gpuPipeline = await gpu.ensureEffects()
-        }
-        if (itemRenderContext.gpuPipeline) {
-          // Initialize GPU transition pipeline (shares device with effects pipeline)
-          if (hasAnyGpuEffects) {
-            if (!itemRenderContext.gpuMediaPipeline) gpu.ensureMedia()
-            itemRenderContext.gpuMediaPipeline = gpu.media
-          }
-          if (activeTransitions.length > 0) {
-            if (!itemRenderContext.gpuTransitionPipeline) gpu.ensureTransition()
-            if (!itemRenderContext.gpuMediaPipeline) gpu.ensureMedia()
-            if (!itemRenderContext.gpuMediaBlendPipeline) gpu.ensureMediaBlend()
-            if (!itemRenderContext.gpuShapePipeline) gpu.ensureShape()
-            if (!itemRenderContext.gpuTextPipeline) gpu.ensureText()
-            if (!itemRenderContext.gpuMaskCombinePipeline) gpu.ensureMaskCombine()
-            itemRenderContext.gpuTransitionPipeline = gpu.transition
-            itemRenderContext.gpuMediaPipeline = gpu.media
-            itemRenderContext.gpuMediaBlendPipeline = gpu.mediaBlend
-            itemRenderContext.gpuShapePipeline = gpu.shape
-            itemRenderContext.gpuTextPipeline = gpu.text
-            itemRenderContext.gpuMaskCombinePipeline = gpu.maskCombine
-          }
-        }
-      }
+      const hasAnyGpuEffects = detectFrameGpuEffects(frame)
+      await ensureFrameGpuPipelines(hasAnyGpuEffects, activeTransitions.length > 0)
       if (isSupersededActivePreviewFrame()) {
         abortActivePreviewRender()
         return
