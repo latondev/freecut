@@ -1575,6 +1575,394 @@ export async function createCompositionRenderer(
   }
 
   /**
+   * Preloads every fallback video element (not just mediabunny misses) so the
+   * HTML5 fallback is ready if mediabunny fails mid-export. Critical for
+   * transitions where the outgoing clip's extractor may fail past the source
+   * duration boundary.
+   */
+  const preloadFallbackVideoElements = async (
+    fallbackVideoIds: string[],
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    if (!hasDom && fallbackVideoIds.some((id) => !useMediabunny.has(id))) {
+      throw new Error('WORKER_REQUIRES_MAIN_THREAD:video-fallback')
+    }
+
+    if (hasDom && !previewStrictDecode && fallbackVideoIds.length > 0) {
+      const fallbackVideoIdSet = new Set(fallbackVideoIds)
+      const uniqueVideoEntries = new Map<HTMLVideoElement, string>()
+      for (const [itemId, video] of videoElements.entries()) {
+        if (!fallbackVideoIdSet.has(itemId)) continue
+        if (!uniqueVideoEntries.has(video)) {
+          uniqueVideoEntries.set(video, itemId)
+        }
+      }
+
+      const videoLoadPromises = Array.from(uniqueVideoEntries.entries()).map(([video, itemId]) =>
+        waitForFallbackVideoReady({ video, itemId, signal, context: 'root' }),
+      )
+
+      await Promise.all(videoLoadPromises)
+    }
+  }
+
+  /**
+   * Preloads Lottie renderers (main thread only). Each renders into its own
+   * OffscreenCanvas at native animation resolution; frames are drawn on demand.
+   */
+  const preloadLottieRenderers = async (): Promise<void> => {
+    if (!isComparisonMode && hasDom && lottieItems.length > 0) {
+      getLog().debug('Preloading Lottie animations', { lottieCount: lottieItems.length })
+      await Promise.all(
+        lottieItems.map(async (lottieItem) => {
+          try {
+            const w =
+              lottieItem.sourceWidth && lottieItem.sourceWidth > 0 ? lottieItem.sourceWidth : 512
+            const h =
+              lottieItem.sourceHeight && lottieItem.sourceHeight > 0 ? lottieItem.sourceHeight : 512
+            // Resolve animation/theme + text/color edits before warming so
+            // exports reflect them.
+            const spec = await resolveLottieRenderSpec(lottieItem.src, lottieItem)
+            if (isDisposed) return
+            await lottieProvider.preload(
+              lottieItem.id,
+              lottieItem.src,
+              w,
+              h,
+              spec.data ?? undefined,
+              lottieOverrideSignature(lottieItem),
+              spec.themeData ?? undefined,
+              spec.slots ?? undefined,
+            )
+            // Bail if the engine was disposed mid-load so we don't register a
+            // renderer into a torn-down provider (dispose() → destroy()).
+            if (isDisposed) return
+          } catch (err) {
+            getLog().error('Failed to preload Lottie', { itemId: lottieItem.id, error: err })
+          }
+        }),
+      )
+      getLog().debug('All Lottie animations loaded')
+    }
+  }
+
+  /** Loads animated WebP frames via the cache service (main thread only). */
+  const preloadAnimatedWebpFrames = async (): Promise<void> => {
+    if (hasDom && webpItems.some((item) => !gifFramesMap.has(item.id))) {
+      getLog().debug('Preloading animated WebP frames', { webpCount: webpItems.length })
+
+      const webpLoadPromises = webpItems.map(async (webpItem) => {
+        try {
+          const mediaId = webpItem.mediaId ?? webpItem.id
+          const cachedFrames = await gifFrameCache.getWebpFrames(mediaId, webpItem.src)
+          gifFramesMap.set(webpItem.id, cachedFrames)
+          getLog().debug('Animated WebP frames loaded', {
+            itemId: webpItem.id.substring(0, 8),
+            frameCount: cachedFrames.frames.length,
+            totalDuration: cachedFrames.totalDuration,
+          })
+        } catch (err) {
+          getLog().error('Failed to load WebP frames', { itemId: webpItem.id, error: err })
+          // WebP will fallback to static image rendering
+        }
+      })
+
+      await Promise.all(webpLoadPromises)
+    }
+  }
+
+  /**
+   * Classifies one sub-comp item: resolves its playable source (proxy/blob or
+   * inline `src`) or defers it for async URL resolution.
+   */
+  const collectSubCompItemMedia = (
+    subItem: TimelineItem,
+    subCompMediaItems: Array<{ subItem: TimelineItem; src: string }>,
+    pendingResolutions: Array<{ subItem: TimelineItem; mediaId: string }>,
+  ): void => {
+    if (subItem.type !== 'video' && subItem.type !== 'image' && subItem.type !== 'lottie') return
+    if (subItem.mediaId) {
+      const src = selectNestedMediaSource({
+        useProxyMedia,
+        proxyUrl: useProxyMedia ? resolveProxyUrl(subItem.mediaId) : null,
+        sourceUrl: blobUrlManager.get(subItem.mediaId),
+      })
+      if (src) {
+        subCompMediaItems.push({ subItem, src })
+      } else {
+        pendingResolutions.push({ subItem, mediaId: subItem.mediaId })
+      }
+    } else {
+      const src = (subItem as VideoItem | ImageItem | LottieItem).src ?? ''
+      if (src) subCompMediaItems.push({ subItem, src })
+    }
+  }
+
+  /**
+   * Walks every reachable sub-composition: syncs its pre-computed render data
+   * and collects its media items (resolving proxy/blob sources), deferring
+   * items whose media URL is not yet available. In comparison mode the
+   * collection is narrowed to priority media in place.
+   */
+  const collectSubCompMedia = (
+    compositionById: Record<string, SubComposition>,
+    subCompMediaItems: Array<{ subItem: TimelineItem; src: string }>,
+    pendingResolutions: Array<{ subItem: TimelineItem; mediaId: string }>,
+    prioritySubCompMediaItemIds: ReadonlySet<string>,
+    signal?: AbortSignal,
+  ): void => {
+    const reachableCompositionIds = collectReachableCompositionIdsFromTracks(
+      tracks,
+      compositionById,
+    )
+    for (const compositionId of reachableCompositionIds) {
+      throwIfAborted(signal)
+      const subComp = compositionById[compositionId]
+      if (!subComp) {
+        getLog().warn('Sub-composition not found in store!', {
+          compositionId,
+          storeCompositionCount: useCompositionsStore.getState().compositions.length,
+          storeCompositionIds: useCompositionsStore
+            .getState()
+            .compositions.map((c) => c.id.substring(0, 8)),
+        })
+        continue
+      }
+
+      if (subCompRenderDataSource.get(compositionId) !== subComp) {
+        subCompRenderData.set(compositionId, buildSubCompRenderDataEntry(subComp))
+        subCompRenderDataSource.set(compositionId, subComp)
+      }
+
+      for (const subItem of subComp.items) {
+        collectSubCompItemMedia(subItem, subCompMediaItems, pendingResolutions)
+      }
+    }
+
+    if (isComparisonMode) {
+      const priorityMedia = selectRendererPreloadItems(
+        rendererMode,
+        subCompMediaItems,
+        prioritySubCompMediaItemIds,
+        ({ subItem }) => subItem.id,
+      )
+      subCompMediaItems.splice(0, subCompMediaItems.length, ...priorityMedia)
+    }
+  }
+
+  /**
+   * Registers sub-comp video items with the extractor registry (binding DOM
+   * fallback elements where available). Returns the registered item ids.
+   */
+  const registerSubCompVideos = (
+    subCompMediaItems: ReadonlyArray<{ subItem: TimelineItem; src: string }>,
+  ): string[] => {
+    const subVideoItemIds: string[] = []
+    for (const { subItem, src } of subCompMediaItems) {
+      if (subItem.type === 'video' && !videoExtractors.has(subItem.id)) {
+        registerVideoItem(subItem.id, src)
+        subVideoItemIds.push(subItem.id)
+        if (hasDom && !previewStrictDecode) {
+          bindFallbackVideoElement(subItem.id, src)
+        }
+      }
+    }
+    return subVideoItemIds
+  }
+
+  /** Loads fallback video elements for sub-comp items that failed mediabunny init. */
+  const preloadSubCompFallbackVideos = async (
+    subCompMediaItems: ReadonlyArray<{ subItem: TimelineItem; src: string }>,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    if (hasDom && !previewStrictDecode) {
+      const subFallbackVideoIds = subCompMediaItems
+        .filter(({ subItem }) => subItem.type === 'video' && !useMediabunny.has(subItem.id))
+        .map(({ subItem }) => subItem.id)
+
+      if (subFallbackVideoIds.length > 0) {
+        const uniqueSubVideos = new Map<HTMLVideoElement, string>()
+        for (const itemId of subFallbackVideoIds) {
+          const video = videoElements.get(itemId)
+          if (video && !uniqueSubVideos.has(video)) {
+            uniqueSubVideos.set(video, itemId)
+          }
+        }
+
+        const subVideoLoadPromises = Array.from(uniqueSubVideos.entries()).map(([video, itemId]) =>
+          waitForFallbackVideoReady({ video, itemId, signal, context: 'nested' }),
+        )
+        await Promise.all(subVideoLoadPromises)
+      }
+    }
+  }
+
+  /**
+   * Preloads sub-comp images and Lottie renderers (applying animation/theme +
+   * text/color edits so compound-clip Lotties reflect them on export, parity
+   * with preview). Returns the collected items for progress logging.
+   */
+  const preloadSubCompImagesAndLotties = async (
+    subCompMediaItems: ReadonlyArray<{ subItem: TimelineItem; src: string }>,
+    signal?: AbortSignal,
+  ): Promise<{ subImageItems: ImageItem[]; subLottieItems: LottieItem[] }> => {
+    const subImageItems = subCompMediaItems.flatMap(({ subItem, src }) =>
+      subItem.type === 'image' ? [{ ...subItem, src } as ImageItem] : [],
+    )
+    const subLottieItems = subCompMediaItems.flatMap(({ subItem, src }) =>
+      subItem.type === 'lottie' ? [{ ...subItem, src } as LottieItem] : [],
+    )
+    await Promise.all(subImageItems.map((item) => ensureImageItemReady(item, signal)))
+
+    if (hasDom && subLottieItems.length > 0) {
+      await Promise.all(subLottieItems.map((item) => ensureLottieItemReady(item, signal)))
+    }
+    return { subImageItems, subLottieItems }
+  }
+
+  /** Returns `performance.now()` when perf tracking is enabled, else -1. */
+  const perfMarkIfEnabled = (enabledMs: number): number => (enabledMs >= 0 ? performance.now() : -1)
+
+  /**
+   * Refreshes per-frame render context: cache mode, decode capture flags, and
+   * sub-comp render data (so edits inside compound clips show up during
+   * playback; reference-equality keeps unchanged compositions at ~zero cost).
+   */
+  const refreshFrameRenderContext = (frame: number): void => {
+    const renderedFrameCacheMode = resolveRenderedFrameCacheMode({
+      previousFrame: lastRenderedFrame,
+      frame,
+      fps,
+    })
+    itemRenderContext.captureDecodedVideoFrames =
+      Boolean(scrubbingCache && scrubbingFrameCacheActive) && renderedFrameCacheMode !== 'skip'
+    itemRenderContext.nonBlockingVideoFrameToleranceSeconds = nonBlockingVideoFrameToleranceSeconds
+    itemRenderContext.workerPredecodeWaitMs =
+      nonBlockingVideoFrameToleranceSeconds === undefined
+        ? resolveWorkerPredecodeWaitMs(rendererMode, renderedFrameCacheMode)
+        : 0
+
+    // This matters for nested compounds where `renderCompositionItem` reads
+    // sub-item effects directly from the cached snapshot — without this
+    // refresh, effects added after renderer creation stay invisible.
+    if (renderMode === 'preview') {
+      refreshSubCompRenderData(useCompositionsStore.getState().compositionById)
+    }
+  }
+
+  /**
+   * Clears the canvas and resolves masks plus the frame scene for a frame
+   * (including development transition/frame logging).
+   */
+  const resolveFrameSceneState = (
+    frame: number,
+  ): {
+    activeMasks: ReturnType<typeof getActiveMasksForFrame>
+    frameScene: ReturnType<typeof frameSceneCache.resolve>
+  } => {
+    // Clear canvas
+    ctx.fillStyle = backgroundColor
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+    // Prepare masks for this frame
+    const activeMasks = getActiveMasksForFrame(
+      maskFrameIndex,
+      frame,
+      maskSettings,
+      getCurrentKeyframes,
+      renderMode === 'preview' ? getPreviewTransformOverride : undefined,
+      renderMode === 'preview' ? getPreviewPathVerticesOverride : undefined,
+      renderMode === 'preview' ? getLiveMaskItem : undefined,
+      canvasSettings.getExpressionItem,
+    )
+
+    const frameScene = frameSceneCache.resolve(
+      {
+        renderPlan: getCurrentRenderPlan(),
+        frame,
+        canvas: getLogicalCanvasSize(canvasSettings),
+        getKeyframes: getCurrentKeyframes,
+        getItem: canvasSettings.getExpressionItem,
+        getPreviewTransform: renderMode === 'preview' ? getPreviewTransformOverride : undefined,
+        getPreviewPathVertices:
+          renderMode === 'preview' ? getPreviewPathVerticesOverride : undefined,
+      },
+      frameSceneRevision,
+    )
+    const { activeTransitions, transitionClipIds } = frameScene.transitionFrameState
+
+    // Debug: Log transition state at key frames (only in development)
+    if (
+      import.meta.env.DEV &&
+      activeTransitions.length > 0 &&
+      (frame === activeTransitions[0]?.transitionStart || frame % 30 === 0)
+    ) {
+      getLog().info(
+        `TRANSITION STATE: frame=${frame} activeTransitions=${activeTransitions.length} skippedClipIds=${Array.from(
+          transitionClipIds,
+        )
+          .map((id) => id.substring(0, 8))
+          .join(',')}`,
+      )
+    }
+
+    // Log periodically (only in development)
+    if (import.meta.env.DEV && frame % 30 === 0) {
+      getLog().debug('Rendering frame', {
+        frame,
+        tracksCount: sortedTracks.length,
+        activeMasks: activeMasks.length,
+        activeTransitions: activeTransitions.length,
+      })
+    }
+    return { activeMasks, frameScene }
+  }
+
+  /**
+   * Sets up the GPU compositor when non-normal blend modes need it. Returns
+   * whether compositing runs on GPU plus the composite output target (if any).
+   */
+  const setupGpuCompositor = async (
+    hasNonNormalBlend: boolean,
+  ): Promise<{
+    useGpuCompositor: boolean
+    gpuCompositeOutput: ReturnType<NonNullable<typeof gpu.ensureCompositeOutput>> | null
+  }> => {
+    if (hasNonNormalBlend && !itemRenderContext.gpuPipeline) {
+      itemRenderContext.gpuPipeline = await gpu.ensureEffects()
+      if (!itemRenderContext.gpuPipeline) {
+        getLog().warn('GPU pipeline init failed - blend modes will use Canvas2D fallback')
+      }
+    }
+    const useGpuCompositor = Boolean(
+      hasNonNormalBlend && itemRenderContext.gpuPipeline && gpu.effects && gpu.ensureCompositor(),
+    )
+    return {
+      useGpuCompositor,
+      gpuCompositeOutput: useGpuCompositor
+        ? gpu.ensureCompositeOutput(canvasSettings.width, canvasSettings.height)
+        : null,
+    }
+  }
+
+  /** Releases per-task outputs and pooled canvases after an aborted frame. */
+  const discardFrameResults = (
+    results: Array<RenderedTaskResult | null>,
+    contentCanvas: OffscreenCanvas,
+  ): void => {
+    for (const result of results) {
+      if (!result) continue
+      for (const pooledCanvas of result.poolCanvases) {
+        canvasPool.release(pooledCanvas)
+      }
+      if (result.gpuTexture) {
+        gpu.texturePool?.release(result.gpuTexture)
+      }
+    }
+    canvasPool.release(contentCanvas)
+  }
+
+  /**
    * Lazily initializes the GPU pipelines needed for a frame: effects (+ media)
    * when any item needs the GPU path, and the transition pipeline (+ its
    * companion media/shape/text/mask pipelines) when transitions are active.
@@ -1755,88 +2143,12 @@ export async function createCompositionRenderer(
       const allVideoIds = Array.from(videoElements.keys())
       const fallbackVideoIds = isComparisonMode ? prioritizedMainVideoIds : allVideoIds
 
-      if (!hasDom && fallbackVideoIds.some((id) => !useMediabunny.has(id))) {
-        throw new Error('WORKER_REQUIRES_MAIN_THREAD:video-fallback')
-      }
-
-      if (hasDom && !previewStrictDecode && fallbackVideoIds.length > 0) {
-        const fallbackVideoIdSet = new Set(fallbackVideoIds)
-        const uniqueVideoEntries = new Map<HTMLVideoElement, string>()
-        for (const [itemId, video] of videoElements.entries()) {
-          if (!fallbackVideoIdSet.has(itemId)) continue
-          if (!uniqueVideoEntries.has(video)) {
-            uniqueVideoEntries.set(video, itemId)
-          }
-        }
-
-        const videoLoadPromises = Array.from(uniqueVideoEntries.entries()).map(([video, itemId]) =>
-          waitForFallbackVideoReady({ video, itemId, signal, context: 'root' }),
-        )
-
-        await Promise.all(videoLoadPromises)
-      }
+      await preloadFallbackVideoElements(fallbackVideoIds, signal)
       throwIfAborted(signal)
 
-      // Preload Lottie renderers (main thread only). Each renders into its own
-      // OffscreenCanvas at native animation resolution; frames are drawn on demand.
-      if (!isComparisonMode && hasDom && lottieItems.length > 0) {
-        getLog().debug('Preloading Lottie animations', { lottieCount: lottieItems.length })
-        await Promise.all(
-          lottieItems.map(async (lottieItem) => {
-            try {
-              const w =
-                lottieItem.sourceWidth && lottieItem.sourceWidth > 0 ? lottieItem.sourceWidth : 512
-              const h =
-                lottieItem.sourceHeight && lottieItem.sourceHeight > 0
-                  ? lottieItem.sourceHeight
-                  : 512
-              // Resolve animation/theme + text/color edits before warming so
-              // exports reflect them.
-              const spec = await resolveLottieRenderSpec(lottieItem.src, lottieItem)
-              if (isDisposed) return
-              await lottieProvider.preload(
-                lottieItem.id,
-                lottieItem.src,
-                w,
-                h,
-                spec.data ?? undefined,
-                lottieOverrideSignature(lottieItem),
-                spec.themeData ?? undefined,
-                spec.slots ?? undefined,
-              )
-              // Bail if the engine was disposed mid-load so we don't register a
-              // renderer into a torn-down provider (dispose() → destroy()).
-              if (isDisposed) return
-            } catch (err) {
-              getLog().error('Failed to preload Lottie', { itemId: lottieItem.id, error: err })
-            }
-          }),
-        )
-        getLog().debug('All Lottie animations loaded')
-      }
+      await preloadLottieRenderers()
 
-      // Load animated WebP frames via cache service (main thread only)
-      if (hasDom && webpItems.some((item) => !gifFramesMap.has(item.id))) {
-        getLog().debug('Preloading animated WebP frames', { webpCount: webpItems.length })
-
-        const webpLoadPromises = webpItems.map(async (webpItem) => {
-          try {
-            const mediaId = webpItem.mediaId ?? webpItem.id
-            const cachedFrames = await gifFrameCache.getWebpFrames(mediaId, webpItem.src)
-            gifFramesMap.set(webpItem.id, cachedFrames)
-            getLog().debug('Animated WebP frames loaded', {
-              itemId: webpItem.id.substring(0, 8),
-              frameCount: cachedFrames.frames.length,
-              totalDuration: cachedFrames.totalDuration,
-            })
-          } catch (err) {
-            getLog().error('Failed to load WebP frames', { itemId: webpItem.id, error: err })
-            // WebP will fallback to static image rendering
-          }
-        })
-
-        await Promise.all(webpLoadPromises)
-      }
+      await preloadAnimatedWebpFrames()
 
       // === PRELOAD SUB-COMPOSITION MEDIA & BUILD RENDER DATA ===
       // CompositionItem references sub-compositions with their own media items.
@@ -1851,59 +2163,13 @@ export async function createCompositionRenderer(
         ...priorityMediaItemIds.lottie,
       ])
 
-      const reachableCompositionIds = collectReachableCompositionIdsFromTracks(
-        tracks,
+      collectSubCompMedia(
         compositionById,
+        subCompMediaItems,
+        pendingResolutions,
+        prioritySubCompMediaItemIds,
+        signal,
       )
-      for (const compositionId of reachableCompositionIds) {
-        throwIfAborted(signal)
-        const subComp = compositionById[compositionId]
-        if (!subComp) {
-          getLog().warn('Sub-composition not found in store!', {
-            compositionId,
-            storeCompositionCount: useCompositionsStore.getState().compositions.length,
-            storeCompositionIds: useCompositionsStore
-              .getState()
-              .compositions.map((c) => c.id.substring(0, 8)),
-          })
-          continue
-        }
-
-        if (subCompRenderDataSource.get(compositionId) !== subComp) {
-          subCompRenderData.set(compositionId, buildSubCompRenderDataEntry(subComp))
-          subCompRenderDataSource.set(compositionId, subComp)
-        }
-
-        for (const subItem of subComp.items) {
-          if (subItem.type !== 'video' && subItem.type !== 'image' && subItem.type !== 'lottie')
-            continue
-          if (subItem.mediaId) {
-            const src = selectNestedMediaSource({
-              useProxyMedia,
-              proxyUrl: useProxyMedia ? resolveProxyUrl(subItem.mediaId) : null,
-              sourceUrl: blobUrlManager.get(subItem.mediaId),
-            })
-            if (src) {
-              subCompMediaItems.push({ subItem, src })
-            } else {
-              pendingResolutions.push({ subItem, mediaId: subItem.mediaId })
-            }
-          } else {
-            const src = (subItem as VideoItem | ImageItem | LottieItem).src ?? ''
-            if (src) subCompMediaItems.push({ subItem, src })
-          }
-        }
-      }
-
-      if (isComparisonMode) {
-        const priorityMedia = selectRendererPreloadItems(
-          rendererMode,
-          subCompMediaItems,
-          prioritySubCompMediaItemIds,
-          ({ subItem }) => subItem.id,
-        )
-        subCompMediaItems.splice(0, subCompMediaItems.length, ...priorityMedia)
-      }
 
       const resolvePendingSubCompMedia = async (
         entries: Array<{ subItem: TimelineItem; mediaId: string }>,
@@ -1947,16 +2213,7 @@ export async function createCompositionRenderer(
         getLog().debug('Preloading sub-composition media', { count: subCompMediaItems.length })
 
         // Preload sub-comp video extractors
-        const subVideoItemIds: string[] = []
-        for (const { subItem, src } of subCompMediaItems) {
-          if (subItem.type === 'video' && !videoExtractors.has(subItem.id)) {
-            registerVideoItem(subItem.id, src)
-            subVideoItemIds.push(subItem.id)
-            if (hasDom && !previewStrictDecode) {
-              bindFallbackVideoElement(subItem.id, src)
-            }
-          }
-        }
+        const subVideoItemIds = registerSubCompVideos(subCompMediaItems)
         const prioritizedSubVideoItemIds = subVideoItemIds.filter((itemId) =>
           prioritySubCompVideoItemIds.has(itemId),
         )
@@ -1999,43 +2256,15 @@ export async function createCompositionRenderer(
         reportPreviewDecodeCoverage(prioritizedSubVideoItemIds)
 
         // Load fallback video elements for sub-comp items that failed mediabunny init
-        if (hasDom && !previewStrictDecode) {
-          const subFallbackVideoIds = subCompMediaItems
-            .filter(({ subItem }) => subItem.type === 'video' && !useMediabunny.has(subItem.id))
-            .map(({ subItem }) => subItem.id)
+        await preloadSubCompFallbackVideos(subCompMediaItems, signal)
 
-          if (subFallbackVideoIds.length > 0) {
-            const uniqueSubVideos = new Map<HTMLVideoElement, string>()
-            for (const itemId of subFallbackVideoIds) {
-              const video = videoElements.get(itemId)
-              if (video && !uniqueSubVideos.has(video)) {
-                uniqueSubVideos.set(video, itemId)
-              }
-            }
-
-            const subVideoLoadPromises = Array.from(uniqueSubVideos.entries()).map(
-              ([video, itemId]) =>
-                waitForFallbackVideoReady({ video, itemId, signal, context: 'nested' }),
-            )
-            await Promise.all(subVideoLoadPromises)
-          }
-        }
-
-        // Preload sub-comp images
-        const subImageItems = subCompMediaItems.flatMap(({ subItem, src }) =>
-          subItem.type === 'image' ? [{ ...subItem, src } as ImageItem] : [],
+        // Preload sub-comp images, then Lottie renderers (applying
+        // animation/theme + text/color edits so compound-clip Lotties reflect
+        // them on export, parity with preview).
+        const { subImageItems, subLottieItems } = await preloadSubCompImagesAndLotties(
+          subCompMediaItems,
+          signal,
         )
-        const subLottieItems = subCompMediaItems.flatMap(({ subItem, src }) =>
-          subItem.type === 'lottie' ? [{ ...subItem, src } as LottieItem] : [],
-        )
-        await Promise.all(subImageItems.map((item) => ensureImageItemReady(item, signal)))
-
-        // Preload sub-comp Lottie renderers, applying animation/theme + text/
-        // color edits so compound-clip Lotties reflect them on export (parity
-        // with preview).
-        if (hasDom && subLottieItems.length > 0) {
-          await Promise.all(subLottieItems.map((item) => ensureLottieItemReady(item, signal)))
-        }
         throwIfAborted(signal)
         if (isComparisonMode) notifyPriorityMediaReady()
 
@@ -2067,52 +2296,34 @@ export async function createCompositionRenderer(
         }
         lastRenderAborted = true
       }
-      if (isSupersededActivePreviewFrame()) {
-        abortActivePreviewRender()
-        return
-      }
-      if (
-        itemRenderContext.isActivePreviewFrameCurrent?.(frame) &&
-        itemRenderContext.isActivePreviewFrameDecodeReady?.(frame) === false
-      ) {
-        abortActivePreviewRender()
-        return
-      }
-      // 3-tier cache lookup (preview only)
-      // Tier 1 (GPU texture) → Tier 3 (RAM ImageBitmap) → miss → full render
-      if (scrubbingCache && scrubbingFrameCacheActive) {
-        const cached = scrubbingCache.getFrame(frame)
-        if (cached) {
-          ctx.clearRect(0, 0, canvas.width, canvas.height)
-          ctx.drawImage(cached, 0, 0)
-          recordScrubPerf(frame, 'cache-hit', scrubPerfStartMs)
-          return
+      const runRenderFramePrologue = (): boolean => {
+        if (isSupersededActivePreviewFrame()) {
+          abortActivePreviewRender()
+          return false
         }
+        if (
+          itemRenderContext.isActivePreviewFrameCurrent?.(frame) &&
+          itemRenderContext.isActivePreviewFrameDecodeReady?.(frame) === false
+        ) {
+          abortActivePreviewRender()
+          return false
+        }
+        // 3-tier cache lookup (preview only)
+        // Tier 1 (GPU texture) → Tier 3 (RAM ImageBitmap) → miss → full render
+        if (scrubbingCache && scrubbingFrameCacheActive) {
+          const cached = scrubbingCache.getFrame(frame)
+          if (cached) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height)
+            ctx.drawImage(cached, 0, 0)
+            recordScrubPerf(frame, 'cache-hit', scrubPerfStartMs)
+            return false
+          }
+        }
+        return true
       }
+      if (!runRenderFramePrologue()) return
 
-      const renderedFrameCacheMode = resolveRenderedFrameCacheMode({
-        previousFrame: lastRenderedFrame,
-        frame,
-        fps,
-      })
-      itemRenderContext.captureDecodedVideoFrames =
-        Boolean(scrubbingCache && scrubbingFrameCacheActive) && renderedFrameCacheMode !== 'skip'
-      itemRenderContext.nonBlockingVideoFrameToleranceSeconds =
-        nonBlockingVideoFrameToleranceSeconds
-      itemRenderContext.workerPredecodeWaitMs =
-        nonBlockingVideoFrameToleranceSeconds === undefined
-          ? resolveWorkerPredecodeWaitMs(rendererMode, renderedFrameCacheMode)
-          : 0
-
-      // Refresh sub-comp render data so edits inside compound clips (effects,
-      // items, keyframes) show up during playback. Reference-equality keeps
-      // unchanged compositions at ~zero cost; only mutated entries rebuild.
-      // This matters for nested compounds where `renderCompositionItem` reads
-      // sub-item effects directly from the cached snapshot — without this
-      // refresh, effects added after renderer creation stay invisible.
-      if (renderMode === 'preview') {
-        refreshSubCompRenderData(useCompositionsStore.getState().compositionById)
-      }
+      refreshFrameRenderContext(frame)
 
       // Rebuild any Lottie whose text/color overrides changed since preload, so
       // live recolor/text edits show up. The sync guard keeps this ~free on the
@@ -2125,61 +2336,8 @@ export async function createCompositionRenderer(
         }
       }
 
-      // Clear canvas
-      ctx.fillStyle = backgroundColor
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-      // Prepare masks for this frame
-      const activeMasks = getActiveMasksForFrame(
-        maskFrameIndex,
-        frame,
-        maskSettings,
-        getCurrentKeyframes,
-        renderMode === 'preview' ? getPreviewTransformOverride : undefined,
-        renderMode === 'preview' ? getPreviewPathVerticesOverride : undefined,
-        renderMode === 'preview' ? getLiveMaskItem : undefined,
-        canvasSettings.getExpressionItem,
-      )
-
-      const frameScene = frameSceneCache.resolve(
-        {
-          renderPlan: getCurrentRenderPlan(),
-          frame,
-          canvas: getLogicalCanvasSize(canvasSettings),
-          getKeyframes: getCurrentKeyframes,
-          getItem: canvasSettings.getExpressionItem,
-          getPreviewTransform: renderMode === 'preview' ? getPreviewTransformOverride : undefined,
-          getPreviewPathVertices:
-            renderMode === 'preview' ? getPreviewPathVerticesOverride : undefined,
-        },
-        frameSceneRevision,
-      )
+      const { activeMasks, frameScene } = resolveFrameSceneState(frame)
       const { activeTransitions, transitionClipIds } = frameScene.transitionFrameState
-
-      // Debug: Log transition state at key frames (only in development)
-      if (
-        import.meta.env.DEV &&
-        activeTransitions.length > 0 &&
-        (frame === activeTransitions[0]?.transitionStart || frame % 30 === 0)
-      ) {
-        getLog().info(
-          `TRANSITION STATE: frame=${frame} activeTransitions=${activeTransitions.length} skippedClipIds=${Array.from(
-            transitionClipIds,
-          )
-            .map((id) => id.substring(0, 8))
-            .join(',')}`,
-        )
-      }
-
-      // Log periodically (only in development)
-      if (import.meta.env.DEV && frame % 30 === 0) {
-        getLog().debug('Rendering frame', {
-          frame,
-          tracksCount: sortedTracks.length,
-          activeMasks: activeMasks.length,
-          activeTransitions: activeTransitions.length,
-        })
-      }
 
       const hasAnyGpuEffects = detectFrameGpuEffects(frame)
       await ensureFrameGpuPipelines(hasAnyGpuEffects, activeTransitions.length > 0)
@@ -2285,7 +2443,8 @@ export async function createCompositionRenderer(
         isFullyOccluding,
       })
 
-      if (occlusionCutoffOrder !== null && import.meta.env.DEV && frame % 30 === 0) {
+      const logOcclusionCulling = (): void => {
+        if (occlusionCutoffOrder === null || !import.meta.env.DEV || frame % 30 !== 0) return
         const occludingTask = sortedTracks
           .filter(
             (track) => visibleTrackIds.has(track.id) && (track.order ?? 0) === occlusionCutoffOrder,
@@ -2298,6 +2457,7 @@ export async function createCompositionRenderer(
           )
         }
       }
+      logOcclusionCulling()
 
       const { shouldDirectRenderSingleTask, shouldUseDeferredGpuBatch } =
         resolveFrameRenderOptimization({
@@ -2306,35 +2466,23 @@ export async function createCompositionRenderer(
           hasGpuEffects: hasAnyGpuEffects,
           renderTaskCount: renderTasks.length,
         })
-      const hasNonNormalBlend = renderTasks.some(
-        (t) =>
-          t.type === 'item' &&
-          (() => {
-            const item = getCurrentItem(t.item)
-            const blendMode = getEffectiveBlendMode(item)
-            return Boolean(blendMode && blendMode !== 'normal')
-          })(),
-      )
-      if (hasNonNormalBlend && !itemRenderContext.gpuPipeline) {
-        itemRenderContext.gpuPipeline = await gpu.ensureEffects()
-        if (!itemRenderContext.gpuPipeline) {
-          getLog().warn('GPU pipeline init failed - blend modes will use Canvas2D fallback')
-        }
+      const hasNonNormalBlendItem = (t: (typeof renderTasks)[number]): boolean => {
+        if (t.type !== 'item') return false
+        const item = getCurrentItem(t.item)
+        const blendMode = getEffectiveBlendMode(item)
+        return Boolean(blendMode && blendMode !== 'normal')
       }
-      const useGpuCompositor = Boolean(
-        hasNonNormalBlend && itemRenderContext.gpuPipeline && gpu.effects && gpu.ensureCompositor(),
-      )
-      const gpuCompositeOutput = useGpuCompositor
-        ? gpu.ensureCompositeOutput(canvasSettings.width, canvasSettings.height)
-        : null
+      const hasNonNormalBlend = renderTasks.some((t) => hasNonNormalBlendItem(t))
+      const { useGpuCompositor, gpuCompositeOutput } = await setupGpuCompositor(hasNonNormalBlend)
       if (shouldUseDeferredGpuBatch && itemRenderContext.gpuPipeline) {
         itemRenderContext.gpuPipeline.beginBatch()
       }
 
-      if (shouldDirectRenderSingleTask) {
+      const tryRenderDirectSingleTask = async (): Promise<boolean> => {
+        if (!shouldDirectRenderSingleTask) return false
         if (isSupersededActivePreviewFrame()) {
           abortActivePreviewRender()
-          return
+          return true
         }
         const directTask = renderTasks[0]
         if (directTask?.type === 'item') {
@@ -2354,17 +2502,18 @@ export async function createCompositionRenderer(
 
         if (isSupersededActivePreviewFrame() || activePreviewFramePending) {
           abortActivePreviewRender()
-          return
+          return true
         }
 
         cacheRenderedFrame(frame)
         recordScrubPerf(frame, 'direct', scrubPerfStartMs)
-        return
+        return true
       }
+      if (await tryRenderDirectSingleTask()) return
 
       // === PERFORMANCE: Use pooled canvas instead of creating new one each frame ===
       const { canvas: contentCanvas, ctx: contentCtx } = canvasPool.acquire()
-      const scrubPerfTaskStartMs = scrubPerfStartMs >= 0 ? performance.now() : -1
+      const scrubPerfTaskStartMs = perfMarkIfEnabled(scrubPerfStartMs)
       let scrubPerfTaskEndMs = scrubPerfTaskStartMs
       let scrubPerfGpuWaitEndMs = scrubPerfTaskStartMs
       let scrubPerfCompositeEndMs = scrubPerfTaskStartMs
@@ -2412,7 +2561,7 @@ export async function createCompositionRenderer(
         const renderTask = async (
           task: (typeof renderTasks)[number],
         ): Promise<RenderedTaskResult | null> => {
-          const taskStartMs = scrubPerfStartMs >= 0 ? performance.now() : -1
+          const taskStartMs = perfMarkIfEnabled(scrubPerfStartMs)
           try {
             if (isSupersededActivePreviewFrame()) return null
             if (task.type === 'item') {
@@ -2498,7 +2647,7 @@ export async function createCompositionRenderer(
           // cap item-level concurrency so a complex frame cannot exhaust the
           // canvas pool while its exact worker bitmaps are still arriving.
           results = await renderTasksWithInteractionLimit()
-          scrubPerfTaskEndMs = scrubPerfStartMs >= 0 ? performance.now() : -1
+          scrubPerfTaskEndMs = perfMarkIfEnabled(scrubPerfStartMs)
         } finally {
           // End GPU pool mode before compositing, even if one task fails.
           if (shouldUseDeferredGpuBatch && itemRenderContext.gpuPipeline) {
@@ -2507,16 +2656,7 @@ export async function createCompositionRenderer(
         }
 
         if (isSupersededActivePreviewFrame() || activePreviewFramePending) {
-          for (const result of results) {
-            if (!result) continue
-            for (const pooledCanvas of result.poolCanvases) {
-              canvasPool.release(pooledCanvas)
-            }
-            if (result.gpuTexture) {
-              gpu.texturePool?.release(result.gpuTexture)
-            }
-          }
-          canvasPool.release(contentCanvas)
+          discardFrameResults(results, contentCanvas)
           abortActivePreviewRender()
           return
         }
@@ -2526,7 +2666,7 @@ export async function createCompositionRenderer(
         // discard a GPUCanvasContext texture before Canvas2D reads it. The first
         // drawImage performs the required GPU stall and preserves heavy effect
         // stacks without intermittent black frames.
-        scrubPerfGpuWaitEndMs = scrubPerfStartMs >= 0 ? performance.now() : -1
+        scrubPerfGpuWaitEndMs = perfMarkIfEnabled(scrubPerfStartMs)
 
         finalCompositeSource = await compositeFrameResults({
           useGpuCompositor,
@@ -2548,7 +2688,7 @@ export async function createCompositionRenderer(
           renderTransitionFallbackCanvas,
           renderItemWithEffects,
         })
-        scrubPerfCompositeEndMs = scrubPerfStartMs >= 0 ? performance.now() : -1
+        scrubPerfCompositeEndMs = perfMarkIfEnabled(scrubPerfStartMs)
       }
 
       // Log occlusion culling stats periodically (only in development)
@@ -2561,7 +2701,8 @@ export async function createCompositionRenderer(
       // Release content canvas back to pool
       canvasPool.release(contentCanvas)
       cacheRenderedFrame(frame)
-      if (scrubPerfStartMs >= 0) {
+      const recordFullFramePerf = (): void => {
+        if (scrubPerfStartMs < 0) return
         const scrubPerfEndMs = performance.now()
         recordScrubPerf(frame, 'full', scrubPerfStartMs, {
           planMs: Number((scrubPerfTaskStartMs - scrubPerfStartMs).toFixed(2)),
@@ -2574,6 +2715,7 @@ export async function createCompositionRenderer(
           slowTasks: scrubSlowTasks.length > 0 ? scrubSlowTasks : undefined,
         })
       }
+      recordFullFramePerf()
     },
 
     wasLastRenderAborted() {
