@@ -1,14 +1,17 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vite-plus/test'
+import type { AnimatableProperty } from '@/types/keyframe'
 import {
   buildGroupAddEntries,
   buildPropertyKeyframeRefs,
   buildRowKeyframeRefs,
+  collectInitialFrames,
   getRemovableGroupCurrentKeyframes,
   removeSelectionIds,
   resolveShiftRangeSelection,
   toggleKeyframeInSelection,
+  toggleKeyframesInSelection,
 } from './row-action-helpers'
 
 describe('row action helpers', () => {
@@ -73,6 +76,25 @@ describe('row action helpers', () => {
     )
     expect(toggleKeyframeInSelection(new Set(['kf-x-1', 'kf-x-2']), 'kf-x-1')).toEqual(
       new Set(['kf-x-2']),
+    )
+  })
+
+  it('toggles every id in a group selection', () => {
+    expect(toggleKeyframesInSelection(new Set(['kf-x-1']), ['kf-x-1', 'kf-x-2'])).toEqual(
+      new Set(['kf-x-2']),
+    )
+  })
+
+  it('collects drag-start frames while skipping unknown ids', () => {
+    const metaById = new Map([
+      ['kf-x-1', { property: 'x' as AnimatableProperty, keyframe: rows[0]!.keyframes[0]! }],
+      ['kf-x-2', { property: 'x' as AnimatableProperty, keyframe: rows[0]!.keyframes[1]! }],
+    ])
+    expect(collectInitialFrames(['kf-x-1', 'kf-missing', 'kf-x-2'], metaById)).toEqual(
+      new Map([
+        ['kf-x-1', 12],
+        ['kf-x-2', 24],
+      ]),
     )
   })
 

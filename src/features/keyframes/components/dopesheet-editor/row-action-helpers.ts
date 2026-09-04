@@ -1,4 +1,5 @@
 import type { AnimatableProperty, Keyframe, KeyframeRef } from '@/types/keyframe'
+import type { KeyframeMeta } from './dopesheet-types'
 
 interface DopesheetPropertyRowLike {
   property: AnimatableProperty
@@ -104,4 +105,34 @@ export function toggleKeyframeInSelection(
     nextSelection.add(keyframeId)
   }
   return nextSelection
+}
+
+/** Ctrl/Cmd-click on a group: toggles every keyframe in the group. */
+export function toggleKeyframesInSelection(
+  selectedKeyframeIds: ReadonlySet<string>,
+  keyframeIds: readonly string[],
+): Set<string> {
+  const nextSelection = new Set(selectedKeyframeIds)
+  for (const keyframeId of keyframeIds) {
+    if (nextSelection.has(keyframeId)) {
+      nextSelection.delete(keyframeId)
+    } else {
+      nextSelection.add(keyframeId)
+    }
+  }
+  return nextSelection
+}
+
+/** Resolves drag-start frames for a keyframe id list, skipping unknown ids. */
+export function collectInitialFrames(
+  keyframeIds: readonly string[],
+  metaById: ReadonlyMap<string, KeyframeMeta>,
+): Map<string, number> {
+  const initialFrames = new Map<string, number>()
+  for (const keyframeId of keyframeIds) {
+    const meta = metaById.get(keyframeId)
+    if (!meta) continue
+    initialFrames.set(keyframeId, meta.keyframe.frame)
+  }
+  return initialFrames
 }

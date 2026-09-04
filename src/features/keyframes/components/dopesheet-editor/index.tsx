@@ -19,11 +19,6 @@ import { flushSync } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useHotkeys } from 'react-hotkeys-hook'
 import {
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  LineChart,
-  Lock,
   Scissors,
   Sparkles,
 } from 'lucide-react'
@@ -46,7 +41,6 @@ import type { TextMotionTimelineBand } from '@/shared/timeline/text-motion-timel
 import {
   areDirectLinkPropertiesCompatible,
   isDirectLinkableProperty,
-  isEffectAnimatableProperty,
   isLinkableAnimatableProperty,
 } from '@/types/keyframe'
 import type { BlockedFrameRange } from '../../utils/transition-region'
@@ -85,7 +79,15 @@ import { DopesheetSheetBody } from './dopesheet-sheet-body'
 import { DopesheetInterpolationButtons } from './dopesheet-interpolation-buttons'
 import { DopesheetParameterMenu } from './dopesheet-parameter-menu'
 import { DopesheetLegendPopover } from './dopesheet-legend-popover'
+import {
+  GroupCurvesButton,
+  GroupExpandButton,
+  GroupKeyframeNavButton,
+  GroupLockButton,
+  GroupReset,
+} from './property-group-controls'
 import { PropertyRowKeyframeNav } from './property-row-keyframe-nav'
+import { resolveGroupHeaderState } from './property-group-view-model'
 import {
   resolvePropertyRowExpressionError,
   resolvePropertyRowLabels,
@@ -95,7 +97,6 @@ import {
   resolvePropertyRowShellClassName,
 } from './property-row-view-model'
 import {
-  DopesheetResetButton,
   PropertyRowAutoKeyButton,
   PropertyRowAxisConstraintButton,
   PropertyRowCompoundInput,
@@ -141,8 +142,6 @@ import {
   DRAG_THRESHOLD,
   EMPTY_AUTO_KEY_ENABLED_BY_PROPERTY,
   GROUP_HEADER_HEIGHT,
-  MINI_ICON_BUTTON_CLASS,
-  MINI_ICON_CLASS,
   PROPERTY_COLUMN_WIDTH,
   SPACIOUS_PROPERTY_COLUMN_WIDTH,
   ROW_HEIGHT,
@@ -185,9 +184,11 @@ import {
 import {
   buildPropertyKeyframeRefs,
   buildRowKeyframeRefs,
+  collectInitialFrames,
   removeSelectionIds,
   resolveShiftRangeSelection,
   toggleKeyframeInSelection,
+  toggleKeyframesInSelection,
 } from './row-action-helpers'
 import {
   getKeyframeGroupLabel,
@@ -2811,14 +2812,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       }
 
       if (event.ctrlKey || event.metaKey) {
-        const nextSelection = new Set(selectedKeyframeIds)
-        for (const keyframeId of keyframeIds) {
-          if (nextSelection.has(keyframeId)) {
-            nextSelection.delete(keyframeId)
-          } else {
-            nextSelection.add(keyframeId)
-          }
-        }
+        const nextSelection = toggleKeyframesInSelection(selectedKeyframeIds, keyframeIds)
         onSelectionChange?.(nextSelection, { preserveExternalSelection: true })
         return
       }
@@ -2837,12 +2831,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
         allSelected && baseSelection.size > keyframeIds.length
           ? Array.from(baseSelection)
           : keyframeIds
-      const initialFrames = new Map<string, number>()
-      for (const keyframeId of selectedIdsForDrag) {
-        const meta = keyframeMetaByIdRef.current.get(keyframeId)
-        if (!meta) continue
-        initialFrames.set(keyframeId, meta.keyframe.frame)
-      }
+      const initialFrames = collectInitialFrames(selectedIdsForDrag, keyframeMetaByIdRef.current)
 
       dragStateRef.current = {
         anchorKeyframeId: anchorEntry.keyframe.id,
@@ -3821,29 +3810,23 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const renderGroupHeaderContent = useCallback(
     (group: DopesheetPropertyGroup) => {
       const groupLabel = getKeyframeGroupLabel(t, group.id, group.label)
-      const groupProperties = group.rows.map((row) => row.property)
-      const curveVisible = groupProperties.some((p) => graphVisibleProperties.has(p))
-      const allRowsLocked =
-        group.rows.length > 0 && group.rows.every((row) => isPropertyLocked(row.property))
-      const canClearAny = group.rows.some((row) => canClearRow(row))
-      const isEffectGroup = group.rows.every((row) => isEffectAnimatableProperty(row.property))
-      const canResetEffectGroup =
-        isEffectGroup &&
-        !!onResetPropertiesToDefault &&
-        !disabled &&
-        group.rows.some((row) => !isPropertyLocked(row.property))
-      const canResetGroup = canResetEffectGroup || canClearAny
-      const resetGroupLabel = t(
-        canResetEffectGroup
-          ? 'timeline.keyframeEditor.resetEffectGroupDefault'
-          : 'timeline.keyframeEditor.resetGroupAnimation',
-        {
-          group: groupLabel,
-          defaultValue: canResetEffectGroup
-            ? `Reset all ${groupLabel} properties to their default values`
-            : `Reset all ${groupLabel} animations to their base values`,
-        },
-      )
+      const {
+        groupProperties,
+        curveVisible,
+        allRowsLocked,
+        canResetEffectGroup,
+        canResetGroup,
+        resetGroupLabel,
+      } = resolveGroupHeaderState({
+        group,
+        graphProperties: graphVisibleProperties,
+        isPropertyLocked,
+        canClearRow,
+        hasResetToDefault: !!onResetPropertiesToDefault,
+        disabled,
+        groupLabel,
+        t,
+      })
       const isOpen = expandedGroups[group.id] ?? true
       const dimensionSeparation = findGroupDimensionSeparation(
         group.rows,
@@ -3859,126 +3842,30 @@ export const DopesheetEditor = memo(function DopesheetEditor({
           )}
         >
           <div className="flex items-center gap-px self-stretch">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={cn(
-                MINI_ICON_BUTTON_CLASS,
-                'self-center text-muted-foreground hover:text-foreground',
-                curveVisible
-                  ? 'text-orange-500 hover:text-orange-400'
-                  : 'opacity-30 hover:opacity-60',
-              )}
-              onClick={(event) => {
-                event.stopPropagation()
-                toggleGroupCurves(groupProperties)
-              }}
-              disabled={groupProperties.length === 0}
-              title={t('timeline.keyframeEditor.showAllGroupCurves', {
-                group: groupLabel,
-                defaultValue: `Show all ${groupLabel} curves`,
-              })}
-              aria-label={t('timeline.keyframeEditor.showAllGroupCurves', {
-                group: groupLabel,
-                defaultValue: `Show all ${groupLabel} curves`,
-              })}
-              aria-pressed={curveVisible}
-            >
-              <LineChart className={MINI_ICON_CLASS} />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={cn(
-                MINI_ICON_BUTTON_CLASS,
-                'self-center text-muted-foreground hover:text-foreground',
-                allRowsLocked ? 'text-red-400 hover:text-red-300' : 'opacity-30 hover:opacity-60',
-              )}
-              onClick={(event) => {
-                event.stopPropagation()
-                if (event.shiftKey) {
-                  setAllRowsLocked(!allRowsLocked)
-                  return
-                }
-                setGroupLocked(groupProperties, !allRowsLocked)
-              }}
-              disabled={groupProperties.length === 0}
-              title={`${
-                allRowsLocked
-                  ? t('timeline.keyframeEditor.unlockGroupRows', {
-                      group: groupLabel,
-                      defaultValue: `Unlock ${groupLabel} rows`,
-                    })
-                  : t('timeline.keyframeEditor.lockGroupRows', {
-                      group: groupLabel,
-                      defaultValue: `Lock ${groupLabel} rows`,
-                    })
-              } — ${t('timeline.keyframeEditor.lockAllRowsHint', {
-                defaultValue: 'Shift-click to lock or unlock every row',
-              })}`}
-              aria-label={
-                allRowsLocked
-                  ? t('timeline.keyframeEditor.unlockGroupRows', {
-                      group: groupLabel,
-                      defaultValue: `Unlock ${groupLabel} rows`,
-                    })
-                  : t('timeline.keyframeEditor.lockGroupRows', {
-                      group: groupLabel,
-                      defaultValue: `Lock ${groupLabel} rows`,
-                    })
-              }
-              aria-pressed={allRowsLocked}
-            >
-              <Lock className={MINI_ICON_CLASS} />
-            </Button>
+            <GroupCurvesButton
+              groupProperties={groupProperties}
+              groupLabel={groupLabel}
+              curveVisible={curveVisible}
+              onToggleGroupCurves={toggleGroupCurves}
+              t={t}
+            />
+            <GroupLockButton
+              groupProperties={groupProperties}
+              groupLabel={groupLabel}
+              allRowsLocked={allRowsLocked}
+              setAllRowsLocked={setAllRowsLocked}
+              setGroupLocked={setGroupLocked}
+              t={t}
+            />
           </div>
-          <button
-            type="button"
-            className="group flex min-w-0 flex-1 items-center gap-px rounded-sm px-0 text-left leading-none transition-colors hover:bg-background/40"
-            onClick={(event) => {
-              if (event.shiftKey) {
-                setAllGroupsExpanded(!isOpen)
-                return
-              }
-              toggleGroup(group.id)
-            }}
-            title={t('timeline.keyframeEditor.shiftToggleAllGroups', {
-              defaultValue: 'Shift-click to expand or collapse all property groups',
-            })}
-            aria-expanded={isOpen}
-            aria-label={
-              isOpen
-                ? t('timeline.keyframeEditor.collapseGroup', {
-                    group: groupLabel,
-                    defaultValue: `Collapse ${groupLabel}`,
-                  })
-                : t('timeline.keyframeEditor.expandGroup', {
-                    group: groupLabel,
-                    defaultValue: `Expand ${groupLabel}`,
-                  })
-            }
-          >
-            {isOpen ? (
-              <ChevronDown
-                className={cn(
-                  MINI_ICON_CLASS,
-                  'flex-shrink-0 text-muted-foreground transition-colors group-hover:text-foreground/80',
-                )}
-              />
-            ) : (
-              <ChevronRight
-                className={cn(
-                  MINI_ICON_CLASS,
-                  'flex-shrink-0 text-muted-foreground transition-colors group-hover:text-foreground/80',
-                )}
-              />
-            )}
-            <span className="truncate pl-px text-[9px] font-semibold uppercase leading-none tracking-[0.08em] text-foreground">
-              {groupLabel}
-            </span>
-          </button>
+          <GroupExpandButton
+            groupId={group.id}
+            groupLabel={groupLabel}
+            isOpen={isOpen}
+            setAllGroupsExpanded={setAllGroupsExpanded}
+            toggleGroup={toggleGroup}
+            t={t}
+          />
           <div className="ml-auto flex items-center gap-0 rounded-sm border border-border/70 bg-background/90 px-px shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
             <DopesheetGroupOptionsMenu
               groupLabel={groupLabel}
@@ -3986,72 +3873,35 @@ export const DopesheetEditor = memo(function DopesheetEditor({
               disabled={disabled}
               isPropertyLocked={isPropertyLocked}
             />
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={cn(MINI_ICON_BUTTON_CLASS, 'text-muted-foreground hover:text-foreground')}
-              onClick={(event) => {
-                event.stopPropagation()
-                handleRowNavigate(
-                  group.prevKeyframe?.property ?? group.rows[0]?.property ?? 'x',
-                  group.prevKeyframe?.keyframe ?? null,
-                )
-              }}
-              disabled={disabled || group.prevKeyframe === null || !onNavigateToKeyframe}
-              title={t('timeline.keyframeEditor.previousGroupKeyframe', {
-                group: groupLabel,
-                defaultValue: `Previous ${groupLabel} keyframe`,
-              })}
-              aria-label={t('timeline.keyframeEditor.previousGroupKeyframe', {
-                group: groupLabel,
-                defaultValue: `Previous ${groupLabel} keyframe`,
-              })}
-            >
-              <ChevronLeft className={MINI_ICON_CLASS} />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={cn(MINI_ICON_BUTTON_CLASS, 'text-muted-foreground hover:text-foreground')}
-              onClick={(event) => {
-                event.stopPropagation()
-                handleRowNavigate(
-                  group.nextKeyframe?.property ?? group.rows[0]?.property ?? 'x',
-                  group.nextKeyframe?.keyframe ?? null,
-                )
-              }}
-              disabled={disabled || group.nextKeyframe === null || !onNavigateToKeyframe}
-              title={t('timeline.keyframeEditor.nextGroupKeyframe', {
-                group: groupLabel,
-                defaultValue: `Next ${groupLabel} keyframe`,
-              })}
-              aria-label={t('timeline.keyframeEditor.nextGroupKeyframe', {
-                group: groupLabel,
-                defaultValue: `Next ${groupLabel} keyframe`,
-              })}
-            >
-              <ChevronRight className={MINI_ICON_CLASS} />
-            </Button>
-            {canResetGroup ? (
-              <DopesheetResetButton
-                label={resetGroupLabel}
-                onReset={() => {
-                  if (canResetEffectGroup) {
-                    onResetPropertiesToDefault?.(groupProperties)
-                  } else {
-                    handleClearGroup(group)
-                  }
-                }}
-              />
-            ) : (
-              <span
-                aria-hidden="true"
-                className={MINI_ICON_BUTTON_CLASS}
-                data-testid={`dopesheet-group-reset-spacer-${group.id}`}
-              />
-            )}
+            <GroupKeyframeNavButton
+              direction="prev"
+              entry={group.prevKeyframe}
+              fallbackProperty={group.rows[0]?.property ?? 'x'}
+              groupLabel={groupLabel}
+              disabled={disabled}
+              canNavigate={!!onNavigateToKeyframe}
+              onNavigate={handleRowNavigate}
+              t={t}
+            />
+            <GroupKeyframeNavButton
+              direction="next"
+              entry={group.nextKeyframe}
+              fallbackProperty={group.rows[0]?.property ?? 'x'}
+              groupLabel={groupLabel}
+              disabled={disabled}
+              canNavigate={!!onNavigateToKeyframe}
+              onNavigate={handleRowNavigate}
+              t={t}
+            />
+            <GroupReset
+              groupId={group.id}
+              canResetGroup={canResetGroup}
+              resetGroupLabel={resetGroupLabel}
+              canResetEffectGroup={canResetEffectGroup}
+              groupProperties={groupProperties}
+              onResetToDefault={onResetPropertiesToDefault}
+              onClearGroup={() => handleClearGroup(group)}
+            />
           </div>
         </div>
       )
