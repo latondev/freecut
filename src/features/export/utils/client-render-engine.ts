@@ -1797,6 +1797,36 @@ export async function createCompositionRenderer(
     }
   }
 
+  /** Notifies onPriorityMediaReady once; warns (never throws) on callback failure. */
+  const createPriorityReadyNotifier = (onPriorityMediaReady?: () => void): (() => void) => {
+    let notified = false
+    return () => {
+      if (notified) return
+      notified = true
+      try {
+        onPriorityMediaReady?.()
+      } catch (err) {
+        getLog().warn('onPriorityMediaReady callback threw', { error: err })
+      }
+    }
+  }
+
+  /** Resolves deferred sub-comp media URLs, dropping entries that fail to resolve. */
+  const resolvePendingSubCompMedia = async (
+    entries: ReadonlyArray<{ subItem: TimelineItem; mediaId: string }>,
+    signal?: AbortSignal,
+  ): Promise<Array<{ subItem: TimelineItem; src: string }>> => {
+    throwIfAborted(signal)
+    const resolved = await Promise.all(
+      entries.map(async ({ subItem, mediaId }) => ({
+        subItem,
+        src: await resolveMediaUrl(mediaId),
+      })),
+    )
+    throwIfAborted(signal)
+    return resolved.filter(({ src }) => !!src)
+  }
+
   /**
    * Preloads sub-comp images and Lottie renderers (applying animation/theme +
    * text/color edits so compound-clip Lotties reflect them on export, parity
@@ -2054,226 +2084,285 @@ export async function createCompositionRenderer(
         imageCount: imageElements.size,
       })
 
-      const topLevelImageLoads = isComparisonMode
-        ? selectRendererPreloadItems(
-            rendererMode,
-            imageItems,
-            priorityImageItemIds,
-            (item) => item.id,
-          ).map((item) => ensureImageItemReady(item, signal))
-        : imageLoadPromises
-      await Promise.all(topLevelImageLoads)
-      throwIfAborted(signal)
+      // Preload runs as named stages in fixed order. Each stage keeps its own
+      // abort checks and worker guards exactly where they were, so cancellation
+      // and main-thread fallback timing are unchanged — the loop only sequences.
+      const stages: Array<{ name: string; run: () => Promise<void> }> = [
+        {
+          name: 'top-level-images',
+          run: async () => {
+            const topLevelImageLoads = isComparisonMode
+              ? selectRendererPreloadItems(
+                  rendererMode,
+                  imageItems,
+                  priorityImageItemIds,
+                  (item) => item.id,
+                ).map((item) => ensureImageItemReady(item, signal))
+              : imageLoadPromises
+            await Promise.all(topLevelImageLoads)
+            throwIfAborted(signal)
+          },
+        },
+        {
+          name: 'worker-guards',
+          run: async () => {
+            if (!hasDom && (gifItems.length > 0 || webpItems.length > 0)) {
+              throw new Error('WORKER_REQUIRES_MAIN_THREAD:animated-image')
+            }
 
-      if (!hasDom && (gifItems.length > 0 || webpItems.length > 0)) {
-        throw new Error('WORKER_REQUIRES_MAIN_THREAD:animated-image')
+            if (!hasDom && lottieItems.length > 0) {
+              throw new Error('WORKER_REQUIRES_MAIN_THREAD:lottie')
+            }
+          },
+        },
+        {
+          name: 'top-level-lotties',
+          run: async () => {
+            const topLevelLottieItems = isComparisonMode
+              ? selectRendererPreloadItems(
+                  rendererMode,
+                  lottieItems,
+                  priorityLottieItemIds,
+                  (item) => item.id,
+                )
+              : lottieItems
+            if (isComparisonMode && hasDom && topLevelLottieItems.length > 0) {
+              await Promise.all(
+                topLevelLottieItems.map((item) =>
+                  ensureLottieItemReady(item, signal).catch((error) => {
+                    if (signal?.aborted) throw error
+                    getLog().error('Failed to preload Lottie', { itemId: item.id, error })
+                  }),
+                ),
+              )
+            }
+            throwIfAborted(signal)
+          },
+        },
+        {
+          name: 'comparison-main-videos',
+          run: async () => {
+            if (isComparisonMode) {
+              await Promise.all(
+                prioritizedMainVideoIds.map((itemId) =>
+                  ensureVideoItemReady(itemId, videoItemsById.get(itemId), signal),
+                ),
+              )
+            }
+          },
+        },
+        {
+          name: 'main-video-extractors',
+          run: async () => {
+            // === Initialize mediabunny video extractors (primary method) ===
+            if (prioritizedMainVideoIds.length > 0) {
+              await initializeMediabunnyForItems(prioritizedMainVideoIds, signal)
+            }
+            const mainVideoPreloadPlan = resolveVideoPreloadPlan(
+              rendererMode,
+              videoExtractors.keys(),
+              prioritizedMainVideoIds,
+            )
+            // Export needs every source ready before frame 0. Preview renders initialize
+            // a missed source on demand, so opening all remaining project media here only
+            // creates decoder/GC churn for clips the user may never visit.
+            if (mainVideoPreloadPlan.eagerItemIds.length > 0) {
+              await initializeMediabunnyForItems(mainVideoPreloadPlan.eagerItemIds, signal)
+            }
+            throwIfAborted(signal)
+
+            getLog().info('Video initialization complete', {
+              mediabunny: useMediabunny.size,
+              deferred: mainVideoPreloadPlan.deferredItemIds.length,
+              fallback:
+                renderMode === 'export' ? videoExtractors.size - useMediabunny.size : undefined,
+              uniqueSources: new Set(videoSourceByItemId.values()).size,
+            })
+
+            reportPreviewDecodeCoverage(prioritizedMainVideoIds)
+          },
+        },
+        {
+          name: 'comparison-fallback-bind',
+          run: async () => {
+            if (isComparisonMode && hasDom) {
+              for (const itemId of prioritizedMainVideoIds) {
+                if (useMediabunny.has(itemId)) continue
+                const src = videoSourceByItemId.get(itemId)
+                if (src) bindFallbackVideoElement(itemId, src)
+              }
+            }
+          },
+        },
+
+        {
+          name: 'fallback-videos',
+          run: async () => {
+            // === Preload ALL fallback video elements ===
+            // Load every video element (not just those that failed mediabunny init)
+            // so the HTML5 fallback is ready if mediabunny fails mid-export.
+            // This is critical for transitions where the outgoing clip's extractor
+            // may fail past the source duration boundary.
+            const allVideoIds = Array.from(videoElements.keys())
+            const fallbackVideoIds = isComparisonMode ? prioritizedMainVideoIds : allVideoIds
+
+            await preloadFallbackVideoElements(fallbackVideoIds, signal)
+            throwIfAborted(signal)
+          },
+        },
+        {
+          name: 'lottie-renderers',
+          run: async () => {
+            await preloadLottieRenderers()
+          },
+        },
+        {
+          name: 'animated-webp-frames',
+          run: async () => {
+            await preloadAnimatedWebpFrames()
+          },
+        },
+      ]
+      for (const stage of stages) {
+        await stage.run()
       }
-
-      if (!hasDom && lottieItems.length > 0) {
-        throw new Error('WORKER_REQUIRES_MAIN_THREAD:lottie')
-      }
-
-      const topLevelLottieItems = isComparisonMode
-        ? selectRendererPreloadItems(
-            rendererMode,
-            lottieItems,
-            priorityLottieItemIds,
-            (item) => item.id,
-          )
-        : lottieItems
-      if (isComparisonMode && hasDom && topLevelLottieItems.length > 0) {
-        await Promise.all(
-          topLevelLottieItems.map((item) =>
-            ensureLottieItemReady(item, signal).catch((error) => {
-              if (signal?.aborted) throw error
-              getLog().error('Failed to preload Lottie', { itemId: item.id, error })
-            }),
-          ),
-        )
-      }
-      throwIfAborted(signal)
-
-      if (isComparisonMode) {
-        await Promise.all(
-          prioritizedMainVideoIds.map((itemId) =>
-            ensureVideoItemReady(itemId, videoItemsById.get(itemId), signal),
-          ),
-        )
-      }
-
-      // === Initialize mediabunny video extractors (primary method) ===
-      if (prioritizedMainVideoIds.length > 0) {
-        await initializeMediabunnyForItems(prioritizedMainVideoIds, signal)
-      }
-      const mainVideoPreloadPlan = resolveVideoPreloadPlan(
-        rendererMode,
-        videoExtractors.keys(),
-        prioritizedMainVideoIds,
-      )
-      // Export needs every source ready before frame 0. Preview renders initialize
-      // a missed source on demand, so opening all remaining project media here only
-      // creates decoder/GC churn for clips the user may never visit.
-      if (mainVideoPreloadPlan.eagerItemIds.length > 0) {
-        await initializeMediabunnyForItems(mainVideoPreloadPlan.eagerItemIds, signal)
-      }
-      throwIfAborted(signal)
-
-      getLog().info('Video initialization complete', {
-        mediabunny: useMediabunny.size,
-        deferred: mainVideoPreloadPlan.deferredItemIds.length,
-        fallback: renderMode === 'export' ? videoExtractors.size - useMediabunny.size : undefined,
-        uniqueSources: new Set(videoSourceByItemId.values()).size,
-      })
-
-      reportPreviewDecodeCoverage(prioritizedMainVideoIds)
-
-      if (isComparisonMode && hasDom) {
-        for (const itemId of prioritizedMainVideoIds) {
-          if (useMediabunny.has(itemId)) continue
-          const src = videoSourceByItemId.get(itemId)
-          if (src) bindFallbackVideoElement(itemId, src)
-        }
-      }
-
-      // === Preload ALL fallback video elements ===
-      // Load every video element (not just those that failed mediabunny init)
-      // so the HTML5 fallback is ready if mediabunny fails mid-export.
-      // This is critical for transitions where the outgoing clip's extractor
-      // may fail past the source duration boundary.
-      const allVideoIds = Array.from(videoElements.keys())
-      const fallbackVideoIds = isComparisonMode ? prioritizedMainVideoIds : allVideoIds
-
-      await preloadFallbackVideoElements(fallbackVideoIds, signal)
-      throwIfAborted(signal)
-
-      await preloadLottieRenderers()
-
-      await preloadAnimatedWebpFrames()
 
       // === PRELOAD SUB-COMPOSITION MEDIA & BUILD RENDER DATA ===
       // CompositionItem references sub-compositions with their own media items.
       // We preload media AND build pre-computed render data to avoid per-frame
       // sorting, filtering, and linear searches in renderCompositionItem.
-      const subCompMediaItems: Array<{ subItem: TimelineItem; src: string }> = []
-      const pendingResolutions: Array<{ subItem: TimelineItem; mediaId: string }> = []
+      // Shared across the sub-comp stages below; the fixed stage order keeps
+      // the original sequencing (collect → resolve → register → load).
+      const subCompState = {
+        items: [] as Array<{ subItem: TimelineItem; src: string }>,
+        pending: [] as Array<{ subItem: TimelineItem; mediaId: string }>,
+        deferredPending: [] as Array<{ subItem: TimelineItem; mediaId: string }>,
+        resolveDeferredBeforeRegistration: false,
+      }
       const prioritySubCompVideoItemIds = new Set(priorityMediaItemIds.video)
       const prioritySubCompMediaItemIds = new Set([
         ...priorityMediaItemIds.video,
         ...priorityMediaItemIds.image,
         ...priorityMediaItemIds.lottie,
       ])
+      const notifyPriorityMediaReady = createPriorityReadyNotifier(options.onPriorityMediaReady)
 
-      collectSubCompMedia(
-        compositionById,
-        subCompMediaItems,
-        pendingResolutions,
-        prioritySubCompMediaItemIds,
-        signal,
-      )
+      const subCompStages: Array<{ name: string; run: () => Promise<void> }> = [
+        {
+          name: 'sub-comp-collect',
+          run: async () => {
+            collectSubCompMedia(
+              compositionById,
+              subCompState.items,
+              subCompState.pending,
+              prioritySubCompMediaItemIds,
+              signal,
+            )
+            const priorityPendingResolutions = subCompState.pending.filter(({ subItem }) =>
+              prioritySubCompMediaItemIds.has(subItem.id),
+            )
+            subCompState.deferredPending = subCompState.pending.filter(
+              ({ subItem }) => !prioritySubCompMediaItemIds.has(subItem.id),
+            )
+            subCompState.items.push(
+              ...(await resolvePendingSubCompMedia(priorityPendingResolutions, signal)),
+            )
 
-      const resolvePendingSubCompMedia = async (
-        entries: Array<{ subItem: TimelineItem; mediaId: string }>,
-      ): Promise<Array<{ subItem: TimelineItem; src: string }>> => {
-        throwIfAborted(signal)
-        const resolved = await Promise.all(
-          entries.map(async ({ subItem, mediaId }) => ({
-            subItem,
-            src: await resolveMediaUrl(mediaId),
-          })),
-        )
-        throwIfAborted(signal)
-        return resolved.filter(({ src }) => !!src)
-      }
-      const priorityPendingResolutions = pendingResolutions.filter(({ subItem }) =>
-        prioritySubCompMediaItemIds.has(subItem.id),
-      )
-      const deferredPendingResolutions = pendingResolutions.filter(
-        ({ subItem }) => !prioritySubCompMediaItemIds.has(subItem.id),
-      )
-      subCompMediaItems.push(...(await resolvePendingSubCompMedia(priorityPendingResolutions)))
-
-      let priorityReadyNotified = false
-      const notifyPriorityMediaReady = () => {
-        if (priorityReadyNotified) return
-        priorityReadyNotified = true
-        try {
-          options.onPriorityMediaReady?.()
-        } catch (err) {
-          getLog().warn('onPriorityMediaReady callback threw', { error: err })
-        }
-      }
-
-      const resolveDeferredBeforeRegistration = !isComparisonMode && subCompMediaItems.length === 0
-      if (resolveDeferredBeforeRegistration) {
-        notifyPriorityMediaReady()
-        subCompMediaItems.push(...(await resolvePendingSubCompMedia(deferredPendingResolutions)))
-      }
-
-      if (subCompMediaItems.length > 0) {
-        getLog().debug('Preloading sub-composition media', { count: subCompMediaItems.length })
-
-        // Preload sub-comp video extractors
-        const subVideoItemIds = registerSubCompVideos(subCompMediaItems)
-        const prioritizedSubVideoItemIds = subVideoItemIds.filter((itemId) =>
-          prioritySubCompVideoItemIds.has(itemId),
-        )
-        if (prioritizedSubVideoItemIds.length > 0) {
-          await initializeMediabunnyForItems(prioritizedSubVideoItemIds, signal)
-        }
-
-        // Signal that priority media for the current frame is ready. The
-        // preview controller uses this to trigger a re-render before the
-        // rest of preload (remaining videos, sub images, GIF/WebP frames)
-        // finishes — so the user sees the correct frame faster after
-        // exiting a sub-composition.
-        if (!isComparisonMode) notifyPriorityMediaReady()
-
-        const deferredResolvedMedia =
-          isComparisonMode || resolveDeferredBeforeRegistration
-            ? []
-            : await resolvePendingSubCompMedia(deferredPendingResolutions)
-        subCompMediaItems.push(...deferredResolvedMedia)
-        for (const { subItem, src } of deferredResolvedMedia) {
-          if (subItem.type === 'video' && !videoExtractors.has(subItem.id)) {
-            registerVideoItem(subItem.id, src)
-            subVideoItemIds.push(subItem.id)
-            if (hasDom && !previewStrictDecode) {
-              bindFallbackVideoElement(subItem.id, src)
+            subCompState.resolveDeferredBeforeRegistration =
+              !isComparisonMode && subCompState.items.length === 0
+            if (subCompState.resolveDeferredBeforeRegistration) {
+              notifyPriorityMediaReady()
+              subCompState.items.push(
+                ...(await resolvePendingSubCompMedia(subCompState.deferredPending, signal)),
+              )
             }
-          }
-        }
+          },
+        },
+        {
+          name: 'sub-comp-videos',
+          run: async () => {
+            if (subCompState.items.length === 0) return
+            getLog().debug('Preloading sub-composition media', {
+              count: subCompState.items.length,
+            })
 
-        const subVideoPreloadPlan = resolveVideoPreloadPlan(
-          rendererMode,
-          subVideoItemIds,
-          prioritizedSubVideoItemIds,
-        )
-        if (subVideoPreloadPlan.eagerItemIds.length > 0) {
-          await initializeMediabunnyForItems(subVideoPreloadPlan.eagerItemIds, signal)
-        }
-        throwIfAborted(signal)
+            // Preload sub-comp video extractors
+            const subVideoItemIds = registerSubCompVideos(subCompState.items)
+            const prioritizedSubVideoItemIds = subVideoItemIds.filter((itemId) =>
+              prioritySubCompVideoItemIds.has(itemId),
+            )
+            if (prioritizedSubVideoItemIds.length > 0) {
+              await initializeMediabunnyForItems(prioritizedSubVideoItemIds, signal)
+            }
 
-        reportPreviewDecodeCoverage(prioritizedSubVideoItemIds)
+            // Signal that priority media for the current frame is ready. The
+            // preview controller uses this to trigger a re-render before the
+            // rest of preload (remaining videos, sub images, GIF/WebP frames)
+            // finishes — so the user sees the correct frame faster after
+            // exiting a sub-composition.
+            if (!isComparisonMode) notifyPriorityMediaReady()
 
-        // Load fallback video elements for sub-comp items that failed mediabunny init
-        await preloadSubCompFallbackVideos(subCompMediaItems, signal)
+            const deferredResolvedMedia =
+              isComparisonMode || subCompState.resolveDeferredBeforeRegistration
+                ? []
+                : await resolvePendingSubCompMedia(subCompState.deferredPending, signal)
+            subCompState.items.push(...deferredResolvedMedia)
+            for (const { subItem, src } of deferredResolvedMedia) {
+              if (subItem.type === 'video' && !videoExtractors.has(subItem.id)) {
+                registerVideoItem(subItem.id, src)
+                subVideoItemIds.push(subItem.id)
+                if (hasDom && !previewStrictDecode) {
+                  bindFallbackVideoElement(subItem.id, src)
+                }
+              }
+            }
 
-        // Preload sub-comp images, then Lottie renderers (applying
-        // animation/theme + text/color edits so compound-clip Lotties reflect
-        // them on export, parity with preview).
-        const { subImageItems, subLottieItems } = await preloadSubCompImagesAndLotties(
-          subCompMediaItems,
-          signal,
-        )
-        throwIfAborted(signal)
-        if (isComparisonMode) notifyPriorityMediaReady()
+            const subVideoPreloadPlan = resolveVideoPreloadPlan(
+              rendererMode,
+              subVideoItemIds,
+              prioritizedSubVideoItemIds,
+            )
+            if (subVideoPreloadPlan.eagerItemIds.length > 0) {
+              await initializeMediabunnyForItems(subVideoPreloadPlan.eagerItemIds, signal)
+            }
+            throwIfAborted(signal)
 
-        getLog().debug('Sub-composition media loaded', {
-          videos: subCompMediaItems.filter((s) => s.subItem.type === 'video').length,
-          images: subCompMediaItems.filter((s) => s.subItem.type === 'image').length,
-          animatedImages: subImageItems.filter(isAnimatedImage).length,
-          lotties: subLottieItems.length,
-        })
+            reportPreviewDecodeCoverage(prioritizedSubVideoItemIds)
+          },
+        },
+        {
+          name: 'sub-comp-fallback-videos',
+          run: async () => {
+            if (subCompState.items.length === 0) return
+            // Load fallback video elements for sub-comp items that failed mediabunny init
+            await preloadSubCompFallbackVideos(subCompState.items, signal)
+          },
+        },
+        {
+          name: 'sub-comp-images',
+          run: async () => {
+            if (subCompState.items.length === 0) return
+            // Preload sub-comp images, then Lottie renderers (applying
+            // animation/theme + text/color edits so compound-clip Lotties reflect
+            // them on export, parity with preview).
+            const { subImageItems, subLottieItems } = await preloadSubCompImagesAndLotties(
+              subCompState.items,
+              signal,
+            )
+            throwIfAborted(signal)
+            if (isComparisonMode) notifyPriorityMediaReady()
+
+            getLog().debug('Sub-composition media loaded', {
+              videos: subCompState.items.filter((s) => s.subItem.type === 'video').length,
+              images: subCompState.items.filter((s) => s.subItem.type === 'image').length,
+              animatedImages: subImageItems.filter(isAnimatedImage).length,
+              lotties: subLottieItems.length,
+            })
+          },
+        },
+      ]
+      for (const stage of subCompStages) {
+        await stage.run()
       }
 
       if (isComparisonMode) notifyPriorityMediaReady()
