@@ -18,11 +18,10 @@ import {
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { useHotkeys } from 'react-hotkeys-hook'
-import { Maximize2, Minimize2, X } from 'lucide-react'
+import { KeyframeGraphPanelHeader } from './keyframe-graph-panel-header'
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
 import { cn } from '@/shared/ui/cn'
-import { Button } from '@/components/ui/button'
 import { MotionBakeConfirmationDialog } from '@/shared/ui/motion-bake-confirmation-dialog'
 import { hasEnabledProceduralMotion } from '@/shared/timeline/procedural-motion'
 import { ErrorBoundary } from '@/app/error-boundary'
@@ -155,7 +154,7 @@ interface KeyframeGraphPanelProps {
   timelineScrollContainerRef?: RefObject<HTMLDivElement | null>
 }
 
-type KeyframeEditorMode = 'graph' | 'dopesheet' | 'split'
+export type KeyframeEditorMode = 'graph' | 'dopesheet' | 'split'
 const KEYFRAME_EDITOR_MODE_STORAGE_KEY = 'timeline:keyframeEditorMode'
 const MOTION_INLINE_PROPERTY_GROUP_IDS = ['transform'] as const
 const EASING_OPTIONS: Array<{
@@ -3418,132 +3417,17 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
     >
       {placement === 'bottom' && resizeHandle}
 
-      {surface !== 'edit' && (
-        <div className="h-8 flex items-center justify-between px-3 bg-secondary/30 border-b border-border">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-muted-foreground">
-              {surface === 'motion'
-                ? t('editor.compose.motionCurves')
-                : t('timeline.keyframeEditor.title')}
-              {selectedItemForEditor && (
-                <span className="ml-2 text-foreground">
-                  - {selectedItemForEditor.label || selectedItemForEditor.type}
-                  <span className="ml-1 text-muted-foreground">
-                    ({selectedItemForEditor.id.slice(0, 8)})
-                  </span>
-                </span>
-              )}
-            </span>
-          </div>
-
-          <div
-            className={cn(
-              'flex items-center gap-0.5',
-              surface === 'default' && 'rounded-md border border-border/60 bg-background/50 p-0.5',
-            )}
-            role={surface === 'default' ? 'tablist' : undefined}
-            aria-label={
-              surface === 'motion'
-                ? t('editor.compose.motionCurves')
-                : t('timeline.keyframeEditor.title')
-            }
-          >
-            {surface === 'default' && (
-              <>
-                <Button
-                  variant={effectiveEditorMode === 'dopesheet' ? 'secondary' : 'ghost'}
-                  size="sm"
-                  className="h-6 px-2 text-[11px]"
-                  role="tab"
-                  aria-selected={effectiveEditorMode === 'dopesheet'}
-                  title={t('timeline.keyframeEditor.legend.sheetMode')}
-                  aria-label={t('timeline.keyframeEditor.legend.sheetMode')}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setEditorMode('dopesheet')
-                  }}
-                >
-                  {t('timeline.keyframeEditor.sheet')}
-                </Button>
-                <Button
-                  variant={effectiveEditorMode === 'graph' ? 'secondary' : 'ghost'}
-                  size="sm"
-                  className="h-6 px-2 text-[11px]"
-                  role="tab"
-                  aria-selected={effectiveEditorMode === 'graph'}
-                  title={t('timeline.keyframeEditor.legend.graphMode')}
-                  aria-label={t('timeline.keyframeEditor.legend.graphMode')}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setEditorMode('graph')
-                  }}
-                >
-                  {t('timeline.keyframeEditor.graph')}
-                </Button>
-                {splitView && (
-                  <Button
-                    variant={effectiveEditorMode === 'split' ? 'secondary' : 'ghost'}
-                    size="sm"
-                    className="h-6 px-2 text-[11px]"
-                    role="tab"
-                    aria-selected={effectiveEditorMode === 'split'}
-                    title={t('timeline.keyframeEditor.split')}
-                    aria-label={t('timeline.keyframeEditor.split')}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setEditorMode('split')
-                    }}
-                  >
-                    {t('timeline.keyframeEditor.split')}
-                  </Button>
-                )}
-              </>
-            )}
-            {onFocusModeChange && (
-              <Button
-                variant={isFocusMode ? 'secondary' : 'ghost'}
-                size="icon"
-                className="ml-0.5 h-6 w-6 p-0"
-                title={t(
-                  isFocusMode
-                    ? 'timeline.keyframeEditor.exitFocusMode'
-                    : 'timeline.keyframeEditor.enterFocusMode',
-                )}
-                aria-label={t(
-                  isFocusMode
-                    ? 'timeline.keyframeEditor.exitFocusMode'
-                    : 'timeline.keyframeEditor.enterFocusMode',
-                )}
-                aria-pressed={isFocusMode}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onFocusModeChange(!isFocusMode)
-                }}
-              >
-                {isFocusMode ? (
-                  <Minimize2 className="h-3 w-3" />
-                ) : (
-                  <Maximize2 className="h-3 w-3" />
-                )}
-              </Button>
-            )}
-            {showCloseButton && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5 p-0"
-                aria-label={t('common.close')}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onClose()
-                }}
-              >
-                <X className="w-3 h-3" />
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
+      <KeyframeGraphPanelHeader
+        surface={surface}
+        selectedItemForEditor={selectedItemForEditor}
+        effectiveEditorMode={effectiveEditorMode}
+        splitView={splitView}
+        setEditorMode={setEditorMode}
+        isFocusMode={isFocusMode}
+        onFocusModeChange={onFocusModeChange}
+        showCloseButton={showCloseButton}
+        onClose={onClose}
+      />
 
       {/* Keyframe editor content */}
       {isOpen && (
