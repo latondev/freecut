@@ -59,7 +59,7 @@ import { DopesheetHeaderFrameInputs } from './dopesheet-header-frame-inputs'
 import { DopesheetRulerHeader } from './dopesheet-ruler-header'
 import { DopesheetLiveRulerCanvas } from './dopesheet-live-ruler-canvas'
 import { syncDopesheetLivePixelGeometry } from './dopesheet-live-pixel-geometry'
-import { TimelinePreviewScrubberVisual } from '@/shared/ui/timeline-preview-scrubber-visual'
+
 import { perfMarkRender } from '@/shared/logging/perf-marks'
 import {
   TIMELINE_LIVE_SCROLL_EVENT,
@@ -69,11 +69,11 @@ import {
 import {
   beginTimelineSkimmerScrub,
   endTimelineSkimmerScrub,
-  timelineSkimmerScrubSignal,
 } from '@/shared/timeline/main-timeline-scrub'
 import { DopesheetSheetBody } from './dopesheet-sheet-body'
 
 import { DopesheetToolbar } from './dopesheet-toolbar'
+import { DopesheetPlayheadOverlay } from './dopesheet-playhead-overlays'
 import {
   handleAddKeyframeHotkey,
   handleDeleteHotkey,
@@ -138,7 +138,7 @@ import {
 import type { DopesheetPropertyGroupStructure } from './dopesheet-helpers'
 import { GroupTimelineCell, PropertyTimelineCell } from './dopesheet-timeline-cells'
 import type { SegmentEasingChange } from './segment-easing-popover'
-import { DopesheetPlayheadLine } from './dopesheet-playhead-line'
+
 import {
   getEdgeScrollDelta,
   getPlayheadEdgeScrollVelocity,
@@ -536,6 +536,31 @@ interface ExpressionDockContext {
   postExpressionValue: ExpressionValue
   error?: string
   hasStoredExpression: boolean
+}
+
+/**
+ * Properties shown in the graph pane: in single-curve mode only the selected
+ * property (plus its compound secondary), otherwise all visible properties.
+ */
+function resolveGraphVisiblePropertyList(
+  singleCurveMode: boolean | undefined,
+  graphDisplayProperty: AnimatableProperty | null,
+  compoundSecondaryProperties: Partial<Record<AnimatableProperty, AnimatableProperty>>,
+  visibleGraphProperties: AnimatableProperty[],
+): AnimatableProperty[] {
+  return singleCurveMode && graphDisplayProperty
+    ? [
+        graphDisplayProperty,
+        ...(compoundSecondaryProperties[graphDisplayProperty]
+          ? [compoundSecondaryProperties[graphDisplayProperty]!]
+          : []),
+      ]
+    : visibleGraphProperties
+}
+
+/** Whether the sheet body has rows to show (classic also shows text-motion bands). */
+function hasSheetBodyRows(rowCount: number, presentation: string, bandCount: number): boolean {
+  return rowCount > 0 || (presentation === 'classic' && bandCount > 0)
 }
 
 function formatExpressionValue(value: ExpressionValue | undefined): string {
@@ -4083,73 +4108,70 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   // main-timeline origin too.
   const timelineContentLeft = columnWidth + (hasLinkedTimelineAxis ? 0 : 1)
   const playheadOverlayElement = showPlayhead ? (
-    <div
-      data-testid="dopesheet-playhead-clip"
-      className="absolute top-0 bottom-0 right-0 overflow-hidden pointer-events-none z-20"
-      style={{ left: timelineContentLeft }}
-    >
-      <DopesheetPlayheadLine
-        relativeFrame={playheadFrame ?? currentFrame}
-        itemFrom={itemFrom}
-        totalFrames={totalFrames}
-        clampToItemBounds={playheadClampToItemBounds}
-        followPreviewFrame={!onSkim}
-        localScrubActiveRef={rulerScrubActiveRef}
-        localScrubHandoffFrameRef={rulerScrubHandoffFrameRef}
-        frameToX={frameToX}
-        globalFrameToX={globalFrameToPixels}
-        positionSyncTargetRef={timelineScrollContainerRef}
-        maxLeft={effectiveTimelineWidth - 1}
-        className="absolute top-0 bottom-0"
-      />
-    </div>
+    <DopesheetPlayheadOverlay
+      variant="sheet"
+      left={timelineContentLeft}
+      playheadFrame={playheadFrame}
+      currentFrame={currentFrame}
+      itemFrom={itemFrom}
+      totalFrames={totalFrames}
+      clampToItemBounds={playheadClampToItemBounds}
+      followPreviewFrame={!onSkim}
+      localScrubActiveRef={rulerScrubActiveRef}
+      localScrubHandoffFrameRef={rulerScrubHandoffFrameRef}
+      frameToX={frameToX}
+      globalFrameToX={globalFrameToPixels}
+      positionSyncTargetRef={timelineScrollContainerRef}
+      maxLeft={effectiveTimelineWidth - 1}
+      fps={fps}
+      isRulerScrubbing={isRulerScrubbing}
+    />
   ) : null
   // Split view: one playhead element spans the ruler, sheet, and graph panes.
   // The graph's own line is hidden via `hidePlayhead`.
   const splitPlayheadOverlayElement = showPlayhead ? (
-    <div
-      data-testid="dopesheet-playhead-clip"
-      className="absolute top-0 right-0 bottom-0 overflow-hidden pointer-events-none z-30"
-      style={{ left: timelineContentLeft }}
-    >
-      <DopesheetPlayheadLine
-        relativeFrame={playheadFrame ?? currentFrame}
-        itemFrom={itemFrom}
-        totalFrames={totalFrames}
-        clampToItemBounds={playheadClampToItemBounds}
-        followPreviewFrame={!onSkim}
-        localScrubActiveRef={rulerScrubActiveRef}
-        localScrubHandoffFrameRef={rulerScrubHandoffFrameRef}
-        frameToX={frameToX}
-        globalFrameToX={globalFrameToPixels}
-        positionSyncTargetRef={timelineScrollContainerRef}
-        maxLeft={effectiveTimelineWidth - 1}
-        className="absolute top-0 bottom-0"
-      />
-    </div>
+    <DopesheetPlayheadOverlay
+      variant="split"
+      left={timelineContentLeft}
+      playheadFrame={playheadFrame}
+      currentFrame={currentFrame}
+      itemFrom={itemFrom}
+      totalFrames={totalFrames}
+      clampToItemBounds={playheadClampToItemBounds}
+      followPreviewFrame={!onSkim}
+      localScrubActiveRef={rulerScrubActiveRef}
+      localScrubHandoffFrameRef={rulerScrubHandoffFrameRef}
+      frameToX={frameToX}
+      globalFrameToX={globalFrameToPixels}
+      positionSyncTargetRef={timelineScrollContainerRef}
+      maxLeft={effectiveTimelineWidth - 1}
+      fps={fps}
+      isRulerScrubbing={isRulerScrubbing}
+    />
   ) : null
   const skimPlayheadOverlayElement = onSkim ? (
-    <div
-      className="pointer-events-none absolute bottom-0 right-0 top-0 z-[19] overflow-hidden"
-      style={{ left: timelineContentLeft }}
-    >
-      <TimelinePreviewScrubberVisual
-        frameToPixels={globalFrameToPixels ?? ((globalFrame) => frameToX(globalFrame - itemFrom))}
-        fps={fps}
-        inRuler
-        rulerOffset={0}
-        showTooltip={false}
-        suppressed={isRulerScrubbing}
-        suppressRefs={[rulerScrubActiveRef]}
-        suppressSignal={timelineSkimmerScrubSignal}
-        positionSyncTargetRef={timelineScrollContainerRef}
-      />
-    </div>
+    <DopesheetPlayheadOverlay
+      variant="skim"
+      left={timelineContentLeft}
+      currentFrame={currentFrame}
+      itemFrom={itemFrom}
+      totalFrames={totalFrames}
+      clampToItemBounds={playheadClampToItemBounds}
+      followPreviewFrame={!onSkim}
+      localScrubActiveRef={rulerScrubActiveRef}
+      localScrubHandoffFrameRef={rulerScrubHandoffFrameRef}
+      frameToX={frameToX}
+      globalFrameToX={globalFrameToPixels}
+      positionSyncTargetRef={timelineScrollContainerRef}
+      maxLeft={effectiveTimelineWidth - 1}
+      fps={fps}
+      isRulerScrubbing={isRulerScrubbing}
+    />
   ) : null
   const sheetBodyElement = (
     <DopesheetSheetBody
       scrollAreaRef={scrollAreaRef}
-      hasRows={sheetRows.length > 0 || (presentation === 'classic' && textMotionBands.length > 0)}
+      hasRows={hasSheetBodyRows(sheetRows.length, presentation, textMotionBands.length)}
       emptyStateMessage={emptyStateMessage}
       showEmptyGuidance={showEmptyGuidance}
       proceduralHint={proceduralHint}
@@ -4180,16 +4202,12 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       itemId={itemId}
       keyframesByProperty={keyframesByProperty}
       graphDisplayProperty={graphDisplayProperty}
-      graphVisibleProperties={
-        singleCurveMode && graphDisplayProperty
-          ? [
-              graphDisplayProperty,
-              ...(compoundSecondaryProperties[graphDisplayProperty]
-                ? [compoundSecondaryProperties[graphDisplayProperty]!]
-                : []),
-            ]
-          : visibleGraphProperties
-      }
+      graphVisibleProperties={resolveGraphVisiblePropertyList(
+        singleCurveMode,
+        graphDisplayProperty,
+        compoundSecondaryProperties,
+        visibleGraphProperties,
+      )}
       selectedKeyframeIds={selectedKeyframeIds}
       currentFrame={currentFrame}
       itemFrom={itemFrom}
