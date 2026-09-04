@@ -20,7 +20,6 @@ import { useTranslation } from 'react-i18next'
 import { useHotkeys } from 'react-hotkeys-hook'
 import {
   Scissors,
-  Sparkles,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/shared/ui/cn'
@@ -39,16 +38,13 @@ import type { MotionModifier } from '@/types/motion'
 import type { TextMotionSlot } from '@/types/text-motion'
 import type { TextMotionTimelineBand } from '@/shared/timeline/text-motion-timeline'
 import {
-  areDirectLinkPropertiesCompatible,
-  isDirectLinkableProperty,
   isLinkableAnimatableProperty,
 } from '@/types/keyframe'
 import type { BlockedFrameRange } from '../../utils/transition-region'
 import { HOTKEY_OPTIONS } from '@/config/hotkeys'
 import { getFrameAxisX, getFrameFromAxisX, getVisibleKeyframeX } from './layout'
 import { CompactNavigator } from './compact-navigator'
-import { DopesheetClipboardActions } from './dopesheet-clipboard-actions'
-import { DopesheetEditActions } from './dopesheet-edit-actions'
+
 import { DopesheetGraphPane } from './dopesheet-graph-pane'
 import { useGraphViewState } from './use-graph-view-state'
 import { useGroupExpansion } from './use-group-expansion'
@@ -76,9 +72,19 @@ import {
   timelineSkimmerScrubSignal,
 } from '@/shared/timeline/main-timeline-scrub'
 import { DopesheetSheetBody } from './dopesheet-sheet-body'
-import { DopesheetInterpolationButtons } from './dopesheet-interpolation-buttons'
-import { DopesheetParameterMenu } from './dopesheet-parameter-menu'
-import { DopesheetLegendPopover } from './dopesheet-legend-popover'
+
+import { DopesheetToolbar } from './dopesheet-toolbar'
+import {
+  handleAddKeyframeHotkey,
+  handleDeleteHotkey,
+  handleFitKeyframesHotkey,
+  handleNavigateHotkey,
+  handleNudgeHotkey,
+  handleToggleAutoKeyHotkey,
+  resolveDopesheetHotkeys,
+} from './dopesheet-hotkeys'
+import { usePropertyExpressionEditor } from './use-property-expression-editor'
+import type { PropertyExpressionDraft } from './expression-reference-utils'
 import {
   GroupCurvesButton,
   GroupExpandButton,
@@ -107,8 +113,8 @@ import {
   PropertyRowReset,
   PropertyRowValueInput,
 } from './property-row-controls'
-import { DopesheetViewOptionsMenu } from './dopesheet-view-options-menu'
-import { DopesheetExpressionDock, EXPRESSION_DOCK_HEIGHT } from './dopesheet-expression-dock'
+
+import { DopesheetExpressionDock } from './dopesheet-expression-dock'
 import {
   DopesheetGroupOptionsMenu,
   type DopesheetDimensionSeparationControl,
@@ -117,7 +123,6 @@ import {
 import type { CompoundPropertyInputConfig } from './compound-property-inputs'
 import { KeyframeTimingStrip } from './keyframe-timing-strip'
 import { setPointerCaptureSafely } from './dopesheet-utils'
-import { useMotionPickWhipDrag } from '@/shared/hooks/use-pick-whip-drag'
 import { PickWhipOverlay } from '@/shared/ui/pick-whip-overlay'
 import {
   evaluatePropertyExpression,
@@ -524,26 +529,6 @@ function findGroupDimensionSeparation(
   return null
 }
 
-interface ExpressionReferenceDragOrigin {
-  itemId: string
-  property: DirectLinkableProperty
-  selectionStart: number
-  selectionEnd: number
-}
-
-interface ExpressionReferenceCandidate {
-  itemId: string
-  property: DirectLinkableProperty
-}
-
-interface PropertyExpressionDraft {
-  property: DirectLinkableProperty
-  source: string
-  enabled: boolean
-  selectionStart: number
-  selectionEnd: number
-}
-
 interface ExpressionDockContext {
   property: DirectLinkableProperty
   propertyLabel: string
@@ -551,31 +536,6 @@ interface ExpressionDockContext {
   postExpressionValue: ExpressionValue
   error?: string
   hasStoredExpression: boolean
-}
-
-function getExpressionReferenceCandidate(
-  element: Element | null,
-  origin: ExpressionReferenceDragOrigin,
-) {
-  const row = element?.closest<HTMLElement>('[data-expression-item-id][data-expression-property]')
-  const itemId = row?.dataset.expressionItemId
-  const property = row?.dataset.expressionProperty
-  if (!row || !itemId || !property || !isDirectLinkableProperty(property)) return null
-  if (itemId === origin.itemId && property === origin.property) return null
-  if (!areDirectLinkPropertiesCompatible(origin.property, property)) return null
-  return { row, value: { itemId, property } }
-}
-
-function resolveExpressionReferenceTarget(
-  clientX: number,
-  clientY: number,
-  origin: ExpressionReferenceDragOrigin,
-) {
-  const candidate = getExpressionReferenceCandidate(
-    document.elementFromPoint(clientX, clientY),
-    origin,
-  )
-  return candidate ? { status: 'valid' as const, ...candidate } : null
 }
 
 function formatExpressionValue(value: ExpressionValue | undefined): string {
@@ -935,188 +895,20 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const snapEnabled = true
   const [valueDrafts, setValueDrafts] = useState<Partial<Record<AnimatableProperty, string>>>({})
   const [editingValueProperty, setEditingValueProperty] = useState<AnimatableProperty | null>(null)
-  const [expressionEditor, setExpressionEditor] = useState<PropertyExpressionDraft | null>(null)
-  const [expressionReferencePick, setExpressionReferencePick] =
-    useState<ExpressionReferenceDragOrigin | null>(null)
-  const expressionDockRef = useRef<HTMLElement>(null)
-  const expressionTextareaRef = useRef<HTMLTextAreaElement>(null)
-  const openPropertyExpressionEditor = useCallback(
-    (property: DirectLinkableProperty, expression?: PropertyExpression) => {
-      const source = expression?.source ?? 'value'
-      setExpressionReferencePick(null)
-      setExpressionEditor({
-        property,
-        source,
-        enabled: expression?.enabled ?? true,
-        selectionStart: source.length,
-        selectionEnd: source.length,
-      })
-    },
-    [],
-  )
-  const expressionDockOpen = expressionEditor !== null
-  useEffect(() => {
-    onExpressionDockHeightChange?.(expressionDockOpen ? EXPRESSION_DOCK_HEIGHT : 0)
-  }, [expressionDockOpen, onExpressionDockHeightChange])
-  useEffect(
-    () => () => {
-      onExpressionDockHeightChange?.(0)
-    },
-    [onExpressionDockHeightChange],
-  )
-  useEffect(() => {
-    if (!expressionDockOpen) return
-
-    let revealFrame = 0
-    const layoutFrame = requestAnimationFrame(() => {
-      revealFrame = requestAnimationFrame(() => {
-        const dock = expressionDockRef.current
-        const motionScrollArea = dock?.closest<HTMLElement>(
-          '[data-testid="motion-layer-scroll-area"]',
-        )
-        if (!dock || !motionScrollArea) return
-
-        const dockRect = dock.getBoundingClientRect()
-        const viewportRect = motionScrollArea.getBoundingClientRect()
-        const overflowBottom = dockRect.bottom - viewportRect.bottom + 8
-        if (overflowBottom <= 0) return
-
-        motionScrollArea.scrollTo({
-          top: motionScrollArea.scrollTop + overflowBottom,
-          behavior: 'smooth',
-        })
-      })
-    })
-
-    return () => {
-      cancelAnimationFrame(layoutFrame)
-      cancelAnimationFrame(revealFrame)
-    }
-  }, [expressionDockOpen, expressionEditor?.property])
-  const applyExpressionPreset = useCallback((property: DirectLinkableProperty, source: string) => {
-    setExpressionEditor((current) => {
-      if (!current || current.property !== property) return current
-      requestAnimationFrame(() => {
-        expressionTextareaRef.current?.focus()
-        expressionTextareaRef.current?.setSelectionRange(source.length, source.length)
-      })
-      return {
-        ...current,
-        source,
-        selectionStart: source.length,
-        selectionEnd: source.length,
-      }
-    })
-  }, [])
   const pickWhipRootRef = useRef<HTMLDivElement>(null)
   const syncLivePixelGeometryRef = useRef<() => void>(() => {})
-  const insertExpressionReference = useCallback(
-    (origin: ExpressionReferenceDragOrigin, candidate: ExpressionReferenceCandidate) => {
-      const reference = `prop(${JSON.stringify(candidate.itemId)}, ${JSON.stringify(candidate.property)})`
-      setExpressionEditor((current) => {
-        if (!current || current.property !== origin.property) return current
-        const replaceDefaultValue =
-          current.source.trim() === 'value' && origin.selectionStart === origin.selectionEnd
-        const selectionStart = replaceDefaultValue ? 0 : origin.selectionStart
-        const selectionEnd = replaceDefaultValue ? current.source.length : origin.selectionEnd
-        const source =
-          current.source.slice(0, selectionStart) + reference + current.source.slice(selectionEnd)
-        const cursor = selectionStart + reference.length
-        requestAnimationFrame(() => {
-          const textarea = expressionTextareaRef.current
-          textarea?.focus()
-          textarea?.setSelectionRange(cursor, cursor)
-        })
-        return {
-          ...current,
-          source,
-          selectionStart: cursor,
-          selectionEnd: cursor,
-        }
-      })
-    },
-    [],
-  )
-  const { drag: expressionReferenceDrag, begin: beginExpressionReferenceDrag } =
-    useMotionPickWhipDrag<ExpressionReferenceDragOrigin, ExpressionReferenceCandidate>({
-      hoverAttribute: 'data-expression-reference-hover',
-      getClipRoot: () =>
-        pickWhipRootRef.current?.closest<HTMLElement>(
-          '[data-pick-whip-scroll-area], [data-testid="motion-layer-scroll-area"]',
-        ) ?? pickWhipRootRef.current,
-      resolveTarget: resolveExpressionReferenceTarget,
-      onCommit: insertExpressionReference,
-    })
-  useEffect(() => {
-    if (!expressionReferencePick) return
-
-    const markedRows = new Set<HTMLElement>()
-    const syncCandidateRows = () => {
-      for (const row of markedRows) {
-        row.removeAttribute('data-expression-reference-pickable')
-        row.removeAttribute('data-expression-reference-unavailable')
-      }
-      markedRows.clear()
-      for (const row of document.querySelectorAll<HTMLElement>(
-        '[data-expression-item-id][data-expression-property]',
-      )) {
-        const candidate = getExpressionReferenceCandidate(row, expressionReferencePick)
-        row.setAttribute(
-          candidate
-            ? 'data-expression-reference-pickable'
-            : 'data-expression-reference-unavailable',
-          'true',
-        )
-        markedRows.add(row)
-      }
-    }
-    syncCandidateRows()
-
-    const mutationRoot =
-      pickWhipRootRef.current?.closest<HTMLElement>(
-        '[data-pick-whip-scroll-area], [data-testid="motion-layer-scroll-area"]',
-      ) ?? document.body
-    const observer =
-      typeof MutationObserver === 'undefined' ? null : new MutationObserver(syncCandidateRows)
-    observer?.observe(mutationRoot, { childList: true, subtree: true })
-
-    const handleCandidateClick = (event: MouseEvent) => {
-      const element = event.target instanceof Element ? event.target : null
-      const row = element?.closest<HTMLElement>(
-        '[data-expression-item-id][data-expression-property]',
-      )
-      if (!row) return
-      event.preventDefault()
-      event.stopPropagation()
-      const candidate = getExpressionReferenceCandidate(row, expressionReferencePick)
-      if (!candidate) {
-        toast.info('Choose a compatible property', {
-          id: 'expression-reference-compatible-help',
-        })
-        return
-      }
-      setExpressionReferencePick(null)
-      insertExpressionReference(expressionReferencePick, candidate.value)
-    }
-    const handlePickKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      event.stopPropagation()
-      setExpressionReferencePick(null)
-      requestAnimationFrame(() => expressionTextareaRef.current?.focus())
-    }
-    document.addEventListener('click', handleCandidateClick, true)
-    document.addEventListener('keydown', handlePickKeyDown, true)
-    return () => {
-      observer?.disconnect()
-      document.removeEventListener('click', handleCandidateClick, true)
-      document.removeEventListener('keydown', handlePickKeyDown, true)
-      for (const row of markedRows) {
-        row.removeAttribute('data-expression-reference-pickable')
-        row.removeAttribute('data-expression-reference-unavailable')
-      }
-    }
-  }, [expressionReferencePick, insertExpressionReference])
+  const {
+    expressionEditor,
+    setExpressionEditor,
+    expressionReferencePick,
+    setExpressionReferencePick,
+    expressionReferenceDrag,
+    beginExpressionReferenceDrag,
+    expressionDockRef,
+    expressionTextareaRef,
+    openPropertyExpressionEditor,
+    applyExpressionPreset,
+  } = usePropertyExpressionEditor({ onExpressionDockHeightChange, pickWhipRootRef })
   const autoKeyEnabledByProperty = useAutoKeyframeStore(
     useCallback(
       (state) => state.enabledByItem[itemId] ?? EMPTY_AUTO_KEY_ENABLED_BY_PROPERTY,
@@ -2549,147 +2341,131 @@ export const DopesheetEditor = memo(function DopesheetEditor({
   const activePropertyRow = selectedProperty
     ? propertyRowByProperty.get(selectedProperty)
     : undefined
+  const hotkeyBindings = resolveDopesheetHotkeys({
+    shortcutsEnabled,
+    addKeyframeShortcutEnabled,
+    disabled,
+    shortcuts,
+    hasActivePropertyRow: !!activePropertyRow,
+    hasSelection: selectedRefs.length > 0,
+    canCommitValues: !!onPropertyValueCommit,
+  })
 
   useHotkeys(
-    shortcuts?.addKeyframe ?? '',
-    (event) => {
-      event.preventDefault()
-      if (activePropertyRow) {
-        handleRowAddKeyframe(
-          activePropertyRow.property,
-          activePropertyRow.controls.currentKeyframes,
-        )
-      }
-    },
+    hotkeyBindings.keys.add,
+    (event) => handleAddKeyframeHotkey(event, activePropertyRow, handleRowAddKeyframe),
     {
       ...HOTKEY_OPTIONS,
-      enabled:
-        (shortcutsEnabled || addKeyframeShortcutEnabled) &&
-        !disabled &&
-        Boolean(shortcuts?.addKeyframe && activePropertyRow),
+      enabled: hotkeyBindings.enabled.add,
     },
     [
+      hotkeyBindings.keys.add,
+      hotkeyBindings.enabled.add,
       activePropertyRow,
-      addKeyframeShortcutEnabled,
-      disabled,
       handleRowAddKeyframe,
-      shortcutsEnabled,
     ],
   )
 
   useHotkeys(
-    shortcuts?.previousKeyframe ?? '',
-    (event) => {
-      event.preventDefault()
-      if (activePropertyRow) {
-        handleRowNavigate(activePropertyRow.property, activePropertyRow.controls.prevKeyframe)
-      }
-    },
+    hotkeyBindings.keys.prev,
+    (event) =>
+      handleNavigateHotkey(
+        event,
+        activePropertyRow,
+        activePropertyRow?.controls.prevKeyframe ?? null,
+        handleRowNavigate,
+      ),
     {
       ...HOTKEY_OPTIONS,
-      enabled:
-        shortcutsEnabled && !disabled && Boolean(shortcuts?.previousKeyframe && activePropertyRow),
+      enabled: hotkeyBindings.enabled.prev,
     },
-    [activePropertyRow, disabled, handleRowNavigate, shortcutsEnabled],
+    [
+      hotkeyBindings.keys.prev,
+      hotkeyBindings.enabled.prev,
+      activePropertyRow,
+      handleRowNavigate,
+    ],
   )
 
   useHotkeys(
-    shortcuts?.nextKeyframe ?? '',
-    (event) => {
-      event.preventDefault()
-      if (activePropertyRow) {
-        handleRowNavigate(activePropertyRow.property, activePropertyRow.controls.nextKeyframe)
-      }
-    },
+    hotkeyBindings.keys.next,
+    (event) =>
+      handleNavigateHotkey(
+        event,
+        activePropertyRow,
+        activePropertyRow?.controls.nextKeyframe ?? null,
+        handleRowNavigate,
+      ),
     {
       ...HOTKEY_OPTIONS,
-      enabled:
-        shortcutsEnabled && !disabled && Boolean(shortcuts?.nextKeyframe && activePropertyRow),
+      enabled: hotkeyBindings.enabled.next,
     },
-    [activePropertyRow, disabled, handleRowNavigate, shortcutsEnabled],
+    [
+      hotkeyBindings.keys.next,
+      hotkeyBindings.enabled.next,
+      activePropertyRow,
+      handleRowNavigate,
+    ],
   )
 
   useHotkeys(
-    shortcuts?.toggleAutoKey ?? '',
-    (event) => {
-      event.preventDefault()
-      if (activePropertyRow) {
-        handleRowAutoKeyToggle(activePropertyRow.property)
-      }
-    },
+    hotkeyBindings.keys.toggleAutoKey,
+    (event) => handleToggleAutoKeyHotkey(event, activePropertyRow, handleRowAutoKeyToggle),
     {
       ...HOTKEY_OPTIONS,
-      enabled:
-        shortcutsEnabled &&
-        !disabled &&
-        Boolean(shortcuts?.toggleAutoKey && activePropertyRow && onPropertyValueCommit),
+      enabled: hotkeyBindings.enabled.toggleAutoKey,
     },
-    [activePropertyRow, disabled, handleRowAutoKeyToggle, onPropertyValueCommit, shortcutsEnabled],
+    [
+      hotkeyBindings.keys.toggleAutoKey,
+      hotkeyBindings.enabled.toggleAutoKey,
+      activePropertyRow,
+      handleRowAutoKeyToggle,
+    ],
   )
 
   useHotkeys(
-    shortcuts?.fitKeyframes ?? '',
-    (event) => {
-      event.preventDefault()
-      fitKeyframesInView()
-    },
+    hotkeyBindings.keys.fit,
+    (event) => handleFitKeyframesHotkey(event, fitKeyframesInView),
     {
       ...HOTKEY_OPTIONS,
-      enabled: shortcutsEnabled && !disabled && Boolean(shortcuts?.fitKeyframes),
+      enabled: hotkeyBindings.enabled.fit,
     },
-    [disabled, fitKeyframesInView, shortcutsEnabled],
+    [hotkeyBindings.keys.fit, hotkeyBindings.enabled.fit, fitKeyframesInView],
   )
 
   useHotkeys(
     'delete,backspace',
-    (event) => {
-      event.preventDefault()
-      if (selectedRefs.length > 0) {
-        onRemoveKeyframes?.(selectedRefs)
-      }
-    },
-    { ...HOTKEY_OPTIONS, enabled: !disabled && selectedRefs.length > 0 },
-    [disabled, selectedRefs, onRemoveKeyframes],
+    (event) => handleDeleteHotkey(event, selectedRefs, onRemoveKeyframes),
+    { ...HOTKEY_OPTIONS, enabled: hotkeyBindings.enabled.edit },
+    [hotkeyBindings.enabled.edit, selectedRefs, onRemoveKeyframes],
   )
 
   useHotkeys(
     'left',
-    (event) => {
-      event.preventDefault()
-      nudgeSelectedKeyframes(-1)
-    },
-    { ...HOTKEY_OPTIONS, enabled: !disabled && selectedRefs.length > 0 },
-    [disabled, selectedRefs.length, nudgeSelectedKeyframes],
+    (event) => handleNudgeHotkey(event, -1, nudgeSelectedKeyframes),
+    { ...HOTKEY_OPTIONS, enabled: hotkeyBindings.enabled.edit },
+    [hotkeyBindings.enabled.edit, nudgeSelectedKeyframes],
   )
 
   useHotkeys(
     'right',
-    (event) => {
-      event.preventDefault()
-      nudgeSelectedKeyframes(1)
-    },
-    { ...HOTKEY_OPTIONS, enabled: !disabled && selectedRefs.length > 0 },
-    [disabled, selectedRefs.length, nudgeSelectedKeyframes],
+    (event) => handleNudgeHotkey(event, 1, nudgeSelectedKeyframes),
+    { ...HOTKEY_OPTIONS, enabled: hotkeyBindings.enabled.edit },
+    [hotkeyBindings.enabled.edit, nudgeSelectedKeyframes],
   )
 
   useHotkeys(
     'shift+left',
-    (event) => {
-      event.preventDefault()
-      nudgeSelectedKeyframes(-10)
-    },
-    { ...HOTKEY_OPTIONS, enabled: !disabled && selectedRefs.length > 0 },
-    [disabled, selectedRefs.length, nudgeSelectedKeyframes],
+    (event) => handleNudgeHotkey(event, -10, nudgeSelectedKeyframes),
+    { ...HOTKEY_OPTIONS, enabled: hotkeyBindings.enabled.edit },
+    [hotkeyBindings.enabled.edit, nudgeSelectedKeyframes],
   )
 
   useHotkeys(
     'shift+right',
-    (event) => {
-      event.preventDefault()
-      nudgeSelectedKeyframes(10)
-    },
-    { ...HOTKEY_OPTIONS, enabled: !disabled && selectedRefs.length > 0 },
-    [disabled, selectedRefs.length, nudgeSelectedKeyframes],
+    (event) => handleNudgeHotkey(event, 10, nudgeSelectedKeyframes),
+    { ...HOTKEY_OPTIONS, enabled: hotkeyBindings.enabled.edit },
+    [hotkeyBindings.enabled.edit, nudgeSelectedKeyframes],
   )
 
   const dragStateRef = useRef<DragState | null>(null)
@@ -3959,7 +3735,7 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       setExpressionReferencePick(null)
       setExpressionEditor(null)
     }
-  }, [expressionDockContext, expressionEditor])
+  }, [expressionDockContext, expressionEditor, setExpressionEditor, setExpressionReferencePick])
 
   const expressionDockElement =
     expressionEditor && expressionDockContext ? (
@@ -4582,165 +4358,70 @@ export const DopesheetEditor = memo(function DopesheetEditor({
       className={cn('flex h-full flex-col gap-0.5 overflow-hidden', className)}
       style={{ height, width }}
     >
-      <div className="flex items-center justify-between px-2 flex-shrink-0 min-h-7">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-muted-foreground">
-              {t('timeline.keyframeEditor.parameters')}
-            </span>
-            <DopesheetParameterMenu
-              disabled={disabled}
-              hasAvailableProperties={availableProperties.length > 0}
-              parameterFilter={filterKeyframedOnly ? 'keyframed' : 'all'}
-              onToggleKeyframedOnly={() => setShowKeyframedOnly((prev) => !prev)}
-              allPropertyGroups={allPropertyGroups}
-              visibleGroups={visibleGroups}
-              onToggleVisibleGroup={toggleVisibleGroup}
-              onExpandAll={() => setAllGroupsExpanded(true)}
-              onCollapseAll={() => setAllGroupsExpanded(false)}
-              onResetParameterView={resetParameterView}
-            />
-          </div>
-
-          {hasPropertyFilters && (
-            <span className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
-              {t('timeline.keyframeEditor.filtered')}
-            </span>
-          )}
-
-          {showGraphPane && graphDisplayProperty && (
-            <span className="text-xs text-muted-foreground">
-              {t('timeline.keyframeEditor.graphLabel', {
-                property:
-                  compoundPropertyRows[graphDisplayProperty]?.label ??
-                  getKeyframePropertyLabel(t, graphDisplayProperty),
-              })}
-            </span>
-          )}
-
-          {showGraphPane && speedGraphContent && onGraphModeChange && (
-            <div
-              className="flex h-6 items-center rounded border border-border/70 bg-background/80 p-0.5"
-              role="group"
-              aria-label={t('timeline.keyframeEditor.graphType', {
-                defaultValue: 'Graph type',
-              })}
-            >
-              {(['value', 'speed'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  className={cn(
-                    'h-5 rounded px-2 text-[10px] font-medium text-muted-foreground active:scale-[0.97]',
-                    graphMode === mode && 'bg-muted text-foreground',
-                  )}
-                  aria-pressed={graphMode === mode}
-                  onClick={() => onGraphModeChange(mode)}
-                >
-                  {mode === 'value'
-                    ? t('timeline.keyframeEditor.valueGraph', {
-                        defaultValue: 'Value',
-                      })
-                    : t('timeline.keyframeEditor.speedGraph', {
-                        defaultValue: 'Speed',
-                      })}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <span className="text-xs text-muted-foreground">
-            {t('timeline.keyframeEditor.keyframes', {
-              count: visibleKeyframes.length,
-            })}
-          </span>
-
-          {isCurrentFrameBlocked && (
-            <span
-              className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-300"
-              title={t('timeline.keyframeEditor.transitionBlocked')}
-            >
-              {t('timeline.keyframeEditor.transitionBlockedPill')}
-            </span>
-          )}
-
-          {canBakeMotion && onBakeMotion && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-6 gap-1 px-1.5 text-[11px] text-sky-300 hover:text-sky-200"
-              onClick={onBakeMotion}
-              title={t('timeline.keyframeEditor.bakeMotionHint')}
-            >
-              <Sparkles className="h-3 w-3" />
-              {t('timeline.keyframeEditor.bakeMotion')}
-            </Button>
-          )}
-
-          <DopesheetHeaderFrameInputs
-            disabled={disabled}
-            inputsEnabled={
-              Boolean(onKeyframeMove) &&
-              selectedFrameSummary.hasSelection &&
-              !selectedFrameSummary.hasMixedFrames
-            }
-            totalFrames={totalFrames}
-            globalFrame={globalFrame}
-            localFrameInputValue={localFrameInputValue}
-            globalFrameInputValue={globalFrameInputValue}
-            setLocalFrameInputValue={setLocalFrameInputValue}
-            setGlobalFrameInputValue={setGlobalFrameInputValue}
-            skipNextHeaderFrameBlurRef={skipNextHeaderFrameBlurRef}
-            commitLocalFrameInput={commitLocalFrameInput}
-            commitGlobalFrameInput={commitGlobalFrameInput}
-            handleHeaderFrameInputKeyDown={handleHeaderFrameInputKeyDown}
-          />
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <DopesheetInterpolationButtons
-            options={interpolationOptions}
-            selected={selectedInterpolation}
-            disabled={disabled || interpolationDisabled}
-            onSelect={onInterpolationChange}
-          />
-          <DopesheetClipboardActions
-            disabled={disabled}
-            hasSelection={selectedRefs.length > 0}
-            hasKeyframeClipboard={hasKeyframeClipboard}
-            isKeyframeClipboardCut={isKeyframeClipboardCut}
-            onCopyKeyframes={onCopyKeyframes}
-            onCutKeyframes={onCutKeyframes}
-            onPasteKeyframes={onPasteKeyframes}
-          />
-          <DopesheetEditActions
-            disabled={disabled}
-            hasSelection={selectedRefs.length > 0}
-            removeKeyframesAvailable={Boolean(onRemoveKeyframes)}
-            handleRemoveKeyframes={handleRemoveKeyframes}
-            horizontalZoomValue={horizontalZoomValue}
-            horizontalZoomDisabled={horizontalZoomRatioBase <= 1}
-            setHorizontalZoomValue={setHorizontalZoomValue}
-            resetViewport={resetViewport}
-            visualizationMode={showGraphPane ? 'graph' : 'dopesheet'}
-            graphVerticalZoomValue={graphVerticalZoomValue}
-            verticalZoomDisabled={visibleGraphProperties.length === 0 || verticalZoomRatioBase <= 1}
-            setGraphVerticalZoomValue={setGraphVerticalZoomValue}
-          />
-          <DopesheetLegendPopover disabled={disabled} />
-          <DopesheetViewOptionsMenu
-            disabled={disabled}
-            visualizationMode={showGraphPane ? 'graph' : 'dopesheet'}
-            graphRulerUnit={graphRulerUnit}
-            onChangeRulerUnit={setGraphRulerUnit}
-            graphHandleVisibility={showAllGraphHandles ? 'all' : 'selected'}
-            onToggleGraphHandleVisibility={() => setShowAllGraphHandles((prev) => !prev)}
-            autoZoomGraphHeight={autoZoomGraphHeight}
-            onToggleAutoZoomGraphHeight={() => setAutoZoomGraphHeight((prev) => !prev)}
-          />
-        </div>
-      </div>
+      <DopesheetToolbar
+        disabled={disabled}
+        hasAvailableProperties={availableProperties.length > 0}
+        filterKeyframedOnly={filterKeyframedOnly}
+        onToggleKeyframedOnly={() => setShowKeyframedOnly((prev) => !prev)}
+        allPropertyGroups={allPropertyGroups}
+        visibleGroups={visibleGroups}
+        onToggleVisibleGroup={toggleVisibleGroup}
+        onExpandAllGroups={() => setAllGroupsExpanded(true)}
+        onCollapseAllGroups={() => setAllGroupsExpanded(false)}
+        onResetParameterView={resetParameterView}
+        hasPropertyFilters={hasPropertyFilters}
+        showGraphPane={showGraphPane}
+        graphDisplayProperty={graphDisplayProperty}
+        compoundPropertyRows={compoundPropertyRows}
+        speedGraphContent={speedGraphContent}
+        onGraphModeChange={onGraphModeChange}
+        graphMode={graphMode}
+        keyframeCount={visibleKeyframes.length}
+        isCurrentFrameBlocked={isCurrentFrameBlocked}
+        canBakeMotion={canBakeMotion}
+        onBakeMotion={onBakeMotion}
+        headerFrameInputsEnabled={
+          Boolean(onKeyframeMove) &&
+          selectedFrameSummary.hasSelection &&
+          !selectedFrameSummary.hasMixedFrames
+        }
+        totalFrames={totalFrames}
+        globalFrame={globalFrame}
+        localFrameInputValue={localFrameInputValue}
+        globalFrameInputValue={globalFrameInputValue}
+        setLocalFrameInputValue={setLocalFrameInputValue}
+        setGlobalFrameInputValue={setGlobalFrameInputValue}
+        skipNextHeaderFrameBlurRef={skipNextHeaderFrameBlurRef}
+        commitLocalFrameInput={commitLocalFrameInput}
+        commitGlobalFrameInput={commitGlobalFrameInput}
+        handleHeaderFrameInputKeyDown={handleHeaderFrameInputKeyDown}
+        interpolationOptions={interpolationOptions}
+        selectedInterpolation={selectedInterpolation}
+        interpolationDisabled={interpolationDisabled}
+        onInterpolationChange={onInterpolationChange}
+        hasSelection={selectedRefs.length > 0}
+        hasKeyframeClipboard={hasKeyframeClipboard}
+        isKeyframeClipboardCut={isKeyframeClipboardCut}
+        onCopyKeyframes={onCopyKeyframes}
+        onCutKeyframes={onCutKeyframes}
+        onPasteKeyframes={onPasteKeyframes}
+        removeKeyframesAvailable={Boolean(onRemoveKeyframes)}
+        handleRemoveKeyframes={handleRemoveKeyframes}
+        horizontalZoomValue={horizontalZoomValue}
+        horizontalZoomRatioBase={horizontalZoomRatioBase}
+        setHorizontalZoomValue={setHorizontalZoomValue}
+        resetViewport={resetViewport}
+        graphVerticalZoomValue={graphVerticalZoomValue}
+        graphPropertyCount={visibleGraphProperties.length}
+        verticalZoomRatioBase={verticalZoomRatioBase}
+        setGraphVerticalZoomValue={setGraphVerticalZoomValue}
+        graphRulerUnit={graphRulerUnit}
+        onChangeRulerUnit={setGraphRulerUnit}
+        showAllGraphHandles={showAllGraphHandles}
+        onToggleGraphHandleVisibility={() => setShowAllGraphHandles((prev) => !prev)}
+        autoZoomGraphHeight={autoZoomGraphHeight}
+        onToggleAutoZoomGraphHeight={() => setAutoZoomGraphHeight((prev) => !prev)}
+      />
 
       <div
         className={cn(
