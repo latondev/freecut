@@ -1360,8 +1360,7 @@ export function AudioEqPanelContent({
         outputGainDb: demixEqValue(eqOutputGainDb, 0),
         band1Enabled: demixEqValue(eqBand1Enabled, false),
         band1Type: demixEqValue(eqBand1Type, 'high-pass'),
-        band1FrequencyHz:
-          eqBand1FrequencyHz === 'mixed' ? AUDIO_EQ_LOW_CUT_FREQUENCY_HZ : eqBand1FrequencyHz,
+        band1FrequencyHz: demixEqValue(eqBand1FrequencyHz, AUDIO_EQ_LOW_CUT_FREQUENCY_HZ),
         band1GainDb: demixEqValue(eqBand1GainDb, 0),
         band1Q: demixEqValue(eqBand1Q, AUDIO_EQ_LOW_MID_Q),
         band1SlopeDbPerOct: demixEqValue(eqBand1SlopeDbPerOct, 12),
@@ -1373,26 +1372,22 @@ export function AudioEqPanelContent({
         lowMidEnabled: demixEqValue(eqLowMidEnabled, true),
         lowMidType: demixEqValue(eqLowMidType, 'peaking'),
         lowMidGainDb: demixEqValue(eqLowMid, 0),
-        lowMidFrequencyHz:
-          eqLowMidFrequencyHz === 'mixed' ? AUDIO_EQ_LOW_MID_FREQUENCY_HZ : eqLowMidFrequencyHz,
+        lowMidFrequencyHz: demixEqValue(eqLowMidFrequencyHz, AUDIO_EQ_LOW_MID_FREQUENCY_HZ),
         lowMidQ: demixEqValue(eqLowMidQ, AUDIO_EQ_LOW_MID_Q),
         midGainDb: 0,
         highMidEnabled: demixEqValue(eqHighMidEnabled, true),
         highMidType: demixEqValue(eqHighMidType, 'peaking'),
         highMidGainDb: demixEqValue(eqHighMid, 0),
-        highMidFrequencyHz:
-          eqHighMidFrequencyHz === 'mixed' ? AUDIO_EQ_HIGH_MID_FREQUENCY_HZ : eqHighMidFrequencyHz,
+        highMidFrequencyHz: demixEqValue(eqHighMidFrequencyHz, AUDIO_EQ_HIGH_MID_FREQUENCY_HZ),
         highMidQ: demixEqValue(eqHighMidQ, AUDIO_EQ_HIGH_MID_Q),
         highEnabled: demixEqValue(eqHighEnabled, true),
         highType: demixEqValue(eqHighType, 'high-shelf'),
         highGainDb: demixEqValue(eqHigh, 0),
-        highFrequencyHz:
-          eqHighFrequencyHz === 'mixed' ? AUDIO_EQ_HIGH_FREQUENCY_HZ : eqHighFrequencyHz,
+        highFrequencyHz: demixEqValue(eqHighFrequencyHz, AUDIO_EQ_HIGH_FREQUENCY_HZ),
         highQ: demixEqValue(eqHighQ, AUDIO_EQ_HIGH_MID_Q),
         band6Enabled: demixEqValue(eqBand6Enabled, false),
         band6Type: demixEqValue(eqBand6Type, 'low-pass'),
-        band6FrequencyHz:
-          eqBand6FrequencyHz === 'mixed' ? AUDIO_EQ_HIGH_CUT_FREQUENCY_HZ : eqBand6FrequencyHz,
+        band6FrequencyHz: demixEqValue(eqBand6FrequencyHz, AUDIO_EQ_HIGH_CUT_FREQUENCY_HZ),
         band6GainDb: demixEqValue(eqBand6GainDb, 0),
         band6Q: demixEqValue(eqBand6Q, AUDIO_EQ_HIGH_MID_Q),
         band6SlopeDbPerOct: demixEqValue(eqBand6SlopeDbPerOct, 12),
@@ -1770,7 +1765,7 @@ export function AudioEqPanelContent({
               >
                 <BandCard
                   title="Band 1"
-                  filterType={eqBand1Type === 'mixed' ? 'high-pass' : eqBand1Type}
+                  filterType={eqBand1TypeOrDefault}
                   filterOptions={AUDIO_EQ_BAND1_FILTER_OPTIONS}
                   onFilterTypeChange={(value) =>
                     handleEqFieldChange(
@@ -1890,7 +1885,7 @@ export function AudioEqPanelContent({
 
                 <BandCard
                   title="Band 2"
-                  filterType={eqLowType === 'mixed' ? 'low-shelf' : eqLowType}
+                  filterType={eqLowTypeOrDefault}
                   filterOptions={AUDIO_EQ_INNER_FILTER_OPTIONS}
                   onFilterTypeChange={(value) =>
                     handleEqFieldChange(
@@ -1992,7 +1987,7 @@ export function AudioEqPanelContent({
 
                 <BandCard
                   title="Band 3"
-                  filterType={eqLowMidType === 'mixed' ? 'peaking' : eqLowMidType}
+                  filterType={eqLowMidTypeOrDefault}
                   filterOptions={AUDIO_EQ_INNER_FILTER_OPTIONS}
                   onFilterTypeChange={(value) =>
                     handleEqFieldChange(
@@ -2096,7 +2091,7 @@ export function AudioEqPanelContent({
 
                 <BandCard
                   title="Band 4"
-                  filterType={eqHighMidType === 'mixed' ? 'peaking' : eqHighMidType}
+                  filterType={eqHighMidTypeOrDefault}
                   filterOptions={AUDIO_EQ_INNER_FILTER_OPTIONS}
                   onFilterTypeChange={(value) =>
                     handleEqFieldChange(
@@ -2204,7 +2199,7 @@ export function AudioEqPanelContent({
 
                 <BandCard
                   title="Band 5"
-                  filterType={eqHighType === 'mixed' ? 'high-shelf' : eqHighType}
+                  filterType={eqHighTypeOrDefault}
                   filterOptions={AUDIO_EQ_INNER_FILTER_OPTIONS}
                   onFilterTypeChange={(value) =>
                     handleEqFieldChange(
@@ -2308,7 +2303,7 @@ export function AudioEqPanelContent({
 
                 <BandCard
                   title="Band 6"
-                  filterType={eqBand6Type === 'mixed' ? 'low-pass' : eqBand6Type}
+                  filterType={eqBand6TypeOrDefault}
                   filterOptions={AUDIO_EQ_BAND6_FILTER_OPTIONS}
                   onFilterTypeChange={(value) =>
                     handleEqFieldChange(
