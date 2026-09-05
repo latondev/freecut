@@ -633,10 +633,7 @@ function buildRippleCompanionUpdates(
   )
 }
 
-function collectTransitionRightIds(
-  transitions: Transition[],
-  itemId: string,
-): Set<string> {
+function collectTransitionRightIds(transitions: Transition[], itemId: string): Set<string> {
   const ids = new Set<string>()
   for (const transition of transitions) {
     if (transition.leftClipId === itemId) ids.add(transition.rightClipId)
@@ -667,7 +664,9 @@ function collectRippleShiftTargets(
   for (const synchronizedItem of synchronizedItems) {
     const transitionNeighborIds = collectTransitionRightIds(transitions, synchronizedItem.id)
     for (const candidate of allItems) {
-      if (isRippleShiftTarget(candidate, synchronizedItem, synchronizedIds, transitionNeighborIds)) {
+      if (
+        isRippleShiftTarget(candidate, synchronizedItem, synchronizedIds, transitionNeighborIds)
+      ) {
         baseDeltaByItemId.set(candidate.id, rippleShift)
       }
     }
@@ -814,6 +813,104 @@ function buildNormalTrimUpdates(options: {
     ...buildAttachedCaptionBoundsPreviewUpdates(allItems, captionClipBounds),
   )
   return linkedPreviewUpdates
+}
+
+interface TrimStartModes {
+  forcedMode: 'rolling' | 'ripple' | null
+  destroyTransitionAtHandle: boolean
+  wantsRolling: boolean
+  wantsRipple: boolean
+}
+
+function resolveTrimStartModes(
+  e: React.MouseEvent,
+  options?: {
+    forcedMode?: 'rolling' | 'ripple' | null
+    destroyTransitionAtHandle?: boolean
+  },
+): TrimStartModes {
+  const forcedMode = options?.forcedMode ?? null
+  const modifierRolling = e.altKey && !e.shiftKey
+  return {
+    forcedMode,
+    destroyTransitionAtHandle: options?.destroyTransitionAtHandle ?? false,
+    wantsRolling: forcedMode === 'rolling' || (forcedMode === null && modifierRolling),
+    wantsRipple: forcedMode === 'ripple' || (forcedMode === null && e.shiftKey),
+  }
+}
+
+function filterVerticallyAlignedTrimItemIds(
+  unlockedTrimItemIds: string[],
+  currentItem: TimelineItem,
+  handle: TrimHandle,
+  allItems: TimelineItem[],
+): string[] {
+  const anchorTrimEdge =
+    handle === 'start' ? currentItem.from : currentItem.from + currentItem.durationInFrames
+  return unlockedTrimItemIds.filter((trimmedItemId) => {
+    if (trimmedItemId === currentItem.id) return true
+    const trimmedItem = allItems.find((candidate) => candidate.id === trimmedItemId)
+    if (!trimmedItem) return false
+    const trimmedItemEdge =
+      handle === 'start' ? trimmedItem.from : trimmedItem.from + trimmedItem.durationInFrames
+    return areTrimEdgesAligned(anchorTrimEdge, trimmedItemEdge)
+  })
+}
+
+function resolveTrimItemIds(
+  currentItem: TimelineItem,
+  handle: TrimHandle,
+  allItems: TimelineItem[],
+): string[] {
+  const selectedItemIds = useSelectionStore.getState().selectedItemIds
+  const baseTrimItemIds = selectedItemIds.includes(currentItem.id)
+    ? selectedItemIds
+    : [currentItem.id]
+  const expandedTrimItemIds = useEditorStore.getState().linkedSelectionEnabled
+    ? expandSelectionWithLinkedItems(allItems, baseTrimItemIds)
+    : baseTrimItemIds
+  const unlockedTrimItemIds = filterUnlockedItemIds(
+    allItems,
+    useItemsStore.getState().tracks,
+    expandedTrimItemIds,
+  )
+  const verticallyAlignedTrimItemIds = filterVerticallyAlignedTrimItemIds(
+    unlockedTrimItemIds,
+    currentItem,
+    handle,
+    allItems,
+  )
+  return verticallyAlignedTrimItemIds.includes(currentItem.id)
+    ? verticallyAlignedTrimItemIds
+    : [currentItem.id]
+}
+
+function initTrimStartPreviews(options: {
+  wantsRolling: boolean
+  neighborId: string | null
+  itemId: string
+  handle: TrimHandle
+  destroyTransitionAtHandle: boolean
+}): void {
+  const { wantsRolling, neighborId, itemId, handle, destroyTransitionAtHandle } = options
+  if (wantsRolling && neighborId) {
+    useRollingEditPreviewStore.getState().setPreview({
+      trimmedItemId: itemId,
+      neighborItemId: neighborId,
+      handle,
+      neighborDelta: 0,
+    })
+  }
+
+  if (destroyTransitionAtHandle) {
+    useTransitionBreakPreviewStore.getState().setPreview({
+      itemId,
+      handle,
+      delta: 0,
+    })
+  } else {
+    useTransitionBreakPreviewStore.getState().clearPreview()
+  }
 }
 
 export function useTimelineTrim(
@@ -1243,58 +1340,20 @@ export function useTimelineTrim(
       e.preventDefault()
       commitPreviewFrameToCurrentFrame()
 
-      const forcedMode = options?.forcedMode ?? null
-      const destroyTransitionAtHandle = options?.destroyTransitionAtHandle ?? false
-      const modifierRolling = e.altKey && !e.shiftKey
-      const modifierRipple = e.shiftKey
-
-      const wantsRolling = forcedMode === 'rolling' || (forcedMode === null && modifierRolling)
-      const wantsRipple = forcedMode === 'ripple' || (forcedMode === null && modifierRipple)
+      const { forcedMode, destroyTransitionAtHandle, wantsRolling, wantsRipple } =
+        resolveTrimStartModes(e, options)
       const currentItem = getItemFromStore()
       const allItems = useTimelineStore.getState().items
       const transitions = useTransitionsStore.getState().transitions
-      let neighborId: string | null = null
-
-      if (wantsRolling) {
-        const neighbor = findHandleNeighborWithTransitions(
-          currentItem,
-          handle,
-          allItems,
-          transitions,
-        )
-        neighborId = neighbor?.id ?? null
-        if (!neighborId) {
-          toast.warning('Rolling edit needs a neighbor on this edge')
-          return
-        }
+      const neighborId = wantsRolling
+        ? findRollingNeighborId(currentItem, handle, allItems, transitions)
+        : null
+      if (wantsRolling && !neighborId) {
+        toast.warning('Rolling edit needs a neighbor on this edge')
+        return
       }
 
-      const selectedItemIds = useSelectionStore.getState().selectedItemIds
-      const baseTrimItemIds = selectedItemIds.includes(currentItem.id)
-        ? selectedItemIds
-        : [currentItem.id]
-      const expandedTrimItemIds = useEditorStore.getState().linkedSelectionEnabled
-        ? expandSelectionWithLinkedItems(allItems, baseTrimItemIds)
-        : baseTrimItemIds
-      const unlockedTrimItemIds = filterUnlockedItemIds(
-        allItems,
-        useItemsStore.getState().tracks,
-        expandedTrimItemIds,
-      )
-      const anchorTrimEdge =
-        handle === 'start' ? currentItem.from : currentItem.from + currentItem.durationInFrames
-      const verticallyAlignedTrimItemIds = unlockedTrimItemIds.filter((trimmedItemId) => {
-        if (trimmedItemId === currentItem.id) return true
-        const trimmedItem = allItems.find((candidate) => candidate.id === trimmedItemId)
-        if (!trimmedItem) return false
-        const trimmedItemEdge =
-          handle === 'start' ? trimmedItem.from : trimmedItem.from + trimmedItem.durationInFrames
-        return areTrimEdgesAligned(anchorTrimEdge, trimmedItemEdge)
-      })
-      const trimmedItemIds =
-        verticallyAlignedTrimItemIds.includes(currentItem.id)
-          ? verticallyAlignedTrimItemIds
-          : [currentItem.id]
+      const trimmedItemIds = resolveTrimItemIds(currentItem, handle, allItems)
 
       magneticSnapTargetsRef.current = getMagneticSnapTargets()
       setDragState({
@@ -1323,24 +1382,13 @@ export function useTimelineTrim(
         trimmedItemIds,
       })
 
-      if (wantsRolling && neighborId) {
-        useRollingEditPreviewStore.getState().setPreview({
-          trimmedItemId: item.id,
-          neighborItemId: neighborId,
-          handle,
-          neighborDelta: 0,
-        })
-      }
-
-      if (destroyTransitionAtHandle) {
-        useTransitionBreakPreviewStore.getState().setPreview({
-          itemId: item.id,
-          handle,
-          delta: 0,
-        })
-      } else {
-        useTransitionBreakPreviewStore.getState().clearPreview()
-      }
+      initTrimStartPreviews({
+        wantsRolling,
+        neighborId,
+        itemId: item.id,
+        handle,
+        destroyTransitionAtHandle,
+      })
     },
     [
       item.from,
