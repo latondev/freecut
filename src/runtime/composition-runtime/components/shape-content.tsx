@@ -53,6 +53,19 @@ function resolveShapeProp<
   >
 }
 
+/** Preview-over-resolved lookup without a fallback (result stays optional). */
+function resolveShapePropValue<
+  TPreview extends object,
+  TResolved extends object,
+  TKey extends keyof TPreview & keyof TResolved,
+>(
+  preview: TPreview | undefined | null,
+  resolved: TResolved,
+  key: TKey,
+): TPreview[TKey] | TResolved[TKey] | undefined {
+  return preview?.[key] ?? resolved[key]
+}
+
 /**
  * Shape content with live property preview support.
  * Renders Composition shapes (Rect, Circle, Triangle, Ellipse, Star, Polygon).
@@ -115,11 +128,14 @@ export const ShapeContent: React.FC<{ item: ShapeItem & { _sequenceFrameOffset?:
     'fillType',
     'solid',
   )
-  const gradientStartColor =
-    shapePropsPreview?.gradientStartColor ?? resolvedItem.gradientStartColor
-  const gradientEndColor = shapePropsPreview?.gradientEndColor ?? resolvedItem.gradientEndColor
-  const gradientAngle = shapePropsPreview?.gradientAngle ?? resolvedItem.gradientAngle
-  const strokeColor = shapePropsPreview?.strokeColor ?? resolvedItem.strokeColor
+  const gradientStartColor = resolveShapePropValue(
+    shapePropsPreview,
+    resolvedItem,
+    'gradientStartColor',
+  )
+  const gradientEndColor = resolveShapePropValue(shapePropsPreview, resolvedItem, 'gradientEndColor')
+  const gradientAngle = resolveShapePropValue(shapePropsPreview, resolvedItem, 'gradientAngle')
+  const strokeColor = resolveShapePropValue(shapePropsPreview, resolvedItem, 'strokeColor')
   const strokeWidth =
     resolveShapeProp(shapePropsPreview, 'strokeWidth', resolvedItem, 'strokeWidth', 0) * renderScale
   const cornerRadius =
@@ -140,7 +156,7 @@ export const ShapeContent: React.FC<{ item: ShapeItem & { _sequenceFrameOffset?:
     'innerRadius',
     0.5,
   )
-  const shapeType = shapePropsPreview?.shapeType ?? resolvedItem.shapeType
+  const shapeType = resolveShapePropValue(shapePropsPreview, resolvedItem, 'shapeType')
   const pathClosed = resolveShapeProp(
     shapePropsPreview,
     'pathClosed',
@@ -151,11 +167,14 @@ export const ShapeContent: React.FC<{ item: ShapeItem & { _sequenceFrameOffset?:
   const fillEnabled =
     shapeType === 'path' && !pathClosed
       ? false
-      : (shapePropsPreview?.fillEnabled ?? resolvedItem.fillEnabled ?? true)
-  const strokeEnabled =
-    shapePropsPreview?.strokeEnabled ??
-    resolvedItem.strokeEnabled ??
-    (strokeWidth > 0 && strokeColor !== undefined)
+      : resolveShapeProp(shapePropsPreview, 'fillEnabled', resolvedItem, 'fillEnabled', true)
+  const strokeEnabled = resolveShapeProp(
+    shapePropsPreview,
+    'strokeEnabled',
+    resolvedItem,
+    'strokeEnabled',
+    strokeWidth > 0 && strokeColor !== undefined,
+  )
   const strokeLineCap = resolveShapeProp(
     shapePropsPreview,
     'strokeLineCap',
