@@ -1797,6 +1797,34 @@ export async function createCompositionRenderer(
     }
   }
 
+  /** Whether an item is currently eligible for mediabunny prewarm decode. */
+  const isPrewarmDecodeEligible = (itemId: string): boolean =>
+    useMediabunny.has(itemId) && !mediabunnyDisabledItems.has(itemId)
+
+  /** Source timestamp for a prewarm draw, clamped into the extractor range. */
+  const getPrewarmClampedTime = (
+    item: VideoItem,
+    frame: number,
+    extractor: VideoFrameSource,
+  ): number => {
+    const sourceTime = getPrewarmVideoSourceTimeSeconds(item, frame, fps)
+    return Math.max(0, Math.min(sourceTime, extractor.getDuration() - 0.01))
+  }
+
+  /**
+   * Records a prewarm decode failure, disabling mediabunny for the item after
+   * repeated failures. Returns the updated failure count.
+   */
+  const recordPrewarmFailure = (itemId: string): number => {
+    const failures = (mediabunnyFailureCountByItem.get(itemId) ?? 0) + 1
+    mediabunnyFailureCountByItem.set(itemId, failures)
+    if (failures >= PREWARM_FAILURE_DISABLE_THRESHOLD) {
+      mediabunnyDisabledItems.add(itemId)
+      useMediabunny.delete(itemId)
+    }
+    return failures
+  }
+
   /** Notifies onPriorityMediaReady once; warns (never throws) on callback failure. */
   const createPriorityReadyNotifier = (onPriorityMediaReady?: () => void): (() => void) => {
     let notified = false
@@ -2831,12 +2859,11 @@ export async function createCompositionRenderer(
       }
 
       for (const item of candidates) {
-        if (!useMediabunny.has(item.id) || mediabunnyDisabledItems.has(item.id)) continue
+        if (!isPrewarmDecodeEligible(item.id)) continue
         const extractor = videoExtractors.get(item.id)
         if (!extractor) continue
 
-        const sourceTime = getPrewarmVideoSourceTimeSeconds(item, frame, fps)
-        const clampedTime = Math.max(0, Math.min(sourceTime, extractor.getDuration() - 0.01))
+        const clampedTime = getPrewarmClampedTime(item, frame, extractor)
 
         try {
           const success = await extractor.drawFrame(ctx2d, clampedTime, 0, 0, 1, 1)
@@ -2846,23 +2873,13 @@ export async function createCompositionRenderer(
             // Skip transient "no-sample" misses (same guard as renderVideoItem).
             const failureKind = extractor.getLastFailureKind()
             if (failureKind !== 'no-sample') {
-              const failures = (mediabunnyFailureCountByItem.get(item.id) ?? 0) + 1
-              mediabunnyFailureCountByItem.set(item.id, failures)
-              if (failures >= PREWARM_FAILURE_DISABLE_THRESHOLD) {
-                mediabunnyDisabledItems.add(item.id)
-                useMediabunny.delete(item.id)
-              }
+              recordPrewarmFailure(item.id)
             }
           }
         } catch (error) {
           if (error instanceof DOMException && error.name === 'AbortError') continue
-          const failures = (mediabunnyFailureCountByItem.get(item.id) ?? 0) + 1
-          mediabunnyFailureCountByItem.set(item.id, failures)
+          const failures = recordPrewarmFailure(item.id)
           getLog().warn('Prewarm decode failed', { itemId: item.id, frame, failures, error })
-          if (failures >= PREWARM_FAILURE_DISABLE_THRESHOLD) {
-            mediabunnyDisabledItems.add(item.id)
-            useMediabunny.delete(item.id)
-          }
         }
       }
     },
@@ -2893,7 +2910,7 @@ export async function createCompositionRenderer(
         const candidates = collectPrewarmVideoCandidatesForFrame(frame)
 
         for (const item of candidates) {
-          if (!useMediabunny.has(item.id) || mediabunnyDisabledItems.has(item.id)) continue
+          if (!isPrewarmDecodeEligible(item.id)) continue
           const extractor = videoExtractors.get(item.id)
           if (!extractor) continue
 
@@ -2903,8 +2920,7 @@ export async function createCompositionRenderer(
             continue
           }
 
-          const sourceTime = getPrewarmVideoSourceTimeSeconds(item, frame, fps)
-          const clampedTime = Math.max(0, Math.min(sourceTime, extractor.getDuration() - 0.01))
+          const clampedTime = getPrewarmClampedTime(item, frame, extractor)
 
           const existing = batchByExtractor.get(item.id)
           if (existing) {
@@ -2942,11 +2958,10 @@ export async function createCompositionRenderer(
         if (isDisposed) break
         const candidates = collectPrewarmVideoCandidatesForFrame(frame)
         for (const item of candidates) {
-          if (!useMediabunny.has(item.id) || mediabunnyDisabledItems.has(item.id)) continue
+          if (!isPrewarmDecodeEligible(item.id)) continue
           const extractor = videoExtractors.get(item.id)
           if (!extractor) continue
-          const sourceTime = getPrewarmVideoSourceTimeSeconds(item, frame, fps)
-          const clampedTime = Math.max(0, Math.min(sourceTime, extractor.getDuration() - 0.01))
+          const clampedTime = getPrewarmClampedTime(item, frame, extractor)
           try {
             await extractor.drawFrame(ctx2d, clampedTime, 0, 0, 1, 1)
           } catch {
