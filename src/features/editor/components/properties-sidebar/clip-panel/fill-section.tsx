@@ -27,6 +27,7 @@ import {
 import { PropertySection, PropertyRow, NumberInput, SliderInput } from '../components'
 import { applyAutoKeyframedTransformChange } from './auto-keyframe-transform'
 import { useKeyframesByItemId } from './use-keyframes-by-item-id'
+import { demixValue } from '../utils'
 
 interface FillSectionProps {
   items: TimelineItem[]
@@ -252,7 +253,7 @@ export const FillSection = memo(function FillSection({
           <KeyframeToggle
             itemIds={itemIds}
             property="opacity"
-            currentValue={opacityRaw === 'mixed' ? 1 : opacityRaw}
+            currentValue={demixValue(opacityRaw, 1)}
           />
           <Button
             variant="ghost"
@@ -269,7 +270,7 @@ export const FillSection = memo(function FillSection({
       {/* Blend Mode */}
       <PropertyRow label={t('editor.fillSection.blend')}>
         <Select
-          value={hasShapeMask ? 'normal' : blendMode === 'mixed' ? undefined : blendMode}
+          value={hasShapeMask ? 'normal' : demixValue(blendMode, undefined)}
           onValueChange={handleBlendModeChange}
           disabled={hasShapeMask}
         >
@@ -315,7 +316,7 @@ export const FillSection = memo(function FillSection({
           <KeyframeToggle
             itemIds={itemIds}
             property="cornerRadius"
-            currentValue={cornerRadius === 'mixed' ? 0 : cornerRadius}
+            currentValue={demixValue(cornerRadius, 0)}
           />
           <Button
             variant="ghost"

@@ -13,7 +13,7 @@ import {
   KeyframeToggle,
 } from '@/features/editor/deps/keyframes'
 import { PropertyRow, PropertySection, SliderInput } from '../components'
-import { getMixedValue } from '../utils'
+import { demixValue, getMixedValue } from '../utils'
 import { getAudioSectionItems } from './audio-section-utils'
 import { useKeyframesByItemId } from './use-keyframes-by-item-id'
 import { AudioEqPanelContent } from './audio-eq-panel-content'
@@ -306,7 +306,7 @@ export function AudioSection({ items }: AudioSectionProps) {
             <KeyframeToggle
               itemIds={itemIds}
               property="volume"
-              currentValue={volume === 'mixed' ? 0 : volume}
+              currentValue={demixValue(volume, 0)}
             />
             <Button
               variant="ghost"

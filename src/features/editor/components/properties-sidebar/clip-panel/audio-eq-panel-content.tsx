@@ -22,7 +22,7 @@ import { type TimelineItem } from '@/types/timeline'
 import type { ResolvedAudioEqSettings } from '@/types/audio'
 import { NumberInput } from '../components'
 import { RotaryKnob } from '@/shared/ui/property-controls/rotary-knob'
-import { getMixedValue } from '../utils/mixed-value'
+import { demixValue, getMixedValue } from '../utils/mixed-value'
 import { AudioEqCurveEditor, type AudioEqPatch } from './audio-eq-curve-editor'
 import { getAudioSectionItems } from './audio-section-utils'
 import {
@@ -264,11 +264,6 @@ function clampOutputGainDb(value: number): number {
   return Math.max(AUDIO_EQ_GAIN_DB_MIN, Math.min(AUDIO_EQ_GAIN_DB_MAX, value))
 }
 
-/** Replaces a possibly-mixed display value with its fallback for curve math. */
-function demixEqValue<T>(value: T | 'mixed', fallback: T): T {
-  return value === 'mixed' ? fallback : value
-}
-
 /**
  * Resolves one EQ display value with live-preview priority: live patch edits
  * win, then track settings, then the mixed multi-clip value.
@@ -315,7 +310,7 @@ function EqOutputGainControl({
   compact = false,
 }: EqOutputGainControlProps) {
   const [draftValue, setDraftValue] = useState<number | null>(null)
-  const resolvedValue = value === 'mixed' ? 0 : value
+  const resolvedValue = demixValue(value, 0)
   const displayValue = draftValue ?? resolvedValue
   const range = AUDIO_EQ_GAIN_DB_MAX - AUDIO_EQ_GAIN_DB_MIN
   const thumbPercent = (1 - (displayValue - AUDIO_EQ_GAIN_DB_MIN) / Math.max(range, 1)) * 100
@@ -565,12 +560,12 @@ type CompactBandRowsProps = {
 
 function CompactBandRows(props: CompactBandRowsProps) {
   const { onFieldChange, onLiveChange, portalContainer } = props
-  const b1Type = demixEqValue(props.eqBand1Type, 'high-pass') as FilterType
-  const b2Type = demixEqValue(props.eqLowType, 'low-shelf') as FilterType
-  const b3Type = demixEqValue(props.eqLowMidType, 'peaking') as FilterType
-  const b4Type = demixEqValue(props.eqHighMidType, 'peaking') as FilterType
-  const b5Type = demixEqValue(props.eqHighType, 'high-shelf') as FilterType
-  const b6Type = demixEqValue(props.eqBand6Type, 'low-pass') as FilterType
+  const b1Type = demixValue(props.eqBand1Type, 'high-pass') as FilterType
+  const b2Type = demixValue(props.eqLowType, 'low-shelf') as FilterType
+  const b3Type = demixValue(props.eqLowMidType, 'peaking') as FilterType
+  const b4Type = demixValue(props.eqHighMidType, 'peaking') as FilterType
+  const b5Type = demixValue(props.eqHighType, 'high-shelf') as FilterType
+  const b6Type = demixValue(props.eqBand6Type, 'low-pass') as FilterType
   const showGain = (t: FilterType) => t !== 'high-pass' && t !== 'low-pass' && t !== 'notch'
   const showQ = (t: FilterType) => t === 'peaking'
   const bandTypes = [b1Type, b2Type, b3Type, b4Type, b5Type, b6Type]
@@ -585,37 +580,37 @@ function CompactBandRows(props: CompactBandRowsProps) {
           [
             {
               label: 'B 1',
-              active: demixEqValue(props.eqBand1Enabled, false),
+              active: demixValue(props.eqBand1Enabled, false),
               field: 'audioEqBand1Enabled' as const,
               current: props.eqBand1Enabled,
             },
             {
               label: 'B 2',
-              active: demixEqValue(props.eqLowEnabled, false),
+              active: demixValue(props.eqLowEnabled, false),
               field: 'audioEqLowEnabled' as const,
               current: props.eqLowEnabled,
             },
             {
               label: 'B 3',
-              active: demixEqValue(props.eqLowMidEnabled, false),
+              active: demixValue(props.eqLowMidEnabled, false),
               field: 'audioEqLowMidEnabled' as const,
               current: props.eqLowMidEnabled,
             },
             {
               label: 'B 4',
-              active: demixEqValue(props.eqHighMidEnabled, false),
+              active: demixValue(props.eqHighMidEnabled, false),
               field: 'audioEqHighMidEnabled' as const,
               current: props.eqHighMidEnabled,
             },
             {
               label: 'B 5',
-              active: demixEqValue(props.eqHighEnabled, false),
+              active: demixValue(props.eqHighEnabled, false),
               field: 'audioEqHighEnabled' as const,
               current: props.eqHighEnabled,
             },
             {
               label: 'B 6',
-              active: demixEqValue(props.eqBand6Enabled, false),
+              active: demixValue(props.eqBand6Enabled, false),
               field: 'audioEqBand6Enabled' as const,
               current: props.eqBand6Enabled,
             },
@@ -624,7 +619,7 @@ function CompactBandRows(props: CompactBandRowsProps) {
           <button
             key={band.label}
             type="button"
-            onClick={() => onFieldChange(band.field, !demixEqValue(band.current, false))}
+            onClick={() => onFieldChange(band.field, !demixValue(band.current, false))}
             className={cn(
               'h-7 rounded-[4px] border text-[11px] font-semibold transition-colors',
               band.active
@@ -1277,18 +1272,18 @@ export function AudioEqPanelContent({
   )
   // Pre-resolved band type/enabled states shared by the band cards below, so
   // the per-card JSX does not re-derive the same 'mixed' fallbacks.
-  const eqBand1TypeOrDefault = demixEqValue(eqBand1Type, 'high-pass')
-  const eqBand1EnabledOrDefault = demixEqValue(eqBand1Enabled, false)
-  const eqLowTypeOrDefault = demixEqValue(eqLowType, 'low-shelf')
-  const eqLowEnabledOrDefault = demixEqValue(eqLowEnabled, false)
-  const eqLowMidTypeOrDefault = demixEqValue(eqLowMidType, 'peaking')
-  const eqLowMidEnabledOrDefault = demixEqValue(eqLowMidEnabled, false)
-  const eqHighMidTypeOrDefault = demixEqValue(eqHighMidType, 'peaking')
-  const eqHighMidEnabledOrDefault = demixEqValue(eqHighMidEnabled, false)
-  const eqHighTypeOrDefault = demixEqValue(eqHighType, 'high-shelf')
-  const eqHighEnabledOrDefault = demixEqValue(eqHighEnabled, false)
-  const eqBand6TypeOrDefault = demixEqValue(eqBand6Type, 'low-pass')
-  const eqBand6EnabledOrDefault = demixEqValue(eqBand6Enabled, false)
+  const eqBand1TypeOrDefault = demixValue(eqBand1Type, 'high-pass')
+  const eqBand1EnabledOrDefault = demixValue(eqBand1Enabled, false)
+  const eqLowTypeOrDefault = demixValue(eqLowType, 'low-shelf')
+  const eqLowEnabledOrDefault = demixValue(eqLowEnabled, false)
+  const eqLowMidTypeOrDefault = demixValue(eqLowMidType, 'peaking')
+  const eqLowMidEnabledOrDefault = demixValue(eqLowMidEnabled, false)
+  const eqHighMidTypeOrDefault = demixValue(eqHighMidType, 'peaking')
+  const eqHighMidEnabledOrDefault = demixValue(eqHighMidEnabled, false)
+  const eqHighTypeOrDefault = demixValue(eqHighType, 'high-shelf')
+  const eqHighEnabledOrDefault = demixValue(eqHighEnabled, false)
+  const eqBand6TypeOrDefault = demixValue(eqBand6Type, 'low-pass')
+  const eqBand6EnabledOrDefault = demixValue(eqBand6Enabled, false)
 
   const lowRangeId = getEffectiveGainBandControlRangeId(
     gainBandControlRanges.low,
@@ -1357,40 +1352,40 @@ export function AudioEqPanelContent({
   const eqCurveSettings = useMemo(
     () =>
       resolveAudioEqSettings({
-        outputGainDb: demixEqValue(eqOutputGainDb, 0),
-        band1Enabled: demixEqValue(eqBand1Enabled, false),
-        band1Type: demixEqValue(eqBand1Type, 'high-pass'),
-        band1FrequencyHz: demixEqValue(eqBand1FrequencyHz, AUDIO_EQ_LOW_CUT_FREQUENCY_HZ),
-        band1GainDb: demixEqValue(eqBand1GainDb, 0),
-        band1Q: demixEqValue(eqBand1Q, AUDIO_EQ_LOW_MID_Q),
-        band1SlopeDbPerOct: demixEqValue(eqBand1SlopeDbPerOct, 12),
-        lowEnabled: demixEqValue(eqLowEnabled, true),
-        lowType: demixEqValue(eqLowType, 'low-shelf'),
-        lowGainDb: demixEqValue(eqLow, 0),
-        lowFrequencyHz: demixEqValue(eqLowFrequencyHz, AUDIO_EQ_LOW_FREQUENCY_HZ),
-        lowQ: demixEqValue(eqLowQ, AUDIO_EQ_LOW_MID_Q),
-        lowMidEnabled: demixEqValue(eqLowMidEnabled, true),
-        lowMidType: demixEqValue(eqLowMidType, 'peaking'),
-        lowMidGainDb: demixEqValue(eqLowMid, 0),
-        lowMidFrequencyHz: demixEqValue(eqLowMidFrequencyHz, AUDIO_EQ_LOW_MID_FREQUENCY_HZ),
-        lowMidQ: demixEqValue(eqLowMidQ, AUDIO_EQ_LOW_MID_Q),
+        outputGainDb: demixValue(eqOutputGainDb, 0),
+        band1Enabled: demixValue(eqBand1Enabled, false),
+        band1Type: demixValue(eqBand1Type, 'high-pass'),
+        band1FrequencyHz: demixValue(eqBand1FrequencyHz, AUDIO_EQ_LOW_CUT_FREQUENCY_HZ),
+        band1GainDb: demixValue(eqBand1GainDb, 0),
+        band1Q: demixValue(eqBand1Q, AUDIO_EQ_LOW_MID_Q),
+        band1SlopeDbPerOct: demixValue(eqBand1SlopeDbPerOct, 12),
+        lowEnabled: demixValue(eqLowEnabled, true),
+        lowType: demixValue(eqLowType, 'low-shelf'),
+        lowGainDb: demixValue(eqLow, 0),
+        lowFrequencyHz: demixValue(eqLowFrequencyHz, AUDIO_EQ_LOW_FREQUENCY_HZ),
+        lowQ: demixValue(eqLowQ, AUDIO_EQ_LOW_MID_Q),
+        lowMidEnabled: demixValue(eqLowMidEnabled, true),
+        lowMidType: demixValue(eqLowMidType, 'peaking'),
+        lowMidGainDb: demixValue(eqLowMid, 0),
+        lowMidFrequencyHz: demixValue(eqLowMidFrequencyHz, AUDIO_EQ_LOW_MID_FREQUENCY_HZ),
+        lowMidQ: demixValue(eqLowMidQ, AUDIO_EQ_LOW_MID_Q),
         midGainDb: 0,
-        highMidEnabled: demixEqValue(eqHighMidEnabled, true),
-        highMidType: demixEqValue(eqHighMidType, 'peaking'),
-        highMidGainDb: demixEqValue(eqHighMid, 0),
-        highMidFrequencyHz: demixEqValue(eqHighMidFrequencyHz, AUDIO_EQ_HIGH_MID_FREQUENCY_HZ),
-        highMidQ: demixEqValue(eqHighMidQ, AUDIO_EQ_HIGH_MID_Q),
-        highEnabled: demixEqValue(eqHighEnabled, true),
-        highType: demixEqValue(eqHighType, 'high-shelf'),
-        highGainDb: demixEqValue(eqHigh, 0),
-        highFrequencyHz: demixEqValue(eqHighFrequencyHz, AUDIO_EQ_HIGH_FREQUENCY_HZ),
-        highQ: demixEqValue(eqHighQ, AUDIO_EQ_HIGH_MID_Q),
-        band6Enabled: demixEqValue(eqBand6Enabled, false),
-        band6Type: demixEqValue(eqBand6Type, 'low-pass'),
-        band6FrequencyHz: demixEqValue(eqBand6FrequencyHz, AUDIO_EQ_HIGH_CUT_FREQUENCY_HZ),
-        band6GainDb: demixEqValue(eqBand6GainDb, 0),
-        band6Q: demixEqValue(eqBand6Q, AUDIO_EQ_HIGH_MID_Q),
-        band6SlopeDbPerOct: demixEqValue(eqBand6SlopeDbPerOct, 12),
+        highMidEnabled: demixValue(eqHighMidEnabled, true),
+        highMidType: demixValue(eqHighMidType, 'peaking'),
+        highMidGainDb: demixValue(eqHighMid, 0),
+        highMidFrequencyHz: demixValue(eqHighMidFrequencyHz, AUDIO_EQ_HIGH_MID_FREQUENCY_HZ),
+        highMidQ: demixValue(eqHighMidQ, AUDIO_EQ_HIGH_MID_Q),
+        highEnabled: demixValue(eqHighEnabled, true),
+        highType: demixValue(eqHighType, 'high-shelf'),
+        highGainDb: demixValue(eqHigh, 0),
+        highFrequencyHz: demixValue(eqHighFrequencyHz, AUDIO_EQ_HIGH_FREQUENCY_HZ),
+        highQ: demixValue(eqHighQ, AUDIO_EQ_HIGH_MID_Q),
+        band6Enabled: demixValue(eqBand6Enabled, false),
+        band6Type: demixValue(eqBand6Type, 'low-pass'),
+        band6FrequencyHz: demixValue(eqBand6FrequencyHz, AUDIO_EQ_HIGH_CUT_FREQUENCY_HZ),
+        band6GainDb: demixValue(eqBand6GainDb, 0),
+        band6Q: demixValue(eqBand6Q, AUDIO_EQ_HIGH_MID_Q),
+        band6SlopeDbPerOct: demixValue(eqBand6SlopeDbPerOct, 12),
       }),
     [
       eqOutputGainDb,

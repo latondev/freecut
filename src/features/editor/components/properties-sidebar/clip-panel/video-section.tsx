@@ -28,7 +28,7 @@ import {
   resolveAnimatedCrop,
 } from '@/features/editor/deps/keyframes'
 import { PropertySection, PropertyRow, SliderInput } from '../components'
-import { getMixedValue } from '../utils'
+import { demixValue, getMixedValue } from '../utils'
 import {
   cropPixelsToRatio,
   cropSignedPixelsToRatio,
@@ -635,7 +635,7 @@ export function VideoSection({ items }: VideoSectionProps) {
             <KeyframeToggle
               itemIds={cropItemIds}
               property="cropLeft"
-              currentValue={cropLeft === 'mixed' ? 0 : cropLeft}
+              currentValue={demixValue(cropLeft, 0)}
               currentValuesByItemId={cropValuesByProperty.cropLeft}
             />
             <Button
@@ -667,7 +667,7 @@ export function VideoSection({ items }: VideoSectionProps) {
             <KeyframeToggle
               itemIds={cropItemIds}
               property="cropRight"
-              currentValue={cropRight === 'mixed' ? 0 : cropRight}
+              currentValue={demixValue(cropRight, 0)}
               currentValuesByItemId={cropValuesByProperty.cropRight}
             />
             <Button
@@ -699,7 +699,7 @@ export function VideoSection({ items }: VideoSectionProps) {
             <KeyframeToggle
               itemIds={cropItemIds}
               property="cropTop"
-              currentValue={cropTop === 'mixed' ? 0 : cropTop}
+              currentValue={demixValue(cropTop, 0)}
               currentValuesByItemId={cropValuesByProperty.cropTop}
             />
             <Button
@@ -731,7 +731,7 @@ export function VideoSection({ items }: VideoSectionProps) {
             <KeyframeToggle
               itemIds={cropItemIds}
               property="cropBottom"
-              currentValue={cropBottom === 'mixed' ? 0 : cropBottom}
+              currentValue={demixValue(cropBottom, 0)}
               currentValuesByItemId={cropValuesByProperty.cropBottom}
             />
             <Button
@@ -763,7 +763,7 @@ export function VideoSection({ items }: VideoSectionProps) {
             <KeyframeToggle
               itemIds={cropItemIds}
               property="cropSoftness"
-              currentValue={cropSoftness === 'mixed' ? 0 : cropSoftness}
+              currentValue={demixValue(cropSoftness, 0)}
               currentValuesByItemId={cropValuesByProperty.cropSoftness}
             />
             <Button

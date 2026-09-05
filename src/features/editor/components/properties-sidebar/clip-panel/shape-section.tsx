@@ -36,6 +36,7 @@ import {
   getSwappedShapeLinearGradientColors,
 } from '@/shared/graphics/shapes/linear-gradient'
 import { getPathClosureUpdates, getShapeSectionControlVisibility } from './shape-section-visibility'
+import { demixValue } from '../utils'
 
 // Shape type options
 const SHAPE_TYPE_OPTIONS: { value: ShapeType; labelKey: string }[] = [
@@ -1096,8 +1097,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
               keyframe={{
                 itemIds,
                 property: 'trimPathStart',
-                currentValue:
-                  sharedValues.trimPathStart === 'mixed' ? 0 : sharedValues.trimPathStart,
+                currentValue: demixValue(sharedValues.trimPathStart, 0),
               }}
               onReset={() => resetNumericProperty('trimPathStart', 0)}
               resetLabel={t('editor.shapeSection.resetToDefault')}
@@ -1115,7 +1115,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
               keyframe={{
                 itemIds,
                 property: 'trimPathEnd',
-                currentValue: sharedValues.trimPathEnd === 'mixed' ? 100 : sharedValues.trimPathEnd,
+                currentValue: demixValue(sharedValues.trimPathEnd, 100),
               }}
               onReset={() => resetNumericProperty('trimPathEnd', 100)}
               resetLabel={t('editor.shapeSection.resetToDefault')}
@@ -1134,8 +1134,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
               keyframe={{
                 itemIds,
                 property: 'trimPathOffset',
-                currentValue:
-                  sharedValues.trimPathOffset === 'mixed' ? 0 : sharedValues.trimPathOffset,
+                currentValue: demixValue(sharedValues.trimPathOffset, 0),
               }}
               onReset={() => resetNumericProperty('trimPathOffset', 0)}
               resetLabel={t('editor.shapeSection.resetToDefault')}
@@ -1163,8 +1162,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
               keyframe={{
                 itemIds,
                 property: 'taperStartWidth',
-                currentValue:
-                  sharedValues.taperStartWidth === 'mixed' ? 100 : sharedValues.taperStartWidth,
+                currentValue: demixValue(sharedValues.taperStartWidth, 100),
               }}
               onReset={() => resetNumericProperty('taperStartWidth', 100)}
               resetLabel={t('editor.shapeSection.resetToDefault')}
@@ -1182,8 +1180,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
               keyframe={{
                 itemIds,
                 property: 'taperStartLength',
-                currentValue:
-                  sharedValues.taperStartLength === 'mixed' ? 0 : sharedValues.taperStartLength,
+                currentValue: demixValue(sharedValues.taperStartLength, 0),
               }}
               onReset={() => resetNumericProperty('taperStartLength', 0)}
               resetLabel={t('editor.shapeSection.resetToDefault')}
@@ -1201,8 +1198,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
               keyframe={{
                 itemIds,
                 property: 'taperEndWidth',
-                currentValue:
-                  sharedValues.taperEndWidth === 'mixed' ? 100 : sharedValues.taperEndWidth,
+                currentValue: demixValue(sharedValues.taperEndWidth, 100),
               }}
               onReset={() => resetNumericProperty('taperEndWidth', 100)}
               resetLabel={t('editor.shapeSection.resetToDefault')}
@@ -1220,8 +1216,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
               keyframe={{
                 itemIds,
                 property: 'taperEndLength',
-                currentValue:
-                  sharedValues.taperEndLength === 'mixed' ? 0 : sharedValues.taperEndLength,
+                currentValue: demixValue(sharedValues.taperEndLength, 0),
               }}
               onReset={() => resetNumericProperty('taperEndLength', 0)}
               resetLabel={t('editor.shapeSection.resetToDefault')}
