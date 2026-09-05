@@ -46,14 +46,4 @@ export {
   updateMotionModifierSettings,
 } from '@/features/keyframes/utils/motion-modifier-eval'
 export { createMotionAnimationLayer } from '@/features/keyframes/utils/motion-layer-eval'
-export {
-  bakeMotionModifiersToKeyframes,
-  bakeAudioPulseToKeyframes,
-  buildBakeMotionPlan,
-} from '@/features/keyframes/utils/bake-motion'
-export {
-  TRIGGER_WAVE_MOTION_LAYER_LABEL,
-  createAudioPulseModulation,
-  buildTriggerWaveMotionLayerKeyframes,
-  createTriggerWaveMotionLayerEffects,
-} from '@/features/keyframes/utils/trigger-wave-motion-layer'
+export { buildBakeMotionPlan } from '@/features/keyframes/utils/bake-motion'

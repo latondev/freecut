@@ -23,14 +23,7 @@ export {
   getShapeAnimatableBaseValue,
   resolveAnimatedShapeItem,
 } from '@/features/keyframes/utils/animated-shape-item'
-export {
-  BEZIER_PRESETS,
-  areBezierPointsEqual,
-  findMatchingBezierPreset,
-  clampBezierValue,
-  clampSpringValue,
-  buildEasingConfig,
-} from '@/features/keyframes/utils/easing-presets'
+export { buildEasingConfig } from '@/features/keyframes/utils/easing-presets'
 export type { BezierPresetValue } from '@/features/keyframes/utils/easing-presets'
 export {
   getTransitionBlockedRanges,

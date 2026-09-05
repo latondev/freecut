@@ -16,26 +16,6 @@
       "reason": "deps-contract: preview editor state is shared with effect panels through feature boundary adapters."
     },
     {
-      "path": "src/features/editor/deps/timeline-keyframe-ui-contract.ts",
-      "exportName": "TranscriptEditorPanel",
-      "reason": "deps-contract: lazy-loaded by the editor media sidebar through the timeline UI contract."
-    },
-    {
-      "path": "src/features/editor/deps/timeline-keyframe-ui-contract.ts",
-      "exportName": "CompactNavigator",
-      "reason": "deps-contract: consumed by the compositing timeline through the timeline keyframe UI adapter."
-    },
-    {
-      "path": "src/features/editor/deps/timeline-keyframe-ui-contract.ts",
-      "exportName": "DopesheetEditor",
-      "reason": "deps-contract: consumed by the compositing timeline through the timeline keyframe UI adapter."
-    },
-    {
-      "path": "src/features/editor/deps/timeline-keyframe-ui-contract.ts",
-      "exportName": "KEYFRAME_EDGE_INSET",
-      "reason": "deps-contract: consumed by compositing timeline layout through the timeline keyframe UI adapter."
-    },
-    {
       "path": "src/features/preview/components/video-preview.tsx",
       "exportName": "ColorVideoPreview",
       "reason": "Component is re-exported by the editor preview dependency contract for workspace-specific preview selection."
@@ -69,36 +49,6 @@
       "path": "src/features/editor/deps/composition-runtime-contract.ts",
       "exportName": "deletePreviewAudioConform",
       "reason": "Re-exported deps contract API used through a dynamic composition-runtime import in the editor settings dialog."
-    },
-    {
-      "path": "src/features/editor/deps/keyframes-contract.ts",
-      "exportName": "bakeAudioPulseToKeyframes",
-      "reason": "deps-contract: cross-feature adapter surface mandated by the boundary rules; check:deps-wrapper-health --fail-on-unused passes it."
-    },
-    {
-      "path": "src/features/editor/deps/keyframes-contract.ts",
-      "exportName": "bakeMotionModifiersToKeyframes",
-      "reason": "deps-contract: cross-feature adapter surface mandated by the boundary rules; check:deps-wrapper-health --fail-on-unused passes it."
-    },
-    {
-      "path": "src/features/editor/deps/keyframes-contract.ts",
-      "exportName": "buildTriggerWaveMotionLayerKeyframes",
-      "reason": "deps-contract: cross-feature adapter surface mandated by the boundary rules; check:deps-wrapper-health --fail-on-unused passes it."
-    },
-    {
-      "path": "src/features/editor/deps/keyframes-contract.ts",
-      "exportName": "createAudioPulseModulation",
-      "reason": "deps-contract: cross-feature adapter surface mandated by the boundary rules; check:deps-wrapper-health --fail-on-unused passes it."
-    },
-    {
-      "path": "src/features/editor/deps/keyframes-contract.ts",
-      "exportName": "createTriggerWaveMotionLayerEffects",
-      "reason": "deps-contract: cross-feature adapter surface mandated by the boundary rules; check:deps-wrapper-health --fail-on-unused passes it."
-    },
-    {
-      "path": "src/features/editor/deps/keyframes-contract.ts",
-      "exportName": "TRIGGER_WAVE_MOTION_LAYER_LABEL",
-      "reason": "deps-contract: cross-feature adapter surface mandated by the boundary rules; check:deps-wrapper-health --fail-on-unused passes it."
     },
     {
       "path": "src/features/export/components/exports-dialog.tsx",
@@ -261,31 +211,6 @@
       "reason": "Lazy-loaded through the editor timeline import helper."
     },
     {
-      "path": "src/features/timeline/deps/keyframes-contract.ts",
-      "exportName": "areBezierPointsEqual",
-      "reason": "deps-contract: cross-feature adapter surface mandated by the boundary rules; check:deps-wrapper-health --fail-on-unused passes it."
-    },
-    {
-      "path": "src/features/timeline/deps/keyframes-contract.ts",
-      "exportName": "BEZIER_PRESETS",
-      "reason": "deps-contract: cross-feature adapter surface mandated by the boundary rules; check:deps-wrapper-health --fail-on-unused passes it."
-    },
-    {
-      "path": "src/features/timeline/deps/keyframes-contract.ts",
-      "exportName": "clampBezierValue",
-      "reason": "deps-contract: cross-feature adapter surface mandated by the boundary rules; check:deps-wrapper-health --fail-on-unused passes it."
-    },
-    {
-      "path": "src/features/timeline/deps/keyframes-contract.ts",
-      "exportName": "clampSpringValue",
-      "reason": "deps-contract: cross-feature adapter surface mandated by the boundary rules; check:deps-wrapper-health --fail-on-unused passes it."
-    },
-    {
-      "path": "src/features/timeline/deps/keyframes-contract.ts",
-      "exportName": "findMatchingBezierPreset",
-      "reason": "deps-contract: cross-feature adapter surface mandated by the boundary rules; check:deps-wrapper-health --fail-on-unused passes it."
-    },
-    {
       "path": "src/features/timeline/utils/collision-utils.ts",
       "exportName": "detectOverlappingItems",
       "reason": "Dynamically imported by the project debug utilities."
@@ -306,49 +231,9 @@
       "reason": "unreviewed: carried over by the 2026-07-09 re-baseline; trace individually before deleting."
     },
     {
-      "path": "src/infrastructure/analysis/verification/registry.ts",
-      "exportName": "DEFAULT_SCENE_VERIFICATION_PROVIDER_ID",
-      "reason": "unreviewed: carried over by the 2026-07-09 re-baseline; trace individually before deleting."
-    },
-    {
-      "path": "src/infrastructure/analysis/verification/registry.ts",
-      "exportName": "getDefaultSceneVerificationProvider",
-      "reason": "unreviewed: carried over by the 2026-07-09 re-baseline; trace individually before deleting."
-    },
-    {
-      "path": "src/infrastructure/analysis/verification/registry.ts",
-      "exportName": "getSceneVerificationModelLabel",
-      "reason": "unreviewed: carried over by the 2026-07-09 re-baseline; trace individually before deleting."
-    },
-    {
-      "path": "src/infrastructure/analysis/verification/registry.ts",
-      "exportName": "getSceneVerificationModelOptions",
-      "reason": "unreviewed: carried over by the 2026-07-09 re-baseline; trace individually before deleting."
-    },
-    {
       "path": "src/infrastructure/audio/mic-recorder/devices.ts",
       "exportName": "onAudioInputDevicesChanged",
       "reason": "unreviewed: carried over by the 2026-07-09 re-baseline; trace individually before deleting."
-    },
-    {
-      "path": "src/infrastructure/audio/mic-recorder/index.ts",
-      "exportName": "buildAudioConstraints",
-      "reason": "barrel-surface: feature barrel defines the public API; current consumers import the underlying module directly."
-    },
-    {
-      "path": "src/infrastructure/audio/mic-recorder/index.ts",
-      "exportName": "createMicLevelMeter",
-      "reason": "barrel-surface: feature barrel defines the public API; current consumers import the underlying module directly."
-    },
-    {
-      "path": "src/infrastructure/audio/mic-recorder/index.ts",
-      "exportName": "onAudioInputDevicesChanged",
-      "reason": "barrel-surface: feature barrel defines the public API; current consumers import the underlying module directly."
-    },
-    {
-      "path": "src/infrastructure/audio/mic-recorder/index.ts",
-      "exportName": "pickRecorderMimeType",
-      "reason": "barrel-surface: feature barrel defines the public API; current consumers import the underlying module directly."
     },
     {
       "path": "src/infrastructure/audio/ui-sound/engine.ts",
