@@ -913,6 +913,57 @@ function initTrimStartPreviews(options: {
   }
 }
 
+function resolveBrokenTransitionIds(state: TrimState, itemId: string): string[] {
+  if (!state.destroyTransitionAtHandle || !state.handle) return []
+  return useTransitionsStore
+    .getState()
+    .transitions.filter((transition) =>
+      state.handle === 'start'
+        ? transition.rightClipId === itemId
+        : transition.leftClipId === itemId,
+    )
+    .map((transition) => transition.id)
+}
+
+function commitTrimStateToStore(itemId: string, state: TrimState): void {
+  const deltaFrames = state.currentDelta
+  // Only update store if there was actual change
+  if (deltaFrames === 0) return
+  if (state.destroyTransitionAtHandle && state.handle) {
+    trimItemBreakingTransition(
+      itemId,
+      state.handle,
+      deltaFrames,
+      resolveBrokenTransitionIds(state, itemId),
+      { itemIds: state.trimmedItemIds },
+    )
+    return
+  }
+  if (state.isRippleEdit) {
+    // Ripple edit: trim + shift downstream items
+    rippleTrimItem(itemId, state.handle!, deltaFrames)
+    return
+  }
+  if (state.isRollingEdit && state.neighborId) {
+    // Rolling edit: determine left/right clip IDs and edit point delta
+    if (state.handle === 'end') {
+      // Trimming end handle: this item is the left clip
+      rollingTrimItems(itemId, state.neighborId, deltaFrames)
+    } else {
+      // Trimming start handle: this item is the right clip, neighbor is left
+      // rollingTrimItems convention: positive delta = edit point moves right
+      rollingTrimItems(state.neighborId, itemId, deltaFrames)
+    }
+    return
+  }
+  // Normal trim
+  if (state.handle === 'start') {
+    trimSelectedItemStarts(itemId, deltaFrames, { itemIds: state.trimmedItemIds })
+  } else if (state.handle === 'end') {
+    trimSelectedItemEnds(itemId, deltaFrames, { itemIds: state.trimmedItemIds })
+  }
+}
+
 export function useTimelineTrim(
   item: TimelineItem,
   timelineDuration: number,
@@ -1197,86 +1248,43 @@ export function useTimelineTrim(
 
   // Mouse up handler - commits changes to store (single update)
   const handleMouseUp = useCallback(() => {
-    if (trimStateRef.current.isTrimming) {
-      const state = trimStateRef.current
-      const deltaFrames = trimStateRef.current.currentDelta
+    if (!trimStateRef.current.isTrimming) return
+    commitTrimStateToStore(item.id, trimStateRef.current)
 
-      // Only update store if there was actual change
-      if (deltaFrames !== 0) {
-        const transitionIdsToRemove =
-          state.destroyTransitionAtHandle && state.handle
-            ? useTransitionsStore
-                .getState()
-                .transitions.filter((transition) =>
-                  state.handle === 'start'
-                    ? transition.rightClipId === item.id
-                    : transition.leftClipId === item.id,
-                )
-                .map((transition) => transition.id)
-            : []
+    // Clear rolling edit preview
+    useRollingEditPreviewStore.getState().clearPreview()
 
-        if (state.destroyTransitionAtHandle && state.handle) {
-          trimItemBreakingTransition(item.id, state.handle, deltaFrames, transitionIdsToRemove, {
-            itemIds: state.trimmedItemIds,
-          })
-        } else if (state.isRippleEdit) {
-          // Ripple edit: trim + shift downstream items
-          rippleTrimItem(item.id, state.handle!, deltaFrames)
-        } else if (state.isRollingEdit && state.neighborId) {
-          // Rolling edit: determine left/right clip IDs and edit point delta
-          if (state.handle === 'end') {
-            // Trimming end handle: this item is the left clip
-            rollingTrimItems(item.id, state.neighborId, deltaFrames)
-          } else {
-            // Trimming start handle: this item is the right clip, neighbor is left
-            // rollingTrimItems convention: positive delta = edit point moves right
-            rollingTrimItems(state.neighborId, item.id, deltaFrames)
-          }
-        } else {
-          // Normal trim
-          if (state.handle === 'start') {
-            trimSelectedItemStarts(item.id, deltaFrames, { itemIds: state.trimmedItemIds })
-          } else if (state.handle === 'end') {
-            trimSelectedItemEnds(item.id, deltaFrames, { itemIds: state.trimmedItemIds })
-          }
-        }
-      }
+    // Clear ripple edit preview
+    useRippleEditPreviewStore.getState().clearPreview()
+    useTransitionBreakPreviewStore.getState().clearPreview()
+    useLinkedEditPreviewStore.getState().clear()
 
-      // Clear rolling edit preview
-      useRollingEditPreviewStore.getState().clearPreview()
+    // Clear drag state (including snap indicator)
+    setActiveSnapTarget(null)
+    setDragState(null)
+    prevSnapTargetRef.current = null
+    magneticSnapTargetsRef.current = []
 
-      // Clear ripple edit preview
-      useRippleEditPreviewStore.getState().clearPreview()
-      useTransitionBreakPreviewStore.getState().clearPreview()
-      useLinkedEditPreviewStore.getState().clear()
+    // Reset modifier key refs
+    altKeyRef.current = false
+    shiftKeyRef.current = false
 
-      // Clear drag state (including snap indicator)
-      setActiveSnapTarget(null)
-      setDragState(null)
-      prevSnapTargetRef.current = null
-      magneticSnapTargetsRef.current = []
-
-      // Reset modifier key refs
-      altKeyRef.current = false
-      shiftKeyRef.current = false
-
-      setTrimState({
-        isTrimming: false,
-        handle: null,
-        startX: 0,
-        initialFrom: 0,
-        initialDuration: 0,
-        currentDelta: 0,
-        isRollingEdit: false,
-        isRippleEdit: false,
-        neighborId: null,
-        forcedMode: null,
-        isConstrained: false,
-        constraintLabel: null,
-        destroyTransitionAtHandle: false,
-        trimmedItemIds: [],
-      })
-    }
+    setTrimState({
+      isTrimming: false,
+      handle: null,
+      startX: 0,
+      initialFrom: 0,
+      initialDuration: 0,
+      currentDelta: 0,
+      isRollingEdit: false,
+      isRippleEdit: false,
+      neighborId: null,
+      forcedMode: null,
+      isConstrained: false,
+      constraintLabel: null,
+      destroyTransitionAtHandle: false,
+      trimmedItemIds: [],
+    })
   }, [item.id, setActiveSnapTarget, setDragState])
 
   // Setup and cleanup mouse event listeners
