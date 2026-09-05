@@ -39,7 +39,7 @@ export interface DopesheetHotkeyBindings {
 }
 
 /** Resolves key strings for every dopesheet shortcut. */
-export function resolveDopesheetHotkeyKeys(
+function resolveDopesheetHotkeyKeys(
   shortcuts: DopesheetShortcutMap | undefined,
 ): DopesheetHotkeyBindings['keys'] {
   return {
@@ -65,7 +65,7 @@ function isBindingEnabled(
 }
 
 /** Resolves enablement for every dopesheet shortcut. */
-export function resolveDopesheetHotkeyEnabled(
+function resolveDopesheetHotkeyEnabled(
   state: DopesheetHotkeyState,
 ): DopesheetHotkeyBindings['enabled'] {
   const {

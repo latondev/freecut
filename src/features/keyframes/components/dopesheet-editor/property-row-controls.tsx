@@ -530,16 +530,6 @@ export function PropertyRowCompoundInput({
   )
 }
 
-export interface RowValueInputKeyDownArgs {
-  property: AnimatableProperty
-  propertyValues: Partial<Record<AnimatableProperty, number>>
-  skipNextBlurCommitPropertyRef: RefObject<AnimatableProperty | null>
-  onValueCommit: (property: AnimatableProperty, options?: { allowCreate?: boolean }) => void
-  onEditingChange: Dispatch<SetStateAction<AnimatableProperty | null>>
-  onDraftsChange: Dispatch<SetStateAction<Partial<Record<AnimatableProperty, string>>>>
-  formatDisplayValue: (property: AnimatableProperty, value: number | undefined) => string
-}
-
 export interface PropertyRowValueInputProps {
   property: AnimatableProperty
   rowLabel: string
