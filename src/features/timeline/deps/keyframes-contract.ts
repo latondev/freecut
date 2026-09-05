@@ -24,7 +24,6 @@ export {
   resolveAnimatedShapeItem,
 } from '@/features/keyframes/utils/animated-shape-item'
 export { buildEasingConfig } from '@/features/keyframes/utils/easing-presets'
-export type { BezierPresetValue } from '@/features/keyframes/utils/easing-presets'
 export {
   getTransitionBlockedRanges,
   isFrameInTransitionRegion,

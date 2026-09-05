@@ -20,7 +20,7 @@ export type RenderPumpFrameState = Pick<
   'currentFrame' | 'currentFrameEpoch' | 'previewFrame' | 'previewFrameEpoch'
 >
 
-export type PreviewPresentationHandoffState = Pick<
+type PreviewPresentationHandoffState = Pick<
   PlaybackState,
   'currentFrame' | 'previewFrame' | 'isPlaying'
 >

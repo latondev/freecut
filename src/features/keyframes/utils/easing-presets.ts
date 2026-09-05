@@ -22,7 +22,7 @@ export function getBezierPresetForEasing(easing: EasingType): BezierControlPoint
  * source of truth shared by the docked interpolation controls and the
  * dopesheet's per-segment easing popover.
  */
-export const BEZIER_PRESETS = [
+const BEZIER_PRESETS = [
   {
     value: 'soft',
     labelKey: 'timeline.keyframeEditor.bezierPreset.soft',

@@ -106,7 +106,7 @@ export interface PreviewDecoderMetricsSample {
   exactFallbackReplacements: number
 }
 
-export interface PreviewScrubPerformanceState {
+interface PreviewScrubPerformanceState {
   version: 1
   requests: PreviewScrubRequestSample[]
   renders: PreviewCompositionRenderSample[]

@@ -22,7 +22,6 @@ import wasmUrl from '@lottiefiles/dotlottie-web/dotlottie-player.wasm?url'
 import { createLogger } from '@/shared/logging/logger'
 
 // Metadata parsing is WASM-free; re-exported here for convenience.
-export { parseLottieMetadata, parseLottieFileBytes, type LottieMetadata } from './lottie-metadata'
 
 const log = createLogger('lottie-provider')
 

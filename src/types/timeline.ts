@@ -28,7 +28,7 @@ export type TimelineTranscriptCaptionStyle = TextStyleFields & {
   transform?: TransformProperties
 }
 
-export interface TimelineTranscriptCaptions {
+interface TimelineTranscriptCaptions {
   type: 'transcript'
   mediaId: string
   enabled: boolean
