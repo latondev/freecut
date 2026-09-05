@@ -7,8 +7,7 @@ import { DRAG_THRESHOLD_PIXELS } from '../constants'
 import { useTimelineStore } from '../stores/timeline-store'
 import { useTransitionsStore } from '../stores/transitions-store'
 import { useSelectionStore } from '@/shared/state/selection'
-import { pixelsToTimeNow } from '../utils/zoom-conversions'
-import { useSnapCalculator } from './use-snap-calculator'
+import { useDragInteractionPreamble } from './use-drag-interaction-preamble'
 import type { SnapTarget } from '../types/drag'
 import { useSlipEditPreviewStore } from '../stores/slip-edit-preview-store'
 import { useSlideEditPreviewStore } from '../stores/slide-edit-preview-store'
@@ -199,14 +198,14 @@ export function useTimelineSlipSlide(
   timelineDuration: number,
   trackLocked: boolean = false,
 ) {
-  const pixelsToTime = pixelsToTimeNow
-  const fps = useTimelineStore((s) => s.fps)
-  const setDragState = useSelectionStore((s) => s.setDragState)
-
-  const { getMagneticSnapTargets, getSnapThresholdFrames, isSnapEnabled } = useSnapCalculator(
-    timelineDuration,
-    item.id,
-  )
+  const {
+    pixelsToTime,
+    fps,
+    setDragState,
+    getMagneticSnapTargets,
+    getSnapThresholdFrames,
+    isSnapEnabled,
+  } = useDragInteractionPreamble(item, timelineDuration)
 
   const [state, setState] = useState<SlipSlideState>({
     isActive: false,

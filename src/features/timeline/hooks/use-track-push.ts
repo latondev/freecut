@@ -1,12 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import type { TimelineItem } from '@/types/timeline'
 import { commitPreviewFrameToCurrentFrame } from '@/shared/state/playback'
-import { useSelectionStore } from '@/shared/state/selection'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useDragInteractionPreamble } from './use-drag-interaction-preamble'
 import { useItemsStore } from '../stores/items-store'
 import { useTrackPushPreviewStore } from '../stores/track-push-preview-store'
-import { pixelsToTimeNow } from '@/features/timeline/utils/zoom-conversions'
-import { useSnapCalculator } from './use-snap-calculator'
+
 import { trackPushItems } from '../stores/actions/item-actions'
 import type { SnapTarget } from '../types/drag'
 import { setActiveSnapTargetIfChanged } from '../utils/snap-target-state'
@@ -30,14 +28,15 @@ export function useTrackPush(
   timelineDuration: number,
   trackLocked: boolean = false,
 ) {
-  const pixelsToTime = pixelsToTimeNow
-  const fps = useTimelineStore((s) => s.fps)
-  const setDragState = useSelectionStore((s) => s.setDragState)
-  const setActiveSnapTarget = useSelectionStore((s) => s.setActiveSnapTarget)
-  const { getMagneticSnapTargets, getSnapThresholdFrames, isSnapEnabled } = useSnapCalculator(
-    timelineDuration,
-    item.id,
-  )
+  const {
+    pixelsToTime,
+    fps,
+    setDragState,
+    setActiveSnapTarget,
+    getMagneticSnapTargets,
+    getSnapThresholdFrames,
+    isSnapEnabled,
+  } = useDragInteractionPreamble(item, timelineDuration)
 
   const [state, setState] = useState<TrackPushState>({
     isActive: false,
