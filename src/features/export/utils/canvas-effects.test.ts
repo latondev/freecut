@@ -12,6 +12,7 @@ vi.mock('./canvas-masks', () => ({
 
 import {
   getAdjustmentLayerEffects,
+  getGpuEffectInstances,
   renderEffectsFromMaskedSource,
   type AdjustmentLayerWithTrackOrder,
 } from './canvas-effects'
@@ -167,5 +168,16 @@ describe('renderEffectsFromMaskedSource', () => {
       source: effectCanvas,
       poolCanvases: [maskedSourceCanvas, effectCanvas],
     })
+  })
+})
+
+
+describe('GPU effect timeline context', () => {
+  it('carries frame-rate-derived time without serializing it into authored params', () => {
+    const authored = createGpuEffect('timed', 0.5)
+    const instances = getGpuEffectInstances([authored], 123 / 24)
+    expect(instances[0]?.timelineTimeSeconds).toBe(5.125)
+    expect(instances[0]?.params).not.toHaveProperty('timelineTimeSeconds')
+    expect(getGpuEffectInstances([authored])[0]?.timelineTimeSeconds).toBe(0)
   })
 })

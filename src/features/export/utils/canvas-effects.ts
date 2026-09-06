@@ -72,6 +72,7 @@ export async function renderEffectsFromMaskedSource(
  * Canvas settings for effect rendering
  */
 interface EffectCanvasSettings {
+  fps: number
   width: number
   height: number
 }
@@ -93,12 +94,13 @@ export interface EffectSourceMask {
 /**
  * Get GPU effects from an effects array and convert to GpuEffectInstance format.
  */
-export function getGpuEffectInstances(effects: ItemEffect[]): GpuEffectInstance[] {
+export function getGpuEffectInstances(effects: ItemEffect[], timelineTimeSeconds = 0): GpuEffectInstance[] {
   return effects
     .filter((e) => e.enabled && e.effect.type === 'gpu-effect')
     .map((e) => {
       const gpuEffect = e.effect as GpuEffect
       return {
+        timelineTimeSeconds,
         id: e.id,
         type: gpuEffect.gpuEffectType,
         name: gpuEffect.gpuEffectType,
@@ -237,7 +239,7 @@ function applyAllEffects(
   ctx: OffscreenCanvasRenderingContext2D,
   sourceCanvas: OffscreenCanvas,
   effects: ItemEffect[],
-  _frame: number,
+  frame: number,
   canvas: EffectCanvasSettings,
   gpuPipeline?: EffectsPipeline | null,
 ): OffscreenCanvas | null {
@@ -251,7 +253,7 @@ function applyAllEffects(
   ctx.drawImage(sourceCanvas, 0, 0)
 
   // Apply GPU shader effects (zero-copy canvas→GPU→canvas path)
-  const gpuInstances = getGpuEffectInstances(effects)
+  const gpuInstances = getGpuEffectInstances(effects, frame / canvas.fps)
   if (gpuInstances.length > 0 && gpuPipeline) {
     const deferredCanvas = applyGpuEffects(ctx, canvas, gpuInstances, gpuPipeline)
     if (deferredCanvas) return deferredCanvas

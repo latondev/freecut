@@ -366,7 +366,7 @@ async function renderTransitionParticipantToTexture(
   return (
     rctx.gpuPipeline?.applyEffectsToTexture(
       canvas,
-      getGpuEffectInstances(participant.effects),
+      getGpuEffectInstances(participant.effects, frame / rctx.fps),
       outputTexture,
     ) ?? false
   )

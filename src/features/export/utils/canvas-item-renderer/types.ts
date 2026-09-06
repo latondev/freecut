@@ -359,6 +359,7 @@ export type ResolvedGpuMediaParticipantSource =
  * Internal: prepared participant state for direct-GPU rendering.
  */
 export type PreparedGpuMediaParticipant = {
+  timelineTimeSeconds?: number
   participant: TransitionParticipantRenderState
   media: ResolvedGpuMediaParticipantSource
   sourceRect: GpuMediaRect

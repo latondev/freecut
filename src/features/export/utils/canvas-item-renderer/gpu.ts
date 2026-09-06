@@ -221,7 +221,7 @@ export async function renderGpuMediaParticipantToTexture(
     if (!rctx.gpuPipeline) return false
     return rctx.gpuPipeline.applyTextureEffectsToTexture(
       mediaOutputTexture,
-      getGpuEffectInstances(participant.effects),
+      getGpuEffectInstances(participant.effects, prepared.timelineTimeSeconds ?? 0),
       outputTexture,
       rctx.canvasSettings.width,
       rctx.canvasSettings.height,
@@ -469,7 +469,7 @@ export function renderPreviewVideoGpuEffectsToCanvas(
   try {
     const canvas = rctx.gpuPipeline.applyEffectsToVideo(
       video,
-      getGpuEffectInstances(enabledEffects),
+      getGpuEffectInstances(enabledEffects, frame / rctx.fps),
       drawLayout.mediaRect,
       rctx.canvasSettings.width,
       rctx.canvasSettings.height,
@@ -527,7 +527,8 @@ export async function prepareGpuMediaParticipant(
     }
     if (transformRect.width <= 0 || transformRect.height <= 0) return null
     return {
-      participant,
+      timelineTimeSeconds: frame / rctx.fps,
+    participant,
       media,
       sourceRect: { x: 0, y: 0, width: media.sourceWidth, height: media.sourceHeight },
       destRect: transformRect,
@@ -558,7 +559,8 @@ export async function prepareGpuMediaParticipant(
       return null
     }
     return {
-      participant,
+      timelineTimeSeconds: frame / rctx.fps,
+    participant,
       media,
       sourceRect: { x: 0, y: 0, width: media.sourceWidth, height: media.sourceHeight },
       destRect: transformRect,
@@ -592,6 +594,7 @@ export async function prepareGpuMediaParticipant(
   }
 
   return {
+    timelineTimeSeconds: frame / rctx.fps,
     participant,
     media,
     sourceRect: {
@@ -1180,7 +1183,7 @@ async function renderPreparedGpuSubCompLayerToTexture(
     if (enabledEffects.length > 0) {
       const effectsApplied = gpuPipeline.applyTextureEffectsToTexture(
         baseTexture,
-        getGpuEffectInstances(enabledEffects),
+        getGpuEffectInstances(enabledEffects, prepared.timelineTimeSeconds ?? 0),
         effectedTexture,
         rctx.canvasSettings.width,
         rctx.canvasSettings.height,
