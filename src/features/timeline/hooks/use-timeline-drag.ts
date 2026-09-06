@@ -439,6 +439,569 @@ function resolveDraggedItemStates(
  * @param timelineDuration - Total timeline duration in seconds
  * @param trackLocked - Whether the track is locked (prevents dragging)
  */
+
+interface PreviewMovedItem {
+  id: string
+  initialFrame: number
+  initialTrackId: string
+  newFrom: number
+  newTrackId: string
+  durationInFrames: number
+}
+
+interface DragPreviewOffsets {
+  previewOffsets: Record<string, { x: number; y: number }> | null
+  anchorPreviewOffset: { x: number; y: number }
+  linkedPreviewMovedItems: Array<{ id: string; from: number }>
+}
+
+function syncAltDragToggle(
+  e: MouseEvent,
+  isAltDragRef: { current: boolean },
+  dragState: DragState,
+  getMagneticSnapTargets: (excludeIds: string[] | null) => SnapTarget[],
+  magneticSnapTargetsRef: { current: SnapTarget[] },
+): boolean {
+  // Dynamic Alt key toggle - update state and cursor
+  const altKeyChanged = isAltDragRef.current !== e.altKey
+  isAltDragRef.current = e.altKey
+  if (!altKeyChanged) return false
+  const draggedIds = dragState.draggedItems.map((dragged) => dragged.id)
+  magneticSnapTargetsRef.current = getMagneticSnapTargets(e.altKey ? null : draggedIds)
+  if (e.altKey) {
+    startLargeAltDragCanvas(draggedIds)
+  } else {
+    clearLargeAltDragCanvas()
+  }
+  return true
+}
+
+function clampDragDeltaToZero(
+  draggedItems: DragState['draggedItems'],
+  deltaFrames: number,
+  deltaX: number,
+): { clampedDeltaFrames: number; clampedDeltaX: number } {
+  // Find the minimum starting frame among all dragged items
+  let minInitialFrame = Infinity
+  for (const draggedItem of draggedItems) {
+    if (draggedItem.initialFrame < minInitialFrame) {
+      minInitialFrame = draggedItem.initialFrame
+    }
+  }
+
+  // Calculate the maximum allowed negative delta (in frames)
+  // to prevent the earliest item from going below frame 0
+  const maxNegativeDeltaFrames = -minInitialFrame
+  const clampedDeltaFrames = Math.max(maxNegativeDeltaFrames, deltaFrames)
+
+  // Convert back to pixels for the clamped X offset
+  // Use the ratio of clamped to original to maintain precision
+  const clampedDeltaX = deltaFrames !== 0 ? deltaX * (clampedDeltaFrames / deltaFrames) : deltaX
+  return { clampedDeltaFrames, clampedDeltaX }
+}
+
+function snapshotDragItemIndexes(
+  currentItems: TimelineItem[],
+  tracks: TimelineTrack[],
+): {
+  currentItemById: Map<string, TimelineItem>
+  currentItemsByTrackId: Map<string, TimelineItem[]>
+  trackIndexById: Map<string, number>
+} {
+  const currentItemById = new Map(currentItems.map((currentItem) => [currentItem.id, currentItem]))
+  const currentItemsByTrackId = new Map<string, TimelineItem[]>()
+  for (const currentItem of currentItems) {
+    const trackItems = currentItemsByTrackId.get(currentItem.trackId)
+    if (trackItems) {
+      trackItems.push(currentItem)
+    } else {
+      currentItemsByTrackId.set(currentItem.trackId, [currentItem])
+    }
+  }
+  const trackIndexById = new Map(tracks.map((currentTrack, index) => [currentTrack.id, index]))
+  return { currentItemById, currentItemsByTrackId, trackIndexById }
+}
+
+function buildGroupSnapWindow(options: {
+  draggedItems: DragState['draggedItems']
+  currentItemById: Map<string, TimelineItem>
+  deltaFrames: number
+  startFrame: number
+  itemId: string
+}): { snapStartFrame: number; snapDuration: number; rawGroupStartFrame: number } {
+  const { draggedItems, currentItemById, deltaFrames, startFrame, itemId } = options
+  if (draggedItems.length <= 1) {
+    // Single item drag - use anchor item
+    const draggedItem = currentItemById.get(itemId)
+    return {
+      snapStartFrame: Math.max(0, startFrame + deltaFrames),
+      snapDuration: draggedItem?.durationInFrames || 0,
+      rawGroupStartFrame: 0,
+    }
+  }
+  // Calculate group bounds
+  let groupStartFrame = Infinity
+  let groupEndFrame = -Infinity
+
+  for (const draggedItem of draggedItems) {
+    const sourceItem = currentItemById.get(draggedItem.id)
+    if (!sourceItem) continue
+
+    const proposedStart = draggedItem.initialFrame + deltaFrames
+    const proposedEnd = proposedStart + sourceItem.durationInFrames
+
+    if (proposedStart < groupStartFrame) groupStartFrame = proposedStart
+    if (proposedEnd > groupEndFrame) groupEndFrame = proposedEnd
+  }
+
+  return {
+    snapStartFrame: Math.max(0, groupStartFrame),
+    snapDuration: groupEndFrame - groupStartFrame,
+    rawGroupStartFrame: groupStartFrame,
+  }
+}
+
+function resolvePreviewItemTrackId(options: {
+  previewTrackTargets: { trackAssignments: Map<string, string> } | null
+  draggedItemId: string
+  draggedItemInitialTrackId: string
+  startTrackId: string
+  previewAnchorTrackId: string
+  trackIndexById: Map<string, number>
+  tracks: TimelineTrack[]
+}): string {
+  const {
+    previewTrackTargets,
+    draggedItemId,
+    draggedItemInitialTrackId,
+    startTrackId,
+    previewAnchorTrackId,
+    trackIndexById,
+    tracks,
+  } = options
+  const assigned = previewTrackTargets?.trackAssignments.get(draggedItemId)
+  if (assigned) return assigned
+  const anchorTrackIndex = trackIndexById.get(startTrackId) ?? -1
+  const itemTrackIndex = trackIndexById.get(draggedItemInitialTrackId) ?? -1
+  const newAnchorTrackIndex = trackIndexById.get(previewAnchorTrackId) ?? -1
+  const trackOffset = itemTrackIndex - anchorTrackIndex
+  const newItemTrackIndex = Math.max(
+    0,
+    Math.min(tracks.length - 1, newAnchorTrackIndex + trackOffset),
+  )
+  return tracks[newItemTrackIndex]?.id || draggedItemInitialTrackId
+}
+
+function buildPreviewMovedItems(options: {
+  draggedItems: DragState['draggedItems']
+  currentItemById: Map<string, TimelineItem>
+  deltaFrames: number
+  previewSnapDelta: number
+  groupClampOffset: number
+  previewTrackTargets: { trackAssignments: Map<string, string> } | null
+  startTrackId: string
+  previewAnchorTrackId: string
+  trackIndexById: Map<string, number>
+  tracks: TimelineTrack[]
+}): PreviewMovedItem[] {
+  const {
+    draggedItems,
+    currentItemById,
+    deltaFrames,
+    previewSnapDelta,
+    groupClampOffset,
+    previewTrackTargets,
+    startTrackId,
+    previewAnchorTrackId,
+    trackIndexById,
+    tracks,
+  } = options
+  return draggedItems
+    .map((draggedItem) => {
+      const sourceItem = currentItemById.get(draggedItem.id)
+      if (!sourceItem) return null
+
+      const itemNewTrackId = resolvePreviewItemTrackId({
+        previewTrackTargets,
+        draggedItemId: draggedItem.id,
+        draggedItemInitialTrackId: draggedItem.initialTrackId,
+        startTrackId,
+        previewAnchorTrackId,
+        trackIndexById,
+        tracks,
+      })
+
+      return {
+        id: draggedItem.id,
+        initialFrame: draggedItem.initialFrame,
+        initialTrackId: draggedItem.initialTrackId,
+        newFrom: draggedItem.initialFrame + deltaFrames + previewSnapDelta + groupClampOffset,
+        newTrackId: itemNewTrackId,
+        durationInFrames: sourceItem.durationInFrames,
+      }
+    })
+    .filter((previewItem) => previewItem !== null) as PreviewMovedItem[]
+}
+
+function clampPreviewGroupToWalls(options: {
+  previewMovedItems: PreviewMovedItem[]
+  currentItems: TimelineItem[]
+  currentItemsByTrackId: Map<string, TimelineItem[]>
+  isAltDrag: boolean
+}): void {
+  const { previewMovedItems, currentItems, currentItemsByTrackId, isAltDrag } = options
+  if (isAltDrag) return
+  // Wall-clamp the group: find tightest constraint across all items,
+  // then shift the entire group by the same delta so they stay together.
+  const groupExcludeIds = new Set(previewMovedItems.map((m) => m.id))
+  let wallClampDelta = 0
+  for (const previewItem of previewMovedItems) {
+    const clamped = clampToTrackWalls(
+      previewItem.newFrom,
+      previewItem.durationInFrames,
+      previewItem.newTrackId,
+      groupExcludeIds,
+      currentItems,
+      currentItemsByTrackId,
+    )
+    const itemDelta = clamped - previewItem.newFrom
+    // Pick the tightest (smallest magnitude) clamp in each direction
+    if (itemDelta < 0 && (wallClampDelta >= 0 || itemDelta > wallClampDelta)) {
+      wallClampDelta = itemDelta
+    } else if (itemDelta > 0 && (wallClampDelta <= 0 || itemDelta < wallClampDelta)) {
+      wallClampDelta = itemDelta
+    }
+  }
+  if (wallClampDelta !== 0) {
+    for (const previewItem of previewMovedItems) {
+      previewItem.newFrom += wallClampDelta
+    }
+  }
+}
+
+function buildPreviewOffsets(
+  previewMovedItems: PreviewMovedItem[],
+  previewVisualTopByTrackId: Map<string, number>,
+  frameToPixels: (frames: number) => number,
+  deltaY: number,
+): Record<string, { x: number; y: number }> {
+  const previewOffsets: Record<string, { x: number; y: number }> = {}
+  for (const previewItem of previewMovedItems) {
+    const currentTop = previewVisualTopByTrackId.get(previewItem.initialTrackId)
+    const targetTop = previewVisualTopByTrackId.get(previewItem.newTrackId)
+    previewOffsets[previewItem.id] = {
+      x: frameToPixels(previewItem.newFrom - previewItem.initialFrame),
+      y: currentTop !== undefined && targetTop !== undefined ? targetTop - currentTop : deltaY,
+    }
+  }
+  return previewOffsets
+}
+
+function buildMultiItemDragPreview(options: {
+  draggedItems: DragState['draggedItems']
+  currentItemById: Map<string, TimelineItem>
+  currentItems: TimelineItem[]
+  currentItemsByTrackId: Map<string, TimelineItem[]>
+  deltaFrames: number
+  deltaY: number
+  snapDuration: number
+  snapStartFrame: number
+  rawGroupStartFrame: number
+  snapResult: { snappedFrame: number }
+  previewTrackTargets: { trackAssignments: Map<string, string> } | null
+  startTrackId: string
+  previewAnchorTrackId: string
+  trackIndexById: Map<string, number>
+  tracks: TimelineTrack[]
+  previewVisualTopByTrackId: Map<string, number>
+  frameToPixels: (frames: number) => number
+  isAltDrag: boolean
+  anchorItemId: string
+}): DragPreviewOffsets {
+  const {
+    draggedItems,
+    currentItemById,
+    currentItems,
+    currentItemsByTrackId,
+    deltaFrames,
+    deltaY,
+    snapDuration,
+    snapStartFrame,
+    rawGroupStartFrame,
+    snapResult,
+    previewTrackTargets,
+    startTrackId,
+    previewAnchorTrackId,
+    trackIndexById,
+    tracks,
+    previewVisualTopByTrackId,
+    frameToPixels,
+    isAltDrag,
+    anchorItemId,
+  } = options
+  const previewSnapDelta = snapDuration > 0 ? snapResult.snappedFrame - snapStartFrame : 0
+  let minProposedFrame = Infinity
+
+  for (const draggedItem of draggedItems) {
+    const proposedStart = draggedItem.initialFrame + deltaFrames + previewSnapDelta
+    if (proposedStart < minProposedFrame) {
+      minProposedFrame = proposedStart
+    }
+  }
+
+  const groupClampOffset = minProposedFrame < 0 ? -minProposedFrame : 0
+  const previewMovedItems = buildPreviewMovedItems({
+    draggedItems,
+    currentItemById,
+    deltaFrames,
+    previewSnapDelta,
+    groupClampOffset,
+    previewTrackTargets,
+    startTrackId,
+    previewAnchorTrackId,
+    trackIndexById,
+    tracks,
+  })
+  clampPreviewGroupToWalls({ previewMovedItems, currentItems, currentItemsByTrackId, isAltDrag })
+
+  const previewOffsets = buildPreviewOffsets(
+    previewMovedItems,
+    previewVisualTopByTrackId,
+    frameToPixels,
+    deltaY,
+  )
+  return {
+    previewOffsets,
+    anchorPreviewOffset: previewOffsets[anchorItemId] ?? {
+      x: frameToPixels(
+        Math.max(0, rawGroupStartFrame + previewSnapDelta) - rawGroupStartFrame + deltaFrames,
+      ),
+      y: deltaY,
+    },
+    linkedPreviewMovedItems: previewMovedItems.map((previewItem) => ({
+      id: previewItem.id,
+      from: previewItem.newFrom,
+    })),
+  }
+}
+
+function buildSingleItemDragPreview(options: {
+  snapResult: { snappedFrame: number }
+  previewTrackTargets: { trackAssignments: Map<string, string> } | null
+  previewAnchorTrackId: string
+  draggedItems: DragState['draggedItems']
+  itemDurationInFrames: number
+  currentItems: TimelineItem[]
+  currentItemsByTrackId: Map<string, TimelineItem[]>
+  isAltDrag: boolean
+  startTrackId: string
+  startFrame: number
+  itemId: string
+  previewVisualTopByTrackId: Map<string, number>
+  frameToPixels: (frames: number) => number
+  deltaY: number
+}): DragPreviewOffsets {
+  const {
+    snapResult,
+    previewTrackTargets,
+    previewAnchorTrackId,
+    draggedItems,
+    itemDurationInFrames,
+    currentItems,
+    currentItemsByTrackId,
+    isAltDrag,
+    startTrackId,
+    startFrame,
+    itemId,
+    previewVisualTopByTrackId,
+    frameToPixels,
+    deltaY,
+  } = options
+  const previewProposedFrame = Math.max(0, snapResult.snappedFrame)
+  const previewTargetTrackId =
+    previewTrackTargets?.trackAssignments.get(itemId) ?? previewAnchorTrackId
+  // Clamp to track walls so the preview can't visually overlap other clips
+  const dragExcludeIds = new Set(draggedItems.map((d) => d.id))
+  const previewFinalFrame = isAltDrag
+    ? previewProposedFrame
+    : clampToTrackWalls(
+        previewProposedFrame,
+        itemDurationInFrames,
+        previewTargetTrackId,
+        dragExcludeIds,
+        currentItems,
+        currentItemsByTrackId,
+      )
+  const currentTop = previewVisualTopByTrackId.get(startTrackId)
+  const targetTop = previewVisualTopByTrackId.get(previewTargetTrackId)
+  return {
+    previewOffsets: null,
+    anchorPreviewOffset: {
+      x: frameToPixels((previewFinalFrame ?? startFrame) - startFrame),
+      y: currentTop !== undefined && targetTop !== undefined ? targetTop - currentTop : deltaY,
+    },
+    linkedPreviewMovedItems:
+      previewFinalFrame !== null ? [{ id: itemId, from: previewFinalFrame }] : [],
+  }
+}
+
+type DragDropTarget = {
+  trackId: string
+  zone: LinkedDragDropZone | null
+  createNew?: boolean
+}
+
+interface ResolvedDragDropTargets {
+  dropTarget: DragDropTarget
+  previewTrackTargets: {
+    tracks: TimelineTrack[]
+    trackAssignments: Map<string, string>
+  } | null
+  hoveredCompatibleTrackId: string | null
+  hasInvalidExplicitDropTarget: boolean
+  linkedDropTarget: {
+    trackId: string
+    zone: LinkedDragDropZone
+    createNew?: boolean
+  } | null
+  previewAnchorTrackId: string
+}
+
+function resolveDragDropTargets(options: {
+  clientY: number
+  startTrackId: string
+  itemType: TimelineItem['type']
+  itemId: string
+  draggedItems: DragState['draggedItems']
+  tracks: TimelineTrack[]
+  currentItems: TimelineItem[]
+  getTrackDropTarget: (mouseY: number, startTrackId: string) => DragDropTarget
+  getCompatibleTrackIdFromMouseY: (
+    mouseY: number,
+    startTrackId: string,
+    itemType: TimelineItem['type'],
+  ) => string | null
+}): ResolvedDragDropTargets {
+  const {
+    clientY,
+    startTrackId,
+    itemType,
+    itemId,
+    draggedItems,
+    tracks,
+    currentItems,
+    getTrackDropTarget,
+    getCompatibleTrackIdFromMouseY,
+  } = options
+  const dropTarget = getTrackDropTarget(clientY, startTrackId)
+  const previewTrackTargets = resolveDraggedTrackTargets({
+    items: currentItems,
+    draggedItems,
+    tracks,
+    dropTarget,
+    preferredTrackHeight:
+      tracks.find((track) => track.id === dropTarget.trackId)?.height ??
+      tracks.find((track) => track.id === startTrackId)?.height ??
+      64,
+  })
+  const hoveredCompatibleTrackId = getCompatibleTrackIdFromMouseY(clientY, startTrackId, itemType)
+  const hasInvalidExplicitDropTarget =
+    dropTarget.zone !== null && !previewTrackTargets && hoveredCompatibleTrackId === null
+  const linkedDropTarget =
+    dropTarget.zone && !hasInvalidExplicitDropTarget
+      ? { trackId: dropTarget.trackId, zone: dropTarget.zone, createNew: dropTarget.createNew }
+      : null
+  const previewAnchorTrackId =
+    previewTrackTargets?.trackAssignments.get(itemId) ?? hoveredCompatibleTrackId ?? startTrackId
+  return {
+    dropTarget,
+    previewTrackTargets,
+    hoveredCompatibleTrackId,
+    hasInvalidExplicitDropTarget,
+    linkedDropTarget,
+    previewAnchorTrackId,
+  }
+}
+
+function resolveDragCursor(hasInvalidExplicitDropTarget: boolean, altKey: boolean): DragCursorMode {
+  if (hasInvalidExplicitDropTarget) return 'not-allowed'
+  return altKey ? 'copy' : 'grabbing'
+}
+
+function syncDragPreviewStores(options: {
+  prevSnapTargetRef: { current: { frame: number; type: string } | null }
+  snapTarget: SnapTarget | null
+  prevLinkedDropTarget: ReturnType<typeof useSelectionStore.getState>['activeLinkedDropTarget']
+  linkedDropTarget: ResolvedDragDropTargets['linkedDropTarget']
+  setActiveSnapTarget: ReturnType<typeof useSelectionStore.getState>['setActiveSnapTarget']
+  setActiveLinkedDropTarget: ReturnType<
+    typeof useSelectionStore.getState
+  >['setActiveLinkedDropTarget']
+  setDragState: ReturnType<typeof useSelectionStore.getState>['setDragState']
+  altKeyChanged: boolean
+  dragStateRef: { current: DragState | null }
+  clampedDeltaX: number
+  deltaY: number
+  altKey: boolean
+}): void {
+  const {
+    prevSnapTargetRef,
+    snapTarget,
+    prevLinkedDropTarget,
+    linkedDropTarget,
+    setActiveSnapTarget,
+    setActiveLinkedDropTarget,
+    setDragState,
+    altKeyChanged,
+    dragStateRef,
+    clampedDeltaX,
+    deltaY,
+    altKey,
+  } = options
+  const linkedDropChanged = haveLinkedDropTargetsChanged(prevLinkedDropTarget, linkedDropTarget)
+  const snapChanged = haveSnapTargetsChanged(prevSnapTargetRef.current, snapTarget)
+  if (!snapChanged && !altKeyChanged && !linkedDropChanged) return
+  prevSnapTargetRef.current = snapTarget ? { frame: snapTarget.frame, type: snapTarget.type } : null
+  setActiveSnapTarget(snapTarget)
+  setActiveLinkedDropTarget(linkedDropTarget)
+  if (!altKeyChanged) return
+  const draggedIds = dragStateRef.current?.draggedItems.map((dragged) => dragged.id) || []
+  setDragState({
+    isDragging: true,
+    draggedItemIds: draggedIds,
+    offset: { x: clampedDeltaX, y: deltaY },
+    isAltDrag: altKey,
+  })
+}
+
+function haveSnapTargetsChanged(
+  prevSnap: { frame: number; type: string } | null,
+  newSnap: { frame: number; type: string } | null,
+): boolean {
+  return (
+    (prevSnap === null && newSnap !== null) ||
+    (prevSnap !== null && newSnap === null) ||
+    (prevSnap !== null &&
+      newSnap !== null &&
+      (prevSnap.frame !== newSnap.frame || prevSnap.type !== newSnap.type))
+  )
+}
+
+function haveLinkedDropTargetsChanged(
+  prev: ReturnType<typeof useSelectionStore.getState>['activeLinkedDropTarget'],
+  next: { trackId: string; zone: LinkedDragDropZone | null; createNew?: boolean } | null,
+): boolean {
+  return (
+    (prev === null && next !== null) ||
+    (prev !== null && next === null) ||
+    (prev !== null &&
+      next !== null &&
+      (prev.trackId !== next.trackId ||
+        prev.zone !== next.zone ||
+        !!prev.createNew !== !!next.createNew))
+  )
+}
+
 export function useTimelineDrag(
   item: TimelineItem,
   timelineDuration: number,
@@ -887,121 +1450,54 @@ export function useTimelineDrag(
       const deltaY = e.clientY - dragStateRef.current.startMouseY
 
       // Dynamic Alt key toggle - update state and cursor
-      const altKeyChanged = isAltDragRef.current !== e.altKey
-      isAltDragRef.current = e.altKey
-      if (altKeyChanged) {
-        const draggedIds = dragStateRef.current.draggedItems.map((dragged) => dragged.id)
-        magneticSnapTargetsRef.current = getMagneticSnapTargets(e.altKey ? null : draggedIds)
-        if (e.altKey) {
-          startLargeAltDragCanvas(draggedIds)
-        } else {
-          clearLargeAltDragCanvas()
-        }
-      }
+      const altKeyChanged = syncAltDragToggle(
+        e,
+        isAltDragRef,
+        dragStateRef.current,
+        getMagneticSnapTargets,
+        magneticSnapTargetsRef,
+      )
 
       // Calculate clamped delta to prevent visual preview from going below frame 0
       const deltaFrames = pixelsToFramePreciseRef.current(deltaX)
       const draggedItems = dragStateRef.current.draggedItems
-
-      // Find the minimum starting frame among all dragged items
-      let minInitialFrame = Infinity
-      for (const draggedItem of draggedItems) {
-        if (draggedItem.initialFrame < minInitialFrame) {
-          minInitialFrame = draggedItem.initialFrame
-        }
-      }
-
-      // Calculate the maximum allowed negative deltaX (in pixels)
-      // to prevent the earliest item from going below frame 0
-      const maxNegativeDeltaFrames = -minInitialFrame
-      const clampedDeltaFrames = Math.max(maxNegativeDeltaFrames, deltaFrames)
-
-      // Convert back to pixels for the clamped X offset
-      // Use the ratio of clamped to original to maintain precision
-      const clampedDeltaX = deltaFrames !== 0 ? deltaX * (clampedDeltaFrames / deltaFrames) : deltaX
+      const { clampedDeltaX } = clampDragDeltaToZero(draggedItems, deltaFrames, deltaX)
 
       const currentItems = getItems()
-      const currentItemById = new Map(
-        currentItems.map((currentItem) => [currentItem.id, currentItem]),
+      const { currentItemById, currentItemsByTrackId, trackIndexById } = snapshotDragItemIndexes(
+        currentItems,
+        tracksRef.current,
       )
-      const currentItemsByTrackId = new Map<string, TimelineItem[]>()
-      for (const currentItem of currentItems) {
-        const trackItems = currentItemsByTrackId.get(currentItem.trackId)
-        if (trackItems) {
-          trackItems.push(currentItem)
-        } else {
-          currentItemsByTrackId.set(currentItem.trackId, [currentItem])
-        }
-      }
-      const trackIndexById = new Map(
-        tracksRef.current.map((currentTrack, index) => [currentTrack.id, index]),
-      )
-      const dropTarget = getTrackDropTarget(e.clientY, dragStateRef.current.startTrackId)
-      const previewTrackTargets = resolveDraggedTrackTargets({
-        items: currentItems,
+      const {
+        previewTrackTargets,
+        hasInvalidExplicitDropTarget,
+        linkedDropTarget,
+        previewAnchorTrackId,
+      } = resolveDragDropTargets({
+        clientY: e.clientY,
+        startTrackId: dragStateRef.current.startTrackId,
+        itemType: item.type,
+        itemId: dragStateRef.current.itemId,
         draggedItems: dragStateRef.current.draggedItems,
         tracks: tracksRef.current,
-        dropTarget,
-        preferredTrackHeight:
-          tracksRef.current.find((track) => track.id === dropTarget.trackId)?.height ??
-          tracksRef.current.find((track) => track.id === dragStateRef.current!.startTrackId)
-            ?.height ??
-          64,
+        currentItems,
+        getTrackDropTarget,
+        getCompatibleTrackIdFromMouseY,
       })
-      const hoveredCompatibleTrackId = getCompatibleTrackIdFromMouseY(
-        e.clientY,
-        dragStateRef.current.startTrackId,
-        item.type,
-      )
-      const hasInvalidExplicitDropTarget =
-        dropTarget.zone !== null && !previewTrackTargets && hoveredCompatibleTrackId === null
-      const linkedDropTarget =
-        dropTarget.zone && !hasInvalidExplicitDropTarget
-          ? { trackId: dropTarget.trackId, zone: dropTarget.zone, createNew: dropTarget.createNew }
-          : null
-      const previewAnchorTrackId =
-        previewTrackTargets?.trackAssignments.get(dragStateRef.current.itemId) ??
-        hoveredCompatibleTrackId ??
-        dragStateRef.current.startTrackId
       dragStateRef.current.currentMouseX = e.clientX
       dragStateRef.current.currentMouseY = e.clientY
 
-      setGlobalDragCursor(
-        hasInvalidExplicitDropTarget ? 'not-allowed' : e.altKey ? 'copy' : 'grabbing',
-      )
+      setGlobalDragCursor(resolveDragCursor(hasInvalidExplicitDropTarget, e.altKey))
 
       // For multi-item drag, calculate group bounding box for snap visualization
       // Note: deltaFrames and draggedItems already calculated above for clamping
-      let snapStartFrame: number
-      let snapDuration: number
-
-      let rawGroupStartFrame = 0
-
-      if (draggedItems.length > 1) {
-        // Calculate group bounds
-        let groupStartFrame = Infinity
-        let groupEndFrame = -Infinity
-
-        for (const draggedItem of draggedItems) {
-          const sourceItem = currentItemById.get(draggedItem.id)
-          if (!sourceItem) continue
-
-          const proposedStart = draggedItem.initialFrame + deltaFrames
-          const proposedEnd = proposedStart + sourceItem.durationInFrames
-
-          if (proposedStart < groupStartFrame) groupStartFrame = proposedStart
-          if (proposedEnd > groupEndFrame) groupEndFrame = proposedEnd
-        }
-
-        rawGroupStartFrame = groupStartFrame
-        snapStartFrame = Math.max(0, groupStartFrame)
-        snapDuration = groupEndFrame - groupStartFrame
-      } else {
-        // Single item drag - use anchor item
-        snapStartFrame = Math.max(0, dragStateRef.current.startFrame + deltaFrames)
-        const draggedItem = currentItemById.get(dragStateRef.current.itemId)
-        snapDuration = draggedItem?.durationInFrames || 0
-      }
+      const { snapStartFrame, snapDuration, rawGroupStartFrame } = buildGroupSnapWindow({
+        draggedItems,
+        currentItemById,
+        deltaFrames,
+        startFrame: dragStateRef.current.startFrame,
+        itemId: dragStateRef.current.itemId,
+      })
 
       const snapResult = calculateMagneticSnap(snapStartFrame, snapDuration)
       const previewVisualTopByTrackId = buildTrackVisualTopMap(
@@ -1018,133 +1514,50 @@ export function useTimelineDrag(
       let linkedPreviewMovedItems: Array<{ id: string; from: number }> = []
 
       if (draggedItems.length > 1) {
-        const previewSnapDelta = snapDuration > 0 ? snapResult.snappedFrame - snapStartFrame : 0
-        let minProposedFrame = Infinity
-
-        for (const draggedItem of dragStateRef.current.draggedItems) {
-          const proposedStart = draggedItem.initialFrame + deltaFrames + previewSnapDelta
-          if (proposedStart < minProposedFrame) {
-            minProposedFrame = proposedStart
-          }
-        }
-
-        const groupClampOffset = minProposedFrame < 0 ? -minProposedFrame : 0
-        const previewMovedItems = dragStateRef.current.draggedItems
-          .map((draggedItem) => {
-            const sourceItem = currentItemById.get(draggedItem.id)
-            if (!sourceItem) return null
-
-            let itemNewTrackId = previewTrackTargets?.trackAssignments.get(draggedItem.id)
-            if (!itemNewTrackId) {
-              const anchorTrackIndex = trackIndexById.get(dragStateRef.current!.startTrackId) ?? -1
-              const itemTrackIndex = trackIndexById.get(draggedItem.initialTrackId) ?? -1
-              const newAnchorTrackIndex = trackIndexById.get(previewAnchorTrackId) ?? -1
-              const trackOffset = itemTrackIndex - anchorTrackIndex
-              const newItemTrackIndex = Math.max(
-                0,
-                Math.min(tracksRef.current.length - 1, newAnchorTrackIndex + trackOffset),
-              )
-              itemNewTrackId =
-                tracksRef.current[newItemTrackIndex]?.id || draggedItem.initialTrackId
-            }
-
-            return {
-              id: draggedItem.id,
-              initialFrame: draggedItem.initialFrame,
-              initialTrackId: draggedItem.initialTrackId,
-              newFrom: draggedItem.initialFrame + deltaFrames + previewSnapDelta + groupClampOffset,
-              newTrackId: itemNewTrackId,
-              durationInFrames: sourceItem.durationInFrames,
-            }
-          })
-          .filter((previewItem) => previewItem !== null) as Array<{
-          id: string
-          initialFrame: number
-          initialTrackId: string
-          newFrom: number
-          newTrackId: string
-          durationInFrames: number
-        }>
-
-        // Wall-clamp the group: find tightest constraint across all items,
-        // then shift the entire group by the same delta so they stay together.
-        if (!isAltDragRef.current) {
-          const groupExcludeIds = new Set(previewMovedItems.map((m) => m.id))
-          let wallClampDelta = 0
-          for (const previewItem of previewMovedItems) {
-            const clamped = clampToTrackWalls(
-              previewItem.newFrom,
-              previewItem.durationInFrames,
-              previewItem.newTrackId,
-              groupExcludeIds,
-              currentItems,
-              currentItemsByTrackId,
-            )
-            const itemDelta = clamped - previewItem.newFrom
-            // Pick the tightest (smallest magnitude) clamp in each direction
-            if (itemDelta < 0 && (wallClampDelta >= 0 || itemDelta > wallClampDelta)) {
-              wallClampDelta = itemDelta
-            } else if (itemDelta > 0 && (wallClampDelta <= 0 || itemDelta < wallClampDelta)) {
-              wallClampDelta = itemDelta
-            }
-          }
-          if (wallClampDelta !== 0) {
-            for (const previewItem of previewMovedItems) {
-              previewItem.newFrom += wallClampDelta
-            }
-          }
-        }
-
-        previewOffsets = {}
-        for (const previewItem of previewMovedItems) {
-          const currentTop = previewVisualTopByTrackId.get(previewItem.initialTrackId)
-          const targetTop = previewVisualTopByTrackId.get(previewItem.newTrackId)
-          previewOffsets[previewItem.id] = {
-            x: frameToPixelsRef.current(previewItem.newFrom - previewItem.initialFrame),
-            y:
-              currentTop !== undefined && targetTop !== undefined ? targetTop - currentTop : deltaY,
-          }
-        }
-        linkedPreviewMovedItems = previewMovedItems.map((previewItem) => ({
-          id: previewItem.id,
-          from: previewItem.newFrom,
-        }))
-
-        anchorPreviewOffset = previewOffsets[dragStateRef.current.itemId] ?? {
-          x: frameToPixelsRef.current(
-            Math.max(0, rawGroupStartFrame + previewSnapDelta) - rawGroupStartFrame + deltaFrames,
-          ),
-          y: deltaY,
-        }
+        const multiPreview = buildMultiItemDragPreview({
+          draggedItems,
+          currentItemById,
+          currentItems,
+          currentItemsByTrackId,
+          deltaFrames,
+          deltaY,
+          snapDuration,
+          snapStartFrame,
+          rawGroupStartFrame,
+          snapResult,
+          previewTrackTargets,
+          startTrackId: dragStateRef.current.startTrackId,
+          previewAnchorTrackId,
+          trackIndexById,
+          tracks: tracksRef.current,
+          previewVisualTopByTrackId,
+          frameToPixels: frameToPixelsRef.current,
+          isAltDrag: isAltDragRef.current,
+          anchorItemId: dragStateRef.current.itemId,
+        })
+        previewOffsets = multiPreview.previewOffsets
+        anchorPreviewOffset = multiPreview.anchorPreviewOffset
+        linkedPreviewMovedItems = multiPreview.linkedPreviewMovedItems
       } else {
-        const previewProposedFrame = Math.max(0, snapResult.snappedFrame)
-        const previewTargetTrackId =
-          previewTrackTargets?.trackAssignments.get(dragStateRef.current.itemId) ??
-          previewAnchorTrackId
-        // Clamp to track walls so the preview can't visually overlap other clips
-        const dragExcludeIds = new Set(draggedItems.map((d) => d.id))
-        const previewFinalFrame = isAltDragRef.current
-          ? previewProposedFrame
-          : clampToTrackWalls(
-              previewProposedFrame,
-              item.durationInFrames,
-              previewTargetTrackId,
-              dragExcludeIds,
-              currentItems,
-              currentItemsByTrackId,
-            )
-        const currentTop = previewVisualTopByTrackId.get(dragStateRef.current.startTrackId)
-        const targetTop = previewVisualTopByTrackId.get(previewTargetTrackId)
-        anchorPreviewOffset = {
-          x: frameToPixelsRef.current(
-            (previewFinalFrame ?? dragStateRef.current.startFrame) -
-              dragStateRef.current.startFrame,
-          ),
-          y: currentTop !== undefined && targetTop !== undefined ? targetTop - currentTop : deltaY,
-        }
-        if (previewFinalFrame !== null) {
-          linkedPreviewMovedItems = [{ id: dragStateRef.current.itemId, from: previewFinalFrame }]
-        }
+        const singlePreview = buildSingleItemDragPreview({
+          snapResult,
+          previewTrackTargets,
+          previewAnchorTrackId,
+          draggedItems,
+          itemDurationInFrames: item.durationInFrames,
+          currentItems,
+          currentItemsByTrackId,
+          isAltDrag: isAltDragRef.current,
+          startTrackId: dragStateRef.current.startTrackId,
+          startFrame: dragStateRef.current.startFrame,
+          itemId: dragStateRef.current.itemId,
+          previewVisualTopByTrackId,
+          frameToPixels: frameToPixelsRef.current,
+          deltaY,
+        })
+        previewOffsets = singlePreview.previewOffsets
+        anchorPreviewOffset = singlePreview.anchorPreviewOffset
+        linkedPreviewMovedItems = singlePreview.linkedPreviewMovedItems
       }
 
       if (isAltDragRef.current) {
@@ -1158,45 +1571,28 @@ export function useTimelineDrag(
       }
 
       dragOffsetRef.current = anchorPreviewOffset
-      dragPreviewOffsetByItemRef.current = previewOffsets ?? {}
+      const safePreviewOffsets = previewOffsets ?? {}
+      dragPreviewOffsetByItemRef.current = safePreviewOffsets
       if (isAltDragRef.current) {
-        updateLargeAltDragCanvas(previewOffsets ?? {}, anchorPreviewOffset)
+        updateLargeAltDragCanvas(safePreviewOffsets, anchorPreviewOffset)
       }
       setDragOffset(anchorPreviewOffset)
 
       // Only update store when snap target or alt state actually changes to reduce re-renders
-      const prevSnap = prevSnapTargetRef.current
-      const newSnap = snapResult.snapTarget
-      const prevLinkedDropTarget = useSelectionStore.getState().activeLinkedDropTarget
-      const linkedDropChanged =
-        (prevLinkedDropTarget === null && linkedDropTarget !== null) ||
-        (prevLinkedDropTarget !== null && linkedDropTarget === null) ||
-        (prevLinkedDropTarget !== null &&
-          linkedDropTarget !== null &&
-          (prevLinkedDropTarget.trackId !== linkedDropTarget.trackId ||
-            prevLinkedDropTarget.zone !== linkedDropTarget.zone ||
-            !!prevLinkedDropTarget.createNew !== !!linkedDropTarget.createNew))
-      const snapChanged =
-        (prevSnap === null && newSnap !== null) ||
-        (prevSnap !== null && newSnap === null) ||
-        (prevSnap !== null &&
-          newSnap !== null &&
-          (prevSnap.frame !== newSnap.frame || prevSnap.type !== newSnap.type))
-
-      if (snapChanged || altKeyChanged || linkedDropChanged) {
-        prevSnapTargetRef.current = newSnap ? { frame: newSnap.frame, type: newSnap.type } : null
-        setActiveSnapTarget(snapResult.snapTarget)
-        setActiveLinkedDropTarget(linkedDropTarget)
-        if (altKeyChanged) {
-          const draggedIds = dragStateRef.current?.draggedItems.map((item) => item.id) || []
-          setDragState({
-            isDragging: true,
-            draggedItemIds: draggedIds,
-            offset: { x: clampedDeltaX, y: deltaY },
-            isAltDrag: e.altKey,
-          })
-        }
-      }
+      syncDragPreviewStores({
+        prevSnapTargetRef,
+        snapTarget: snapResult.snapTarget,
+        prevLinkedDropTarget: useSelectionStore.getState().activeLinkedDropTarget,
+        linkedDropTarget,
+        setActiveSnapTarget,
+        setActiveLinkedDropTarget,
+        setDragState,
+        altKeyChanged,
+        dragStateRef,
+        clampedDeltaX,
+        deltaY,
+        altKey: e.altKey,
+      })
     }
 
     const handleMouseUp = () => {
