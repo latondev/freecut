@@ -4,6 +4,7 @@ import {
   VideoFrameExtractor,
   type CaptureFrameResult,
   type DrawFrameCaptureResult,
+  type VideoDrawContinuationCheck,
 } from './canvas-video-extractor'
 
 const log = createLogger('SharedVideoExtractorPool')
@@ -19,6 +20,7 @@ export interface VideoFrameSource {
     y: number,
     width: number,
     height: number,
+    shouldContinue?: VideoDrawContinuationCheck,
   ): Promise<boolean>
   drawFrameWithCapture(
     ctx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
@@ -27,8 +29,12 @@ export interface VideoFrameSource {
     y: number,
     width: number,
     height: number,
+    shouldContinue?: VideoDrawContinuationCheck,
   ): Promise<DrawFrameCaptureResult>
-  captureFrame(timestamp: number): Promise<CaptureFrameResult>
+  captureFrame(
+    timestamp: number,
+    shouldContinue?: VideoDrawContinuationCheck,
+  ): Promise<CaptureFrameResult>
   getLastFailureKind(): VideoFrameFailureKind
   getDimensions(): { width: number; height: number }
   getDuration(): number
@@ -180,8 +186,19 @@ class SharedItemVideoSource implements VideoFrameSource {
     y: number,
     width: number,
     height: number,
+    shouldContinue?: VideoDrawContinuationCheck,
   ): Promise<boolean> {
-    return this.pool.drawItemFrame(this.itemId, this.src, ctx, timestamp, x, y, width, height)
+    return this.pool.drawItemFrame(
+      this.itemId,
+      this.src,
+      ctx,
+      timestamp,
+      x,
+      y,
+      width,
+      height,
+      shouldContinue,
+    )
   }
 
   drawFrameWithCapture(
@@ -191,6 +208,7 @@ class SharedItemVideoSource implements VideoFrameSource {
     y: number,
     width: number,
     height: number,
+    shouldContinue?: VideoDrawContinuationCheck,
   ): Promise<DrawFrameCaptureResult> {
     return this.pool.drawItemFrameWithCapture(
       this.itemId,
@@ -201,11 +219,15 @@ class SharedItemVideoSource implements VideoFrameSource {
       y,
       width,
       height,
+      shouldContinue,
     )
   }
 
-  captureFrame(timestamp: number): Promise<CaptureFrameResult> {
-    return this.pool.captureItemFrame(this.itemId, this.src, timestamp)
+  captureFrame(
+    timestamp: number,
+    shouldContinue?: VideoDrawContinuationCheck,
+  ): Promise<CaptureFrameResult> {
+    return this.pool.captureItemFrame(this.itemId, this.src, timestamp, shouldContinue)
   }
 
   getLastFailureKind(): VideoFrameFailureKind {
@@ -344,7 +366,9 @@ export class SharedVideoExtractorPool {
     y: number,
     width: number,
     height: number,
+    shouldContinue?: VideoDrawContinuationCheck,
   ): Promise<boolean> {
+    if (shouldContinue && !shouldContinue()) return false
     const state = this.ensureSourceState(src)
     return this.withSourceOperation(state, async () => {
       const sourceReady = await this.initSource(src)
@@ -355,7 +379,9 @@ export class SharedVideoExtractorPool {
       const lane = await this.getInitializedLaneForItem(state, itemId)
       if (!lane) return false
       const prev = lane.drawLock ?? Promise.resolve()
-      const result = prev.then(() => lane.extractor.drawFrame(ctx, timestamp, x, y, width, height))
+      const result = prev.then(() =>
+        lane.extractor.drawFrame(ctx, timestamp, x, y, width, height, shouldContinue),
+      )
       lane.drawLock = result.then(
         () => undefined,
         () => undefined,
@@ -373,7 +399,11 @@ export class SharedVideoExtractorPool {
     y: number,
     width: number,
     height: number,
+    shouldContinue?: VideoDrawContinuationCheck,
   ): Promise<DrawFrameCaptureResult> {
+    if (shouldContinue && !shouldContinue()) {
+      return { success: false, capturedFrame: null, capturedSourceTime: null }
+    }
     const state = this.ensureSourceState(src)
     return this.withSourceOperation(state, async () => {
       const sourceReady = await this.initSource(src)
@@ -385,7 +415,7 @@ export class SharedVideoExtractorPool {
       if (!lane) return { success: false, capturedFrame: null, capturedSourceTime: null }
       const prev = lane.drawLock ?? Promise.resolve()
       const result = prev.then(() =>
-        lane.extractor.drawFrameWithCapture(ctx, timestamp, x, y, width, height),
+        lane.extractor.drawFrameWithCapture(ctx, timestamp, x, y, width, height, shouldContinue),
       )
       lane.drawLock = result.then(
         () => undefined,
@@ -399,7 +429,11 @@ export class SharedVideoExtractorPool {
     itemId: string,
     src: string,
     timestamp: number,
+    shouldContinue?: VideoDrawContinuationCheck,
   ): Promise<CaptureFrameResult> {
+    if (shouldContinue && !shouldContinue()) {
+      return { success: false, frame: null, sourceTime: null }
+    }
     const state = this.ensureSourceState(src)
     return this.withSourceOperation(state, async () => {
       const sourceReady = await this.initSource(src)
@@ -410,7 +444,7 @@ export class SharedVideoExtractorPool {
       const lane = await this.getInitializedLaneForItem(state, itemId)
       if (!lane) return { success: false, frame: null, sourceTime: null }
       const prev = lane.drawLock ?? Promise.resolve()
-      const result = prev.then(() => lane.extractor.captureFrame(timestamp))
+      const result = prev.then(() => lane.extractor.captureFrame(timestamp, shouldContinue))
       lane.drawLock = result.then(
         () => undefined,
         () => undefined,

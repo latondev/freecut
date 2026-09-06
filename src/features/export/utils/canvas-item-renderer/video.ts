@@ -19,6 +19,7 @@ import {
   waitForPreviewDomVideoDrawDecision,
 } from '../frame-source-policy'
 import type { CanvasPool } from '../canvas-pool'
+import type { VideoDrawContinuationCheck } from '../canvas-video-extractor'
 import type { CanvasSettings, ItemRenderContext, ItemTransform } from './types'
 import {
   isFrameInsideItemTimelineSpan,
@@ -666,6 +667,13 @@ export async function renderVideoItem(
   // workaround is needed.
   const mediabunnyGate = await tryMediabunnyDraw(state)
   if (mediabunnyGate !== undefined) return mediabunnyGate
+  if (state.rctx.isActivePreviewFrameSuperseded?.(state.previewRootFrame) === true) {
+    // The pointer moved while the exact decode was in flight (or missed): the
+    // frame is dead, so skip the fallback DOM seek for it. Mirrors the
+    // supersede holds above; stale-frame presentation guards stay authoritative.
+    state.holdPreviewFrontBuffer()
+    return false
+  }
 
   // HTML5 video element fallback (slower, seeks required).
   return drawHtmlVideoFallback(state)
@@ -1056,6 +1064,7 @@ async function drawMediabunnyExtractorFrame(
   extractor: NonNullable<VideoRenderStage['extractor']>,
   clampedTime: number,
   drawLayout: ContainedMediaDrawLayout,
+  shouldContinue?: VideoDrawContinuationCheck,
 ): Promise<DrawnExtractorFrame> {
   const { ctx, rctx, scrubbingCache } = state
   const { mediaRect, viewportRect, featherPixels } = drawLayout
@@ -1070,6 +1079,7 @@ async function drawMediabunnyExtractorFrame(
           mediaRect.y,
           mediaRect.width,
           mediaRect.height,
+          shouldContinue,
         )
       : {
           success: await extractor.drawFrame(
@@ -1079,6 +1089,7 @@ async function drawMediabunnyExtractorFrame(
             mediaRect.y,
             mediaRect.width,
             mediaRect.height,
+            shouldContinue,
           ),
           capturedFrame: null,
           capturedSourceTime: null,
@@ -1237,7 +1248,18 @@ async function tryMediabunnyDraw(state: VideoRenderStage): Promise<VideoStageRes
   const reverseCache = await tryReverseFrameCache(state, extractor, dims)
   if (reverseCache !== undefined) return reverseCache
 
-  const drawn = await drawMediabunnyExtractorFrame(state, extractor, clampedTime, drawLayout)
+  // Abort the blocking main-thread seek when the pointer has already moved
+  // on: the frame is dead and the render pump has a newer target. The
+  // extractor resolves the abort as a plain miss with no failure bookkeeping.
+  const shouldContinueDecoding = () =>
+    state.rctx.isActivePreviewFrameSuperseded?.(state.previewRootFrame) !== true
+  const drawn = await drawMediabunnyExtractorFrame(
+    state,
+    extractor,
+    clampedTime,
+    drawLayout,
+    shouldContinueDecoding,
+  )
 
   if (drawn.success) {
     recordMediabunnySuccess(state, clampedTime, drawn.capturedFrame, drawn.capturedSourceTime)

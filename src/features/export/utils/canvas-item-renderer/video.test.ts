@@ -165,6 +165,71 @@ describe('renderVideoItem', () => {
     expect(scrubbingCache.putVideoFrame).not.toHaveBeenCalled()
   })
 
+  it('passes a live supersede probe to the extractor draw', async () => {
+    const drawFrame = vi.fn(async () => true)
+    const extractor = {
+      drawFrame,
+      drawFrameWithCapture: vi.fn(),
+      getLastFailureKind: vi.fn(() => 'none' as const),
+      getDimensions: vi.fn(() => ({ width: 1920, height: 1080 })),
+      getCanBeTransparent: vi.fn(() => false),
+      getDuration: vi.fn(() => 30),
+    }
+    let superseded = false
+    const renderContext = createRenderContext({
+      videoExtractors: new Map([[item.id, extractor]]),
+      useMediabunny: new Set([item.id]),
+      isActivePreviewFrameSuperseded: vi.fn(() => superseded),
+    } as unknown as Partial<ItemRenderContext>)
+
+    await renderVideoItem(createCanvasContext(), item, transform, 12, renderContext)
+
+    expect(drawFrame).toHaveBeenCalledOnce()
+    const firstCall = drawFrame.mock.calls[0] as unknown as unknown[]
+    const shouldContinue = firstCall?.[6] as unknown as () => boolean
+    expect(typeof shouldContinue).toBe('function')
+    expect(shouldContinue()).toBe(true)
+    superseded = true
+    expect(shouldContinue()).toBe(false)
+  })
+
+  it('skips the fallback seek when the frame is superseded during the exact decode', async () => {
+    let superseded = false
+    const drawFrame = vi.fn(async () => {
+      // Simulate the pointer moving on mid-decode: the exact path misses for
+      // a frame that is already dead.
+      superseded = true
+      return false
+    })
+    const extractor = {
+      drawFrame,
+      drawFrameWithCapture: vi.fn(),
+      getLastFailureKind: vi.fn(() => 'decode-error' as const),
+      getDimensions: vi.fn(() => ({ width: 1920, height: 1080 })),
+      getCanBeTransparent: vi.fn(() => false),
+      getDuration: vi.fn(() => 30),
+    }
+    const markActivePreviewFramePending = vi.fn()
+    const video = { currentTime: 0, readyState: 2, duration: 30 } as HTMLVideoElement
+    const renderContext = createRenderContext({
+      videoExtractors: new Map([[item.id, extractor]]),
+      videoElements: new Map([[item.id, video]]),
+      useMediabunny: new Set([item.id]),
+      isActivePreviewFrameSuperseded: vi.fn(() => superseded),
+      markActivePreviewFramePending,
+    } as unknown as Partial<ItemRenderContext>)
+
+    await expect(
+      renderVideoItem(createCanvasContext(), item, transform, 12, renderContext),
+    ).resolves.toBe(false)
+
+    expect(drawFrame).toHaveBeenCalledOnce()
+    expect(markActivePreviewFramePending).toHaveBeenCalled()
+    // A fallback seek would have moved currentTime toward the frame's ~0.4s
+    // source time and returned true; neither may happen for a dead frame.
+    expect(video.currentTime).toBe(0)
+  })
+
   it('awaits an existing worker decode for isolated seeks instead of blocking on MediaBunny', async () => {
     const bitmap = { width: 1920, height: 1080 } as ImageBitmap
     const waitForInflightPredecodedBitmap = vi.fn(async () => bitmap)

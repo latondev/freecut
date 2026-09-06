@@ -137,7 +137,7 @@ describe('SharedVideoExtractorPool', () => {
       (instance) => instance.src === disposed[0]!.src,
     )
     expect(reopened).not.toBe(disposed[0])
-    expect(reopened?.drawFrame).toHaveBeenCalledWith(ctx, 42.25, 0, 0, 1, 1)
+    expect(reopened?.drawFrame).toHaveBeenCalledWith(ctx, 42.25, 0, 0, 1, 1, undefined)
     expect(pool.getStats().initializedSources).toBe(2)
     expect(pool.getStats().sourceEvictions).toBe(2)
   })

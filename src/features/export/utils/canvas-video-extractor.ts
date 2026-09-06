@@ -67,6 +67,15 @@ export interface CaptureFrameResult {
   sourceTime: number | null
 }
 
+/**
+ * Cooperative cancellation probe for long sample walks. Return false to abort
+ * a blocking seek; the draw resolves as a plain miss with no failure
+ * bookkeeping (no 3-strikes counting, no recovery attempt, no warning).
+ */
+export type VideoDrawContinuationCheck = () => boolean
+
+const DRAW_CANCELLED = Symbol('video-frame-draw-cancelled')
+
 export class VideoFrameExtractor {
   private static readonly TIMESTAMP_EPSILON = 1e-4
   private static readonly LOOKAHEAD_TOLERANCE_SECONDS = 0.05
@@ -207,6 +216,7 @@ export class VideoFrameExtractor {
     y: number,
     width: number,
     height: number,
+    shouldContinue?: VideoDrawContinuationCheck,
   ): Promise<boolean> {
     if (!this.ready || !this.sink) {
       return false
@@ -217,7 +227,7 @@ export class VideoFrameExtractor {
     let lastError: unknown = this.sampleLoopError
 
     try {
-      await this.ensureSampleForTimestamp(clampedTime)
+      await this.ensureSampleForTimestamp(clampedTime, shouldContinue)
       const drawOk = this.drawCurrentSample(ctx, x, y, width, height)
       if (drawOk) {
         this.drawFailureCount = 0
@@ -228,10 +238,11 @@ export class VideoFrameExtractor {
       lastError = this.sampleLoopError
       return this.reportDrawFailure(timestamp, clampedTime, lastError)
     } catch (error) {
+      if (error === DRAW_CANCELLED) return false
       lastError = error
       this.sampleLoopError = error
 
-      const recovered = await this.recoverAndPrime(clampedTime, error)
+      const recovered = await this.recoverAndPrime(clampedTime, error, shouldContinue)
       if (recovered) {
         const drawOk = this.drawCurrentSample(ctx, x, y, width, height)
         if (drawOk) {
@@ -254,8 +265,9 @@ export class VideoFrameExtractor {
     y: number,
     width: number,
     height: number,
+    shouldContinue?: VideoDrawContinuationCheck,
   ): Promise<DrawFrameCaptureResult> {
-    const success = await this.drawFrame(ctx, timestamp, x, y, width, height)
+    const success = await this.drawFrame(ctx, timestamp, x, y, width, height, shouldContinue)
     if (!success) {
       return {
         success: false,
@@ -271,7 +283,10 @@ export class VideoFrameExtractor {
     }
   }
 
-  async captureFrame(timestamp: number): Promise<CaptureFrameResult> {
+  async captureFrame(
+    timestamp: number,
+    shouldContinue?: VideoDrawContinuationCheck,
+  ): Promise<CaptureFrameResult> {
     const duration = this.duration
     const clampedTime =
       duration > 0
@@ -282,7 +297,7 @@ export class VideoFrameExtractor {
     this.lastFailureKind = 'none'
 
     try {
-      await this.ensureSampleForTimestamp(clampedTime)
+      await this.ensureSampleForTimestamp(clampedTime, shouldContinue)
       if (!this.currentSample || !this.currentSampleCoversTimestamp(clampedTime)) {
         this.lastFailureKind = 'no-sample'
         return { success: false, frame: null, sourceTime: null }
@@ -294,14 +309,21 @@ export class VideoFrameExtractor {
         sourceTime: this.currentSample.timestamp,
       }
     } catch (error) {
+      if (error === DRAW_CANCELLED) {
+        return { success: false, frame: null, sourceTime: null }
+      }
       this.sampleLoopError = error
       this.lastFailureKind = 'decode-error'
       return { success: false, frame: null, sourceTime: null }
     }
   }
 
-  private async ensureSampleForTimestamp(timestamp: number): Promise<void> {
+  private async ensureSampleForTimestamp(
+    timestamp: number,
+    shouldContinue?: VideoDrawContinuationCheck,
+  ): Promise<void> {
     if (!this.sink) return
+    if (shouldContinue && !shouldContinue()) throw DRAW_CANCELLED
 
     // Use a forward sample stream instead of samplesAtTimestamps/getSample.
     // Mediabunny's timestamp-based path can flush decoders at GOP boundaries;
@@ -327,7 +349,9 @@ export class VideoFrameExtractor {
     this.lastRequestedTimestamp = timestamp
 
     while (true) {
+      if (shouldContinue && !shouldContinue()) throw DRAW_CANCELLED
       const candidate = await this.peekNextSample()
+      if (shouldContinue && !shouldContinue()) throw DRAW_CANCELLED
       if (!candidate) break
       if (candidate.timestamp <= timestamp + VideoFrameExtractor.TIMESTAMP_EPSILON) {
         // Moving to a new sample — release the cached VideoFrame first
@@ -537,7 +561,11 @@ export class VideoFrameExtractor {
     }
   }
 
-  private async recoverAndPrime(timestamp: number, error: unknown): Promise<boolean> {
+  private async recoverAndPrime(
+    timestamp: number,
+    error: unknown,
+    shouldContinue?: VideoDrawContinuationCheck,
+  ): Promise<boolean> {
     const message = error instanceof Error ? error.message : String(error)
     const looksRecoverable = /key frame|configure\(\)|flush\(\)|InvalidStateError|decode/i.test(
       message,
@@ -548,9 +576,10 @@ export class VideoFrameExtractor {
 
     try {
       this.resetSampleIterator(timestamp, 'recover')
-      await this.ensureSampleForTimestamp(timestamp)
+      await this.ensureSampleForTimestamp(timestamp, shouldContinue)
       return this.currentSample !== null
     } catch (recoveryError) {
+      if (recoveryError === DRAW_CANCELLED) throw recoveryError
       this.sampleLoopError = recoveryError
       this.lastFailureKind = 'decode-error'
       return false
