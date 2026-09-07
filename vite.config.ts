@@ -146,7 +146,12 @@ export default defineConfig({
             normalizedId.endsWith('/src/components/ui/accordion.tsx') ||
             normalizedId.endsWith('/src/components/ui/button.tsx') ||
             normalizedId.endsWith('/src/components/ui/button-variants.ts') ||
-            normalizedId.endsWith('/src/components/ui/global-tooltip.tsx')
+            normalizedId.endsWith('/src/components/ui/global-tooltip.tsx') ||
+            // TooltipProvider wraps the whole app in App, so the Radix tooltip
+            // primitive must live in the shell. Without this pin, the chunker
+            // places it in feature-editing-core (majority importer) and the
+            // entire 1.2MB editor chunk loads on the landing page.
+            normalizedId.endsWith('/src/components/ui/tooltip.tsx')
 
           // Logger must be in its own chunk to avoid circular chunk TDZ errors.
           // Without this, Rollup places it in composition-runtime which has a
