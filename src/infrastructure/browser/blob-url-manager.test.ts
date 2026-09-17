@@ -154,4 +154,64 @@ describe('BlobUrlManager', () => {
       expect(revokedUrls.has(url2)).toBe(true)
     })
   })
+
+  describe('onRevoke', () => {
+    it('notifies subscribers when a released refcount hits zero', () => {
+      const seen: string[] = []
+      const unsubscribe = blobUrlManager.onRevoke((url) => seen.push(url))
+      const url = blobUrlManager.acquire('media-1', new Blob(['data']))
+
+      blobUrlManager.release('media-1')
+
+      expect(seen).toEqual([url])
+      unsubscribe()
+    })
+
+    it('does not notify while references remain', () => {
+      const seen: string[] = []
+      const unsubscribe = blobUrlManager.onRevoke((url) => seen.push(url))
+      blobUrlManager.acquire('media-1', new Blob(['data']))
+      blobUrlManager.acquire('media-1', new Blob(['data']))
+
+      blobUrlManager.release('media-1')
+
+      expect(seen).toEqual([])
+      unsubscribe()
+    })
+
+    it('notifies for invalidate and releaseAll', () => {
+      const seen: string[] = []
+      const unsubscribe = blobUrlManager.onRevoke((url) => seen.push(url))
+      const url1 = blobUrlManager.acquire('media-1', new Blob(['a']))
+      const url2 = blobUrlManager.acquire('media-2', new Blob(['b']))
+
+      blobUrlManager.invalidate('media-1')
+      blobUrlManager.releaseAll()
+
+      expect(seen).toEqual([url1, url2])
+      unsubscribe()
+    })
+
+    it('stops notifying after unsubscribe', () => {
+      const seen: string[] = []
+      const unsubscribe = blobUrlManager.onRevoke((url) => seen.push(url))
+      unsubscribe()
+
+      blobUrlManager.acquire('media-1', new Blob(['data']))
+      blobUrlManager.release('media-1')
+
+      expect(seen).toEqual([])
+    })
+
+    it('does not notify for external URLs', () => {
+      const seen: string[] = []
+      const unsubscribe = blobUrlManager.onRevoke((url) => seen.push(url))
+      blobUrlManager.registerUrl('media-1', 'https://example.com/video.mp4')
+
+      blobUrlManager.releaseAll()
+
+      expect(seen).toEqual([])
+      unsubscribe()
+    })
+  })
 })

@@ -650,6 +650,20 @@ const blobByUrl = new Map<string, Blob>()
 /** Track sources whose keyframe index has been sent to at least one worker */
 const keyframesSentForSrc = new Set<string>()
 
+// A revoked blob URL can never be drawn or fetched again, and re-resolving the
+// same media mints a new URL — so every cache entry keyed by the old URL is
+// unreachable. Drop it (and its bitmaps) instead of retaining the Blob for the
+// lifetime of the session.
+blobUrlManager.onRevoke((url) => {
+  const hadBlob = blobByUrl.delete(url)
+  const hadBitmap = bitmapCache.has(url) || fallbackBitmapCache.has(url)
+  unavailableBlobUrls.delete(url)
+  keyframesSentForSrc.delete(url)
+  if (hadBlob || hadBitmap) {
+    clearPredecodedCache(url)
+  }
+})
+
 function getDirectSourceMetadata(src: string) {
   return getObjectUrlDirectFileMetadata(src) ?? undefined
 }

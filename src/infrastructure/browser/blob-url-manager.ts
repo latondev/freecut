@@ -30,6 +30,7 @@ class BlobUrlManager {
   private entries = new Map<string, BlobUrlEntry>()
   private version = 0
   private listeners = new Set<() => void>()
+  private revokeListeners = new Set<(url: string) => void>()
 
   /** Notify React subscribers that blob URLs have changed */
   private notify(): void {
@@ -43,6 +44,16 @@ class BlobUrlManager {
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  /**
+   * Subscribe to individual URL revocations. URL-keyed caches (e.g. the
+   * decoder prewarm blob/bitmap caches) use this to drop entries whose Blob
+   * would otherwise be retained for the whole session.
+   */
+  onRevoke = (listener: (url: string) => void): (() => void) => {
+    this.revokeListeners.add(listener)
+    return () => this.revokeListeners.delete(listener)
   }
 
   /** Get current version snapshot (for useSyncExternalStore) */
@@ -134,6 +145,9 @@ class BlobUrlManager {
     if (entry.external) return
     unregisterObjectUrl(entry.url)
     URL.revokeObjectURL(entry.url)
+    for (const listener of this.revokeListeners) {
+      listener(entry.url)
+    }
   }
 
   /**

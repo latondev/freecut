@@ -290,6 +290,7 @@ vi.mock('@/infrastructure/browser/blob-url-manager', async () => {
       },
       subscribe: mockState.subscribeVersion,
       getSnapshot: () => mockState.version.current,
+      onRevoke: () => () => {},
     },
     useBlobUrlVersion: () =>
       React.useSyncExternalStore(mockState.subscribeVersion, () => mockState.version.current),
