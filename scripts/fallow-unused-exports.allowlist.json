@@ -127,11 +127,6 @@
     },
     {
       "path": "src/features/preview/deps/media-library-contract.ts",
-      "exportName": "cleanupBlobUrls",
-      "reason": "Re-exported through preview media resolution helpers for tests and route cleanup."
-    },
-    {
-      "path": "src/features/preview/deps/media-library-contract.ts",
       "exportName": "resolveProxyUrl",
       "reason": "Re-exported through preview media resolution helpers for preview component callers."
     },
