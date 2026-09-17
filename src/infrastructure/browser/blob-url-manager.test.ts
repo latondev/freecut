@@ -155,6 +155,41 @@ describe('BlobUrlManager', () => {
     })
   })
 
+  describe('getMediaIdByUrl', () => {
+    it('resolves an acquired blob URL back to its media id', () => {
+      const url = blobUrlManager.acquire('media-1', new Blob(['data']))
+      expect(blobUrlManager.getMediaIdByUrl(url)).toBe('media-1')
+    })
+
+    it('resolves registered external URLs', () => {
+      const url = blobUrlManager.registerUrl('media-1', 'https://example.com/video.mp4')
+      expect(blobUrlManager.getMediaIdByUrl(url)).toBe('media-1')
+    })
+
+    it('returns null for unknown URLs', () => {
+      expect(blobUrlManager.getMediaIdByUrl('blob:unknown')).toBeNull()
+    })
+
+    it('drops the mapping when the entry is released or invalidated', () => {
+      const releasedUrl = blobUrlManager.acquire('media-1', new Blob(['data']))
+      blobUrlManager.release('media-1')
+      expect(blobUrlManager.getMediaIdByUrl(releasedUrl)).toBeNull()
+
+      const invalidatedUrl = blobUrlManager.acquire('media-2', new Blob(['data']))
+      blobUrlManager.invalidate('media-2')
+      expect(blobUrlManager.getMediaIdByUrl(invalidatedUrl)).toBeNull()
+    })
+
+    it('drops all mappings on releaseAll', () => {
+      const url1 = blobUrlManager.acquire('media-1', new Blob(['a']))
+      const url2 = blobUrlManager.acquire('media-2', new Blob(['b']))
+      blobUrlManager.releaseAll()
+
+      expect(blobUrlManager.getMediaIdByUrl(url1)).toBeNull()
+      expect(blobUrlManager.getMediaIdByUrl(url2)).toBeNull()
+    })
+  })
+
   describe('onRevoke', () => {
     it('notifies subscribers when a released refcount hits zero', () => {
       const seen: string[] = []

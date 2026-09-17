@@ -28,6 +28,8 @@ interface BlobUrlEntry {
  */
 class BlobUrlManager {
   private entries = new Map<string, BlobUrlEntry>()
+  /** Reverse index so per-message URL lookups don't scan every entry. */
+  private mediaIdByUrl = new Map<string, string>()
   private version = 0
   private listeners = new Set<() => void>()
   private revokeListeners = new Set<(url: string) => void>()
@@ -78,6 +80,7 @@ class BlobUrlManager {
     const url = URL.createObjectURL(blob)
     registerObjectUrl(url, blob, metadata)
     this.entries.set(mediaId, { url, refCount: 1, blob, metadata })
+    this.mediaIdByUrl.set(url, mediaId)
     this.notify()
     return url
   }
@@ -98,6 +101,7 @@ class BlobUrlManager {
       return existing.url
     }
     this.entries.set(mediaId, { url, refCount: 1, external: true })
+    this.mediaIdByUrl.set(url, mediaId)
     this.notify()
     return url
   }
@@ -122,10 +126,7 @@ class BlobUrlManager {
    * Returns null if the URL is not tracked.
    */
   getMediaIdByUrl(url: string): string | null {
-    for (const [mediaId, entry] of this.entries) {
-      if (entry.url === url) return mediaId
-    }
-    return null
+    return this.mediaIdByUrl.get(url) ?? null
   }
 
   /**
@@ -137,6 +138,7 @@ class BlobUrlManager {
     if (!entry) return
     this.revokeEntry(entry)
     this.entries.delete(mediaId)
+    this.mediaIdByUrl.delete(entry.url)
     this.notify()
   }
 
@@ -162,6 +164,7 @@ class BlobUrlManager {
     if (entry.refCount <= 0) {
       this.revokeEntry(entry)
       this.entries.delete(mediaId)
+      this.mediaIdByUrl.delete(entry.url)
       this.notify()
       logger.debug(`Revoked blob URL for media ${mediaId}`)
     }
@@ -177,6 +180,7 @@ class BlobUrlManager {
       this.revokeEntry(entry)
     }
     this.entries.clear()
+    this.mediaIdByUrl.clear()
     this.notify()
   }
 
@@ -189,6 +193,7 @@ class BlobUrlManager {
       logger.debug(`Revoked blob URL for media ${mediaId}`)
     }
     this.entries.clear()
+    this.mediaIdByUrl.clear()
     this.notify()
   }
 

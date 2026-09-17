@@ -456,6 +456,25 @@ export function usePreviewRenderPump({
       if (!displayCtx) return
       const displayedFrame = usePreviewBridgeStore.getState().displayedFrame
       const playbackState = usePlaybackStore.getState()
+      // Pixel probes force a synchronous GPU readback, and the same three
+      // surfaces can each be probed from several rejection checks in one draw.
+      // Memoize per invocation so repeated checks reuse the first sample.
+      let sourceBlank: boolean | null = null
+      let snapshotCanvasBlank: boolean | null = null
+      let displayCanvasBlank: boolean | null = null
+      const probeSourceBlank = () => {
+        sourceBlank ??= isEffectivelyBlankPreviewSource(source)
+        return sourceBlank
+      }
+      const probeSnapshotCanvasBlank = () => {
+        if (!committedPreviewSnapshot.canvas) return true
+        snapshotCanvasBlank ??= isEffectivelyBlankPreviewSource(committedPreviewSnapshot.canvas)
+        return snapshotCanvasBlank
+      }
+      const probeDisplayCanvasBlank = () => {
+        displayCanvasBlank ??= isEffectivelyBlankPreviewSource(displayCanvas)
+        return displayCanvasBlank
+      }
       if (
         committedPreviewSnapshot.guardFrame !== null &&
         performance.now() > committedPreviewSnapshot.guardUntilMs
@@ -472,8 +491,8 @@ export function usePreviewRenderPump({
           previewFrame: playbackState.previewFrame,
           isPlaying: playbackState.isPlaying,
           snapshotFrame: committedPreviewSnapshot.frame,
-          renderedFrameBlank: isEffectivelyBlankPreviewSource(source),
-          snapshotFrameBlank: isEffectivelyBlankPreviewSource(committedPreviewSnapshot.canvas),
+          probeRenderedFrameBlank: probeSourceBlank,
+          probeSnapshotFrameBlank: probeSnapshotCanvasBlank,
         })
       ) {
         if (source === scrubOffscreenCanvasRef.current) {
@@ -490,7 +509,7 @@ export function usePreviewRenderPump({
       const shouldReleaseScrubSnapshotGuardAfterDraw =
         committedPreviewSnapshot.guardFrame === renderedFrame &&
         source !== committedPreviewSnapshot.canvas &&
-        !isEffectivelyBlankPreviewSource(source)
+        !probeSourceBlank()
       if (
         shouldPreservePausedTransportPresentation({
           holdActive: performance.now() <= pausedTransportHoldUntilMs,
@@ -512,8 +531,8 @@ export function usePreviewRenderPump({
           isTransportSettling: true,
           renderedFrame,
           displayedFrame,
-          renderedFrameBlank: isEffectivelyBlankPreviewSource(source),
-          displayedFrameBlank: isEffectivelyBlankPreviewSource(displayCanvas),
+          probeRenderedFrameBlank: probeSourceBlank,
+          probeDisplayedFrameBlank: probeDisplayCanvasBlank,
         })
       ) {
         if (source === scrubOffscreenCanvasRef.current) {
@@ -1075,8 +1094,8 @@ export function usePreviewRenderPump({
                 isTransportSettling: true,
                 renderedFrame: frameToRender,
                 displayedFrame,
-                renderedFrameBlank: isEffectivelyBlankPreviewSource(renderedSource),
-                displayedFrameBlank: isEffectivelyBlankPreviewSource(displayedSource),
+                probeRenderedFrameBlank: () => isEffectivelyBlankPreviewSource(renderedSource),
+                probeDisplayedFrameBlank: () => isEffectivelyBlankPreviewSource(displayedSource),
               })
             ) {
               // The known-good same-frame front buffer remains visible. The
