@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { TimelineItem as TimelineItemType } from '@/types/timeline'
 import { useTimelineStore } from '../../stores/timeline-store'
+import { selectConsolidatableCaptionClipIds } from '../../stores/items-store-indexes'
 import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store'
 import {
   importMediaLibraryService,
@@ -160,15 +161,7 @@ export function useCaptionDialogState({
 
   const hasConsolidatablePerCueCaptions = useTimelineStore(
     useCallback(
-      (s) =>
-        item.isReversed !== true &&
-        s.items.some(
-          (other) =>
-            other.type === 'text' &&
-            (other.captionSource?.type === 'embedded-subtitles' ||
-              other.captionSource?.type === 'subtitle-import') &&
-            other.captionSource.clipId === item.id,
-        ),
+      (s) => item.isReversed !== true && selectConsolidatableCaptionClipIds(s).has(item.id),
       [item.id, item.isReversed],
     ),
   )

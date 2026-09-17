@@ -52,6 +52,7 @@ import {
   clampSlideDeltaToPreserveKeyframes,
   type SlideParticipant,
 } from '../utils/slide-keyframe-constraints'
+import { createRafCoalescedCallback } from '../utils/raf-coalesced-callback'
 
 interface SlipSlideState {
   isActive: boolean
@@ -1409,12 +1410,21 @@ export function useTimelineSlipSlide(
   // Setup/cleanup mouse event listeners
   useEffect(() => {
     if (state.isActive) {
-      window.addEventListener('mousemove', handleMouseMove)
-      window.addEventListener('mouseup', handleMouseUp)
+      // Coalesce the pointer stream to one preview/store update per painted frame.
+      const coalescedMouseMove = createRafCoalescedCallback(handleMouseMove)
+      const queueMouseMove = (event: MouseEvent) => coalescedMouseMove.queue(event)
+      const handleCoalescedMouseUp = () => {
+        coalescedMouseMove.flush()
+        handleMouseUp()
+      }
+
+      window.addEventListener('mousemove', queueMouseMove)
+      window.addEventListener('mouseup', handleCoalescedMouseUp)
 
       return () => {
-        window.removeEventListener('mousemove', handleMouseMove)
-        window.removeEventListener('mouseup', handleMouseUp)
+        coalescedMouseMove.cancel()
+        window.removeEventListener('mousemove', queueMouseMove)
+        window.removeEventListener('mouseup', handleCoalescedMouseUp)
       }
     }
   }, [state.isActive, handleMouseMove, handleMouseUp])

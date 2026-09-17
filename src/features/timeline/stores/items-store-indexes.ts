@@ -340,6 +340,33 @@ export function selectReplaceableCaptionClipIds(state: { items: TimelineItem[] }
   return captionCacheSet
 }
 
+// Items-keyed memo for per-cue caption ownership (embedded subtitles and
+// subtitle imports). Every mounted clip asks whether it owns consolidatable
+// captions on each store notification; a raw scan would be O(N²).
+let consolidatableCaptionItems: TimelineItem[] | null = null
+let consolidatableCaptionClipIds: Set<string> = new Set()
+
+export function selectConsolidatableCaptionClipIds(state: {
+  items: TimelineItem[]
+}): Set<string> {
+  if (consolidatableCaptionItems === state.items) return consolidatableCaptionClipIds
+  const ids = new Set<string>()
+  for (const item of state.items) {
+    if (item.type !== 'text') continue
+    const source = item.captionSource
+    if (
+      source &&
+      (source.type === 'embedded-subtitles' || source.type === 'subtitle-import') &&
+      source.clipId
+    ) {
+      ids.add(source.clipId)
+    }
+  }
+  consolidatableCaptionItems = state.items
+  consolidatableCaptionClipIds = ids
+  return ids
+}
+
 function buildReplaceableCaptionClipIds(items: TimelineItem[]): Set<string> {
   const ids = new Set<string>()
   const clipsByMediaId: Record<string, Array<AudioItem | VideoItem>> = {}

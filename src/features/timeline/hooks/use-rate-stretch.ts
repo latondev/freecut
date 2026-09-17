@@ -26,6 +26,7 @@ import {
 import { applyRateStretchPreview, applyMovePreview } from '../utils/item-edit-preview'
 import type { PreviewItemUpdate } from '../utils/item-edit-preview'
 import { useTransitionsStore } from '../stores/transitions-store'
+import { createRafCoalescedCallback } from '../utils/raf-coalesced-callback'
 
 type StretchHandle = 'start' | 'end'
 
@@ -605,12 +606,21 @@ export function useRateStretch(
   // With useEffectEvent, we only need to depend on stretchState.isStretching
   useEffect(() => {
     if (stretchState.isStretching) {
-      window.addEventListener('mousemove', onMouseMove)
-      window.addEventListener('mouseup', onMouseUp)
+      // Coalesce the pointer stream to one preview/store update per painted frame.
+      const coalescedMouseMove = createRafCoalescedCallback(onMouseMove)
+      const queueMouseMove = (event: MouseEvent) => coalescedMouseMove.queue(event)
+      const handleCoalescedMouseUp = () => {
+        coalescedMouseMove.flush()
+        onMouseUp()
+      }
+
+      window.addEventListener('mousemove', queueMouseMove)
+      window.addEventListener('mouseup', handleCoalescedMouseUp)
 
       return () => {
-        window.removeEventListener('mousemove', onMouseMove)
-        window.removeEventListener('mouseup', onMouseUp)
+        coalescedMouseMove.cancel()
+        window.removeEventListener('mousemove', queueMouseMove)
+        window.removeEventListener('mouseup', handleCoalescedMouseUp)
         useLinkedEditPreviewStore.getState().clear()
         magneticSnapTargetsRef.current = []
       }

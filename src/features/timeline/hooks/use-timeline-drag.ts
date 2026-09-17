@@ -371,6 +371,68 @@ function buildTrackVisualTopMap(
   return topByTrackId
 }
 
+interface DragDropRowGeometry {
+  trackId: string
+  /** Row top relative to its scroll pane's content box (stable while the pane scrolls). */
+  top: number
+  bottom: number
+  pane: HTMLElement | null
+}
+
+interface DragDropGeometry {
+  tracks: TimelineTrack[]
+  trackContainer: HTMLElement | null
+  rows: DragDropRowGeometry[]
+}
+
+/**
+ * Snapshot row geometry once per tracks-array identity. Pane scroll offsets are
+ * re-applied on every read (see resolveDragDropRowBounds), so drag pointer
+ * handling no longer runs querySelectorAll + getBoundingClientRect over every
+ * track row each frame — those reads forced a synchronous layout after the
+ * previous frame's transform write.
+ */
+function captureDragDropGeometry(tracks: TimelineTrack[]): DragDropGeometry {
+  const trackContainerEl = document.querySelector('.timeline-tracks')
+  const containerEl = document.querySelector('.timeline-container')
+  const trackContainer =
+    trackContainerEl instanceof HTMLElement
+      ? trackContainerEl
+      : containerEl instanceof HTMLElement
+        ? containerEl
+        : null
+  const scope: ParentNode = trackContainer ?? document
+  const rows: DragDropRowGeometry[] = []
+
+  for (const element of scope.querySelectorAll('[data-track-id]')) {
+    if (!(element instanceof HTMLElement)) continue
+    const trackId = element.getAttribute('data-track-id')
+    if (!trackId) continue
+    const pane = element.closest<HTMLElement>('[data-track-section-scroll]')
+    const rect = element.getBoundingClientRect()
+    const paneBase = pane ? pane.getBoundingClientRect().top - pane.scrollTop : 0
+    rows.push({ trackId, top: rect.top - paneBase, bottom: rect.bottom - paneBase, pane })
+  }
+
+  return { tracks, trackContainer, rows }
+}
+
+function resolveDragDropRowBounds(
+  geometry: DragDropGeometry,
+): Array<{ trackId: string; top: number; bottom: number }> {
+  const paneBaseByPane = new Map<HTMLElement | null, number>()
+  const bounds = geometry.rows.map((row) => {
+    let paneBase = paneBaseByPane.get(row.pane)
+    if (paneBase === undefined) {
+      paneBase = row.pane ? row.pane.getBoundingClientRect().top - row.pane.scrollTop : 0
+      paneBaseByPane.set(row.pane, paneBase)
+    }
+    return { trackId: row.trackId, top: row.top + paneBase, bottom: row.bottom + paneBase }
+  })
+  bounds.sort((left, right) => left.top - right.top)
+  return bounds
+}
+
 function setGlobalDragCursor(mode: DragCursorMode): void {
   const nextClass = DRAG_CURSOR_CLASS_BY_MODE[mode]
   if (document.body.classList.contains(nextClass)) {
@@ -1012,6 +1074,12 @@ export function useTimelineDrag(
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const dragStateRef = useRef<DragState | null>(null)
   const dragVisualTopByTrackIdRef = useRef<Map<string, number>>(new Map())
+  const dragDropGeometryRef = useRef<DragDropGeometry | null>(null)
+  const dragItemIndexCacheRef = useRef<{
+    items: TimelineItem[]
+    tracks: TimelineTrack[]
+    value: ReturnType<typeof snapshotDragItemIndexes>
+  } | null>(null)
   const linkedMovePreviewSignatureRef = useRef('')
 
   // Track Alt key state for duplication mode (dynamic toggle during drag)
@@ -1096,6 +1164,17 @@ export function useTimelineDrag(
 
   // Helper to get items on-demand (avoids subscription that would cause all items to re-render)
   const getItems = useCallback(() => useTimelineStore.getState().items, [])
+  // Item/track lookup maps are stable for a given items-array + tracks-array
+  // pair, so pointer moves can reuse them instead of rebuilding Maps per frame.
+  const getDragItemIndexes = useCallback((items: TimelineItem[], tracks: TimelineTrack[]) => {
+    const cached = dragItemIndexCacheRef.current
+    if (cached && cached.items === items && cached.tracks === tracks) {
+      return cached.value
+    }
+    const value = snapshotDragItemIndexes(items, tracks)
+    dragItemIndexCacheRef.current = { items, tracks, value }
+    return value
+  }, [])
   // Update refs synchronously (not in useEffect) so they're always current
   const magneticSnapTargetsRef = useRef<SnapTarget[]>([])
   const getSnapThresholdFramesRef = useRef(getSnapThresholdFrames)
@@ -1123,56 +1202,53 @@ export function useTimelineDrag(
   ])
 
   /**
+   * Cached row geometry for the current tracks array, with live pane scroll
+   * offsets applied. Reading DOM rects for every row on every pointer move
+   * forced a layout each frame; this keeps reads to one rect per pane.
+   */
+  const getDragDropGeometry = useCallback((tracks: TimelineTrack[]) => {
+    const cached = dragDropGeometryRef.current
+    const geometry = cached && cached.tracks === tracks ? cached : captureDragDropGeometry(tracks)
+    dragDropGeometryRef.current = geometry
+    return { trackContainer: geometry.trackContainer, rows: resolveDragDropRowBounds(geometry) }
+  }, [])
+
+  /**
    * Calculate which track the mouse is over based on Y position
    */
-  const getTrackIdFromMouseY = useCallback((mouseY: number, startTrackId: string): string => {
-    const container = document.querySelector('.timeline-container')
-    const trackElements = (container ?? document).querySelectorAll('[data-track-id]')
-    const tracks = tracksRef.current
+  const getTrackIdFromMouseY = useCallback(
+    (mouseY: number, startTrackId: string): string => {
+      const tracks = tracksRef.current
+      const { rows } = getDragDropGeometry(tracks)
 
-    // Find track element under cursor
-    for (const el of Array.from(trackElements)) {
-      const rect = el.getBoundingClientRect()
-      if (mouseY >= rect.top && mouseY <= rect.bottom) {
-        const trackId = el.getAttribute('data-track-id')
-        if (trackId) {
-          return trackId
+      // Find track row under cursor
+      for (const row of rows) {
+        if (mouseY >= row.top && mouseY <= row.bottom) {
+          return row.trackId
         }
       }
-    }
 
-    // Fallback to calculating by track height
-    const startTrack = tracks.find((t) => t.id === startTrackId)
-    if (!startTrack) return startTrackId
+      // Fallback to calculating by track height
+      const startTrack = tracks.find((t) => t.id === startTrackId)
+      if (!startTrack) return startTrackId
 
-    const startTrackIndex = tracks.findIndex((t) => t.id === startTrackId)
-    const trackHeight = startTrack.height || 64
-    const deltaY = mouseY - (dragStateRef.current?.startMouseY || 0)
-    const trackOffset = Math.round(deltaY / trackHeight)
-    const newTrackIndex = Math.max(0, Math.min(tracks.length - 1, startTrackIndex + trackOffset))
+      const startTrackIndex = tracks.findIndex((t) => t.id === startTrackId)
+      const trackHeight = startTrack.height || 64
+      const deltaY = mouseY - (dragStateRef.current?.startMouseY || 0)
+      const trackOffset = Math.round(deltaY / trackHeight)
+      const newTrackIndex = Math.max(0, Math.min(tracks.length - 1, startTrackIndex + trackOffset))
 
-    return tracks[newTrackIndex]?.id || startTrackId
-  }, [])
+      return tracks[newTrackIndex]?.id || startTrackId
+    },
+    [getDragDropGeometry],
+  )
 
   const getTrackDropTarget = useCallback(
     (
       mouseY: number,
       startTrackId: string,
     ): { trackId: string; zone: LinkedDragDropZone | null; createNew?: boolean } => {
-      const trackContainer = document.querySelector('.timeline-tracks')
-      const container = document.querySelector('.timeline-container')
-      const trackElements = (trackContainer ?? container ?? document).querySelectorAll(
-        '[data-track-id]',
-      )
-      const trackRows = Array.from(trackElements)
-        .filter((el): el is HTMLElement => el instanceof HTMLElement)
-        .map((el) => ({
-          el,
-          rect: el.getBoundingClientRect(),
-          trackId: el.getAttribute('data-track-id'),
-        }))
-        .filter((row): row is { el: HTMLElement; rect: DOMRect; trackId: string } => !!row.trackId)
-        .sort((left, right) => left.rect.top - right.rect.top)
+      const { trackContainer, rows: trackRows } = getDragDropGeometry(tracksRef.current)
 
       const dragState = dragStateRef.current
       const startTrack = tracksRef.current.find((track) => track.id === startTrackId)
@@ -1188,22 +1264,22 @@ export function useTimelineDrag(
         .reverse()
         .find((track) => getTrackKind(track) === 'audio')
 
-      if (trackContainer instanceof HTMLElement && trackRows.length > 0) {
+      if (trackContainer && trackRows.length > 0) {
         const trackContainerRect = trackContainer.getBoundingClientRect()
         const firstRow = trackRows[0]!
         const lastRow = trackRows[trackRows.length - 1]!
 
-        if (firstVideoTrack && mouseY >= trackContainerRect.top && mouseY < firstRow.rect.top) {
+        if (firstVideoTrack && mouseY >= trackContainerRect.top && mouseY < firstRow.top) {
           return { trackId: firstVideoTrack.id, zone: 'video', createNew: true }
         }
-        if (lastAudioTrack && mouseY > lastRow.rect.bottom && mouseY <= trackContainerRect.bottom) {
+        if (lastAudioTrack && mouseY > lastRow.bottom && mouseY <= trackContainerRect.bottom) {
           return { trackId: lastAudioTrack.id, zone: 'audio', createNew: true }
         }
       }
 
       for (const row of trackRows) {
-        const { rect, trackId } = row
-        if (mouseY < rect.top || mouseY > rect.bottom) continue
+        const { trackId } = row
+        if (mouseY < row.top || mouseY > row.bottom) continue
 
         const hoveredTrack = tracksRef.current.find((track) => track.id === trackId)
         const hoveredKind = hoveredTrack ? getTrackKind(hoveredTrack) : null
@@ -1226,7 +1302,7 @@ export function useTimelineDrag(
         zone: null,
       }
     },
-    [getTrackIdFromMouseY],
+    [getTrackIdFromMouseY, getDragDropGeometry],
   )
 
   const getCompatibleTrackIdFromMouseY = useCallback(
@@ -1367,6 +1443,7 @@ export function useTimelineDrag(
       // Relative track deltas stay stable during vertical scrolling, so pointer
       // moves can derive every preview offset without forcing layout again.
       dragVisualTopByTrackIdRef.current = captureTrackVisualTops()
+      dragDropGeometryRef.current = null
 
       // Don't set cursor immediately - wait for drag threshold
 
@@ -1412,6 +1489,7 @@ export function useTimelineDrag(
         dragStateRef.current = null
         magneticSnapTargetsRef.current = []
         dragVisualTopByTrackIdRef.current.clear()
+        dragDropGeometryRef.current = null
         dragPreviewOffsetByItemRef.current = {}
         clearLargeAltDragCanvas()
         clearLinkedMovePreview()
@@ -1464,7 +1542,7 @@ export function useTimelineDrag(
       const { clampedDeltaX } = clampDragDeltaToZero(draggedItems, deltaFrames, deltaX)
 
       const currentItems = getItems()
-      const { currentItemById, currentItemsByTrackId, trackIndexById } = snapshotDragItemIndexes(
+      const { currentItemById, currentItemsByTrackId, trackIndexById } = getDragItemIndexes(
         currentItems,
         tracksRef.current,
       )
@@ -1741,6 +1819,7 @@ export function useTimelineDrag(
             }
             dragOffsetRef.current = { x: 0, y: 0 }
             dragVisualTopByTrackIdRef.current.clear()
+            dragDropGeometryRef.current = null
             dragPreviewOffsetByItemRef.current = {}
             clearLargeAltDragCanvas()
             clearLinkedMovePreview()
@@ -1874,6 +1953,7 @@ export function useTimelineDrag(
       }
       dragOffsetRef.current = { x: 0, y: 0 } // Reset shared ref immediately
       dragVisualTopByTrackIdRef.current.clear()
+      dragDropGeometryRef.current = null
       dragPreviewOffsetByItemRef.current = {}
       clearLargeAltDragCanvas()
       clearLinkedMovePreview()
@@ -1913,6 +1993,7 @@ export function useTimelineDrag(
         coalescedMouseMove.cancel()
         magneticSnapTargetsRef.current = []
         dragVisualTopByTrackIdRef.current.clear()
+        dragDropGeometryRef.current = null
         clearLargeAltDragCanvas()
         clearLinkedMovePreview()
         clearGlobalDragCursor()
@@ -1931,6 +2012,7 @@ export function useTimelineDrag(
     clearLinkedMovePreview,
     elementRef,
     getItems,
+    getDragItemIndexes,
     setActiveLinkedDropTarget,
     setActiveSnapTarget,
     setDragState,

@@ -8,6 +8,7 @@ import { useTrackPushPreviewStore } from '../stores/track-push-preview-store'
 import { trackPushItems } from '../stores/actions/item-actions'
 import type { SnapTarget } from '../types/drag'
 import { setActiveSnapTargetIfChanged } from '../utils/snap-target-state'
+import { createRafCoalescedCallback } from '../utils/raf-coalesced-callback'
 
 interface TrackPushState {
   isActive: boolean
@@ -124,11 +125,20 @@ export function useTrackPush(
 
   useEffect(() => {
     if (state.isActive) {
-      window.addEventListener('mousemove', handleMouseMove)
-      window.addEventListener('mouseup', handleMouseUp)
+      // Coalesce the pointer stream to one preview update per painted frame.
+      const coalescedMouseMove = createRafCoalescedCallback(handleMouseMove)
+      const queueMouseMove = (event: MouseEvent) => coalescedMouseMove.queue(event)
+      const handleCoalescedMouseUp = () => {
+        coalescedMouseMove.flush()
+        handleMouseUp()
+      }
+
+      window.addEventListener('mousemove', queueMouseMove)
+      window.addEventListener('mouseup', handleCoalescedMouseUp)
       return () => {
-        window.removeEventListener('mousemove', handleMouseMove)
-        window.removeEventListener('mouseup', handleMouseUp)
+        coalescedMouseMove.cancel()
+        window.removeEventListener('mousemove', queueMouseMove)
+        window.removeEventListener('mouseup', handleCoalescedMouseUp)
         useTrackPushPreviewStore.getState().clearPreview()
         magneticSnapTargetsRef.current = []
         setActiveSnapTarget(null)
