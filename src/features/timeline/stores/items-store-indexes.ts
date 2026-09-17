@@ -382,6 +382,19 @@ export function selectAudioGraphItems(state: { items: TimelineItem[] }): Timelin
   return audioGraphItemsCache
 }
 
+// Items-keyed memo for consumers that only need stable item ids (marquee hit
+// testing at the timeline root). Avoids re-allocating the id array on every
+// unrelated items update.
+let itemIdsCacheItems: TimelineItem[] | null = null
+let itemIdsCache: string[] = []
+
+export function selectItemIds(state: { items: TimelineItem[] }): string[] {
+  if (itemIdsCacheItems === state.items) return itemIdsCache
+  itemIdsCacheItems = state.items
+  itemIdsCache = state.items.map((item) => item.id)
+  return itemIdsCache
+}
+
 function buildReplaceableCaptionClipIds(items: TimelineItem[]): Set<string> {
   const ids = new Set<string>()
   const clipsByMediaId: Record<string, Array<AudioItem | VideoItem>> = {}

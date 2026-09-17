@@ -1,10 +1,10 @@
 import { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback, memo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useShallow } from 'zustand/react/shallow'
 
 // Stores and selectors
 import { useTimelineStore } from '../stores/timeline-store'
 import { useItemsStore } from '../stores/items-store'
+import { selectItemIds } from '../stores/items-store-indexes'
 import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 import { useTimelineViewportStore } from '../stores/timeline-viewport-store'
 import { registerZoomTo100, useZoomStore } from '../stores/zoom-store'
@@ -1167,10 +1167,10 @@ export const TimelineContent = memo(function TimelineContent({
     allTracksScrollRef,
   ])
 
-  // Marquee selection - create items array for getBoundingRect lookups
-  // Use derived selector for item IDs only (doesn't re-render when positions change)
-  // useShallow prevents infinite loops from array reference changes
-  const itemIds = useItemsStore(useShallow((s) => s.items.map((item) => item.id)))
+  // Marquee selection - create items array for getBoundingRect lookups.
+  // selectItemIds memoizes the id array per items revision so the marquee layer
+  // doesn't re-allocate (or re-render) on unrelated item property updates.
+  const itemIds = useItemsStore(selectItemIds)
 
   const handleMarqueeSelectionChange = useCallback(
     (ids: string[]) => {

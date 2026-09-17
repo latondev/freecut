@@ -437,10 +437,6 @@ function removeMatchingFallbackBitmaps(src: string, timestamp: number): void {
   }
   if (retained.length > 0) fallbackBitmapCache.set(src, retained)
   else fallbackBitmapCache.delete(src)
-  decoderPrewarmMetrics.fallbackBitmaps = [...fallbackBitmapCache.values()].reduce(
-    (sum, sourceEntries) => sum + sourceEntries.length,
-    0,
-  )
 }
 
 function ensureBitmapCacheSourceCapacity(src: string): void {
@@ -485,11 +481,6 @@ function cachePredecodedBitmap(
   bitmapCache.delete(src)
   bitmapCache.set(src, entries)
   removeMatchingFallbackBitmaps(src, timestamp)
-  decoderPrewarmMetrics.cacheSources = bitmapCache.size
-  decoderPrewarmMetrics.cacheBitmaps = [...bitmapCache.values()].reduce(
-    (sum, sourceEntries) => sum + sourceEntries.length,
-    0,
-  )
   const activeTargets = latestActivePreviewTimestampsBySrc.get(src)
   if (
     activePreviewScrubSession &&
@@ -528,10 +519,6 @@ export function cacheActivePreviewFallbackBitmap(
   while (entries.length > MAX_FALLBACK_BITMAPS_PER_SOURCE) entries.shift()?.bitmap.close()
   fallbackBitmapCache.delete(src)
   fallbackBitmapCache.set(src, entries)
-  decoderPrewarmMetrics.fallbackBitmaps = [...fallbackBitmapCache.values()].reduce(
-    (sum, sourceEntries) => sum + sourceEntries.length,
-    0,
-  )
 
   const activeTargets = latestActivePreviewTimestampsBySrc.get(src)
   if (
@@ -1511,6 +1498,13 @@ function clearPredecodedCache(src?: string): void {
     unavailableBlobUrls.clear()
     keyframesSentForSrc.clear()
   }
+}
+
+/**
+ * Cache sizes are derived at snapshot time instead of being recomputed (spread
+ * + reduce over every cached source) on each decoded frame.
+ */
+function refreshCacheMetrics(): void {
   decoderPrewarmMetrics.cacheSources = bitmapCache.size
   decoderPrewarmMetrics.cacheBitmaps = [...bitmapCache.values()].reduce(
     (sum, sourceEntries) => sum + sourceEntries.length,
@@ -1569,5 +1563,6 @@ export function disposePrewarmWorker(): void {
 }
 
 export function getDecoderPrewarmMetricsSnapshot(): DecoderPrewarmMetricsSnapshot {
+  refreshCacheMetrics()
   return { ...decoderPrewarmMetrics }
 }
