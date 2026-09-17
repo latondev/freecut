@@ -10,10 +10,10 @@ import {
   useSyncExternalStore,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useShallow } from 'zustand/react/shallow'
 import {
   useTimelineStore,
   useItemsStore,
+  selectAudioGraphItems,
   useCompositionsStore,
   useTimelineCommandStore,
   captureSnapshot,
@@ -212,14 +212,7 @@ export const AudioMeterPanel = memo(function AudioMeterPanel() {
   // Purely visual layers cannot contribute audio. Keep them out of this
   // subscription so moving text/shapes does not rebuild the complete mixer
   // graph on gizmo release.
-  const audioGraphItems = useItemsStore(
-    useShallow((state) =>
-      state.items.filter(
-        (item) =>
-          item.type === 'audio' || item.type === 'video' || item.type === 'composition',
-      ),
-    ),
-  )
+  const audioGraphItems = useItemsStore(selectAudioGraphItems)
   const itemsByTrackId = useMemo(() => {
     const grouped: Record<string, typeof audioGraphItems> = {}
     for (const item of audioGraphItems) {

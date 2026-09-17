@@ -74,8 +74,12 @@ interface ShapeSectionProps {
 export function ShapeSection({ items }: ShapeSectionProps) {
   const { t } = useTranslation()
   const updateItem = useTimelineStore((s) => s.updateItem)
-  const { isEditing, editingItemId, penMode, selectedVertexIndex, startEditing, stopEditing } =
-    useMaskEditorStore()
+  const isEditing = useMaskEditorStore((s) => s.isEditing)
+  const editingItemId = useMaskEditorStore((s) => s.editingItemId)
+  const penMode = useMaskEditorStore((s) => s.penMode)
+  const selectedVertexIndex = useMaskEditorStore((s) => s.selectedVertexIndex)
+  const startEditing = useMaskEditorStore((s) => s.startEditing)
+  const stopEditing = useMaskEditorStore((s) => s.stopEditing)
 
   // Gizmo store for live property preview
   const setPropertiesPreviewNew = useGizmoStore((s) => s.setPropertiesPreviewNew)

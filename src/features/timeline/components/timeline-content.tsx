@@ -1460,8 +1460,11 @@ export const TimelineContent = memo(function TimelineContent({
       const scrollContainer = containerRef.current
       if (!scrollContainer) return
 
-      const rect = scrollContainer.getBoundingClientRect()
-      const x = e.clientX - rect.left + scrollContainer.scrollLeft
+      // Prefer the ResizeObserver-maintained box cache; a live rect read on every
+      // hover move can force a layout flush after gesture transform writes.
+      const containerLeft =
+        viewportDimsRef.current?.left ?? scrollContainer.getBoundingClientRect().left
+      const x = e.clientX - containerLeft + scrollContainer.scrollLeft
 
       // In razor mode with Shift held, snap to nearby targets
       const isRazor = useSelectionStore.getState().activeTool === 'razor'

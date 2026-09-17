@@ -367,6 +367,21 @@ export function selectConsolidatableCaptionClipIds(state: {
   return ids
 }
 
+// Items-keyed memo for the audio mixer graph. Returning the same array while
+// items are unchanged keeps the mixer panel from re-filtering (and rebuilding
+// its graph) on every unrelated item edit.
+let audioGraphItemsCacheItems: TimelineItem[] | null = null
+let audioGraphItemsCache: TimelineItem[] = []
+
+export function selectAudioGraphItems(state: { items: TimelineItem[] }): TimelineItem[] {
+  if (audioGraphItemsCacheItems === state.items) return audioGraphItemsCache
+  audioGraphItemsCacheItems = state.items
+  audioGraphItemsCache = state.items.filter(
+    (item) => item.type === 'audio' || item.type === 'video' || item.type === 'composition',
+  )
+  return audioGraphItemsCache
+}
+
 function buildReplaceableCaptionClipIds(items: TimelineItem[]): Set<string> {
   const ids = new Set<string>()
   const clipsByMediaId: Record<string, Array<AudioItem | VideoItem>> = {}

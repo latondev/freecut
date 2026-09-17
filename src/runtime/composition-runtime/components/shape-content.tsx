@@ -20,7 +20,7 @@ import {
   buildTaperedOutline,
   getTaperedOutlineFillPath,
 } from '@/shared/graphics/shapes/taper-outline'
-import { useItemGizmoPreview, useTimelineStore } from '@/runtime/composition-runtime/deps/stores'
+import { useItemGizmoPreview, useKeyframesStore } from '@/runtime/composition-runtime/deps/stores'
 import type { ShapeItem } from '@/types/timeline'
 import { useCompositionSpace } from '../contexts/composition-space-context'
 import { useItemVisualTransform } from '../contexts/item-visual-transform-context'
@@ -82,8 +82,8 @@ export const ShapeContent: React.FC<{ item: ShapeItem & { _sequenceFrameOffset?:
   const sequenceContext = useSequenceContext()
   const keyframesContext = useContext(KeyframesContext)
   const contextKeyframes = useItemKeyframesFromContext(item.id)
-  const storeKeyframes = useTimelineStore(
-    useCallback((s) => s.keyframes.find((entry) => entry.itemId === item.id), [item.id]),
+  const storeKeyframes = useKeyframesStore(
+    useCallback((s) => s.keyframesByItemId[item.id], [item.id]),
   )
   const sequenceFrameOffset =
     item._sequenceFrameOffset ??

@@ -203,7 +203,7 @@ export const PreviewArea = memo(function PreviewArea({
     useCallback(
       (s) => {
         if (!editingItemId) return 0
-        const item = s.items.find((candidate) => candidate.id === editingItemId)
+        const item = s.itemById[editingItemId]
         return item?.type === 'shape' && item.shapeType === 'path'
           ? (item.pathVertices?.length ?? 0)
           : 0

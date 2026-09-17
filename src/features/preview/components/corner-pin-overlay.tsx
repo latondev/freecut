@@ -56,12 +56,13 @@ export const CornerPinOverlay = memo(function CornerPinOverlay({
   const dragHandleRef = useRef<CornerPinHandle | null>(null)
   const dragStartPinRef = useRef<CornerPinValues>(DEFAULT_PIN)
 
-  const { editingItemId, draggingHandle, hoveredHandle, previewCornerPin, setHovered } =
-    useCornerPinStore()
+  const editingItemId = useCornerPinStore((s) => s.editingItemId)
+  const draggingHandle = useCornerPinStore((s) => s.draggingHandle)
+  const hoveredHandle = useCornerPinStore((s) => s.hoveredHandle)
+  const previewCornerPin = useCornerPinStore((s) => s.previewCornerPin)
+  const setHovered = useCornerPinStore((s) => s.setHovered)
 
-  const items = useItemsStore((s) => s.items)
-
-  const item = items.find((i) => i.id === editingItemId)
+  const item = useItemsStore((s) => (editingItemId ? s.itemById[editingItemId] : undefined))
   const cornerPinTargetRect = useCallback(
     (transform: Transform) =>
       resolveCornerPinTargetRect(

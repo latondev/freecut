@@ -562,17 +562,19 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
     if (!container) return
 
     // Content clip rows live under the track-sections surface, scoped here so we don't
-    // also match the header rows (both use data-track-id).
-    const getContentRows = (): NodeListOf<HTMLElement> | HTMLElement[] =>
+    // also match the header rows (both use data-track-id). The row set is stable for
+    // the duration of a track drag, so query it once instead of every frame.
+    const headerRows = Array.from(container.querySelectorAll<HTMLElement>('[data-track-id]'))
+    const contentRows = Array.from(
       document
         .getElementById('timeline-track-sections')
-        ?.querySelectorAll<HTMLElement>('[data-track-id]') ?? []
+        ?.querySelectorAll<HTMLElement>('[data-track-id]') ?? [],
+    )
 
     let rafId: number
     const updateDragVisuals = () => {
       const offset = trackDragOffsetRef.current
-      const elements = container.querySelectorAll<HTMLElement>('[data-track-id]')
-      for (const el of elements) {
+      for (const el of headerRows) {
         const trackId = el.getAttribute('data-track-id')
         if (trackId && draggedIds.has(trackId)) {
           el.style.transform = `translateY(${offset}px) scale(1.02)`
@@ -584,7 +586,7 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
       }
       // Clip rows ghost-follow the header. No horizontal scale here — it would shift the
       // clips sideways; just translate + dim so the clips track the drag.
-      for (const el of getContentRows()) {
+      for (const el of contentRows) {
         const trackId = el.getAttribute('data-track-id')
         if (trackId && draggedIds.has(trackId)) {
           el.style.transform = `translateY(${offset}px)`
@@ -600,18 +602,15 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
     return () => {
       cancelAnimationFrame(rafId)
       // Reset styles on all track headers
-      if (container) {
-        const elements = container.querySelectorAll<HTMLElement>('[data-track-id]')
-        for (const el of elements) {
-          el.style.transform = ''
-          el.style.zIndex = ''
-          el.style.opacity = ''
-          el.style.transition = ''
-          el.style.boxShadow = ''
-        }
+      for (const el of headerRows) {
+        el.style.transform = ''
+        el.style.zIndex = ''
+        el.style.opacity = ''
+        el.style.transition = ''
+        el.style.boxShadow = ''
       }
       // Reset styles on the clip rows
-      for (const el of getContentRows()) {
+      for (const el of contentRows) {
         el.style.transform = ''
         el.style.zIndex = ''
         el.style.opacity = ''

@@ -7,6 +7,7 @@ export type { TimelineState, TimelineActions } from '@/features/timeline/types'
 export { useTimelineStore } from '@/features/timeline/stores/timeline-store'
 export { useTimelineSettingsStore } from '@/features/timeline/stores/timeline-settings-store'
 export { useItemsStore } from '@/features/timeline/stores/items-store'
+export { selectAudioGraphItems } from '@/features/timeline/stores/items-store-indexes'
 export { useKeyframesStore } from '@/features/timeline/stores/keyframes-store'
 export { useCompositionsStore } from '@/features/timeline/stores/compositions-store'
 export {

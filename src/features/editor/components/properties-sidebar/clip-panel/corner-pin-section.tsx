@@ -39,12 +39,10 @@ const CORNER_LABELS: Record<CornerKey, string> = {
 export const CornerPinSection = memo(function CornerPinSection({ items }: CornerPinSectionProps) {
   const { t } = useTranslation()
   const updateItem = useTimelineStore((s) => s.updateItem)
-  const {
-    isEditing: isCornerPinEditing,
-    editingItemId,
-    startEditing,
-    stopEditing,
-  } = useCornerPinStore()
+  const isCornerPinEditing = useCornerPinStore((s) => s.isEditing)
+  const editingItemId = useCornerPinStore((s) => s.editingItemId)
+  const startEditing = useCornerPinStore((s) => s.startEditing)
+  const stopEditing = useCornerPinStore((s) => s.stopEditing)
 
   const item = items.length === 1 ? items[0]! : null
   const cornerPin = useMemo(() => {
