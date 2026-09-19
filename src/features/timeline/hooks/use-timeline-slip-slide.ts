@@ -275,22 +275,26 @@ function syncSlipPreview(options: { itemId: string; trackId: string; clamped: nu
 function commitDragLocalState(refs: SlipSlideLocalRefs, result: SlipSlideClampResult): void {
   const { latestDeltaRef, stateRef, setState } = refs
   const { clamped, isConstrained, constraintEdge, constraintLabel } = result
-  if (
-    clamped === latestDeltaRef.current &&
-    isConstrained === stateRef.current.isConstrained &&
-    constraintEdge === stateRef.current.constraintEdge &&
-    constraintLabel === stateRef.current.constraintLabel
-  ) {
+  const deltaChanged = clamped !== latestDeltaRef.current
+  const constraintChanged =
+    isConstrained !== stateRef.current.isConstrained ||
+    constraintEdge !== stateRef.current.constraintEdge ||
+    constraintLabel !== stateRef.current.constraintLabel
+  if (!deltaChanged && !constraintChanged) {
     return
   }
   latestDeltaRef.current = clamped
-  setState((prev) => ({
-    ...prev,
-    currentDelta: clamped,
-    isConstrained,
-    constraintEdge,
-    constraintLabel,
-  }))
+  // Only constraint transitions are rendered (they drive the halo/label), so a
+  // delta-only frame must not re-render the clip; the commit reads the ref.
+  if (constraintChanged) {
+    setState((prev) => ({
+      ...prev,
+      currentDelta: clamped,
+      isConstrained,
+      constraintEdge,
+      constraintLabel,
+    }))
+  }
 }
 
 function buildSlipLinkedUpdates(options: {
@@ -1502,7 +1506,7 @@ export function useTimelineSlipSlide(
   return {
     isSlipSlideActive: state.isActive,
     slipSlideMode: state.mode,
-    slipSlideDelta: state.currentDelta,
+    slipSlideDelta: latestDeltaRef.current,
     slipSlideConstrained: state.isConstrained,
     slipSlideConstraintEdge: state.constraintEdge,
     slipSlideConstraintLabel: state.constraintLabel,

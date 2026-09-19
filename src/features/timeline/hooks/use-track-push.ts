@@ -96,9 +96,10 @@ export function useTrackPush(
         previewStore.setDelta(deltaFrames)
       }
 
-      if (deltaFrames !== stateRef.current.currentDelta) {
-        setState((prev) => ({ ...prev, currentDelta: deltaFrames }))
-      }
+      // The delta is only read imperatively (mouseup commit) and by the
+      // preview store above; keeping it in React state re-rendered the clip
+      // on every pointer frame for nothing.
+      stateRef.current.currentDelta = deltaFrames
 
       setActiveSnapTargetIfChanged({
         previousRef: prevSnapTargetRef,
