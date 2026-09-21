@@ -53,9 +53,6 @@ import {
   selectBoundaryPrewarmFrames,
   selectBoundarySourcePrewarmSources,
   shouldDropStalePausedPreviewRender,
-  shouldPreservePausedTransportPresentation,
-  shouldProbePreviewSourcePixels,
-  shouldRejectBlankReleasedScrubHandoff,
   shouldRejectBlankTransportHandoff,
   shouldRecoverFailedActivePreseekSchedule,
   shouldRestoreCommittedPreviewSnapshot,
@@ -92,10 +89,8 @@ import {
   resolveScrubPrewarmIdleDelayMs,
   shouldUseCompositionScrubPrewarm,
 } from '../utils/render-pump-prewarm-plan'
-import {
-  drawSourceToPreviewDisplayCanvas,
-  type CommittedPreviewSnapshotState,
-} from '../utils/preview-display-canvas'
+import type { CommittedPreviewSnapshotState } from '../utils/preview-display-canvas'
+import { createPreviewPresentationGate } from '../utils/preview-presentation-gate'
 import type { TransitionPreviewSessionTrace } from './use-preview-transition-session-controller'
 import { resolveTransitionDomPlaybackState } from '../utils/transition-dom-playback'
 import { createLogger } from '@/shared/logging/logger'
@@ -367,204 +362,37 @@ export function usePreviewRenderPump({
     let transportSettlingUntilMs = 0
     let pausedTransportHeldFrame: number | null = null
     let pausedTransportHoldUntilMs = 0
-    let blankProbeCanvas: OffscreenCanvas | null = null
     const committedPreviewSnapshot = committedPreviewSnapshotRef.current
-    const clearReleasedScrubSnapshotGuard = () => {
-      committedPreviewSnapshot.guardFrame = null
-      committedPreviewSnapshot.guardUntilMs = 0
-    }
-
-    const captureCommittedPreviewSnapshot = (frame: number) => {
-      const displayCanvas = scrubCanvasRef.current
-      if (
-        !displayCanvas ||
-        !showFastScrubOverlayRef.current ||
-        usePreviewBridgeStore.getState().displayedFrame !== frame
-      ) {
-        // A hidden scrub canvas is not the visible committed presentation.
-        // It may contain an old partial render even though its frame tag still
-        // matches the playhead. Never promote those pixels on gesture entry.
-        // A transient ruler -> track -> ruler handoff can attempt another
-        // capture while the hover frame is on top. Preserve an earlier
-        // authoritative snapshot for the same committed playhead frame.
-        if (committedPreviewSnapshot.frame !== frame) {
-          committedPreviewSnapshot.frame = null
-          clearReleasedScrubSnapshotGuard()
-        }
-        return
-      }
-      if (
-        !committedPreviewSnapshot.canvas ||
-        committedPreviewSnapshot.canvas.width !== displayCanvas.width ||
-        committedPreviewSnapshot.canvas.height !== displayCanvas.height
-      ) {
-        committedPreviewSnapshot.canvas = new OffscreenCanvas(
-          displayCanvas.width,
-          displayCanvas.height,
-        )
-      }
-      const context = committedPreviewSnapshot.canvas.getContext('2d')
-      if (!context) return
-      context.clearRect(
-        0,
-        0,
-        committedPreviewSnapshot.canvas.width,
-        committedPreviewSnapshot.canvas.height,
-      )
-      context.drawImage(displayCanvas, 0, 0)
-      committedPreviewSnapshot.frame = frame
-    }
-
-    const isEffectivelyBlankPreviewSource = (
-      source: OffscreenCanvas | HTMLCanvasElement,
-    ): boolean => {
-      if (!shouldProbePreviewSourcePixels(usePlaybackStore.getState().isPlaying)) {
-        return false
-      }
-      try {
-        blankProbeCanvas ??= new OffscreenCanvas(8, 8)
-        const context = blankProbeCanvas.getContext('2d', { willReadFrequently: true })
-        if (!context) return false
-        context.clearRect(0, 0, 8, 8)
-        context.drawImage(source, 0, 0, 8, 8)
-        const pixels = context.getImageData(0, 0, 8, 8).data
-        let rgbTotal = 0
-        for (let index = 0; index < pixels.length; index += 4) {
-          rgbTotal +=
-            (pixels.at(index) ?? 0) + (pixels.at(index + 1) ?? 0) + (pixels.at(index + 2) ?? 0)
-          if (rgbTotal > 8) return false
-        }
-        return true
-      } catch {
-        // A presentation safeguard must never turn a readback limitation into
-        // a dropped frame. If probing is unavailable, preserve normal output.
-        return false
-      }
-    }
-
-    const drawSourceToDisplay = (
-      source: OffscreenCanvas | HTMLCanvasElement,
-      renderedFrame: number,
-      usedFallback = false,
-    ) => {
-      const displayCanvas = scrubCanvasRef.current
-      if (!displayCanvas) return
-      const displayCtx = displayCanvas.getContext('2d')
-      if (!displayCtx) return
-      const displayedFrame = usePreviewBridgeStore.getState().displayedFrame
-      const playbackState = usePlaybackStore.getState()
-      // Pixel probes force a synchronous GPU readback, and the same three
-      // surfaces can each be probed from several rejection checks in one draw.
-      // Memoize per invocation so repeated checks reuse the first sample.
-      let sourceBlank: boolean | null = null
-      let snapshotCanvasBlank: boolean | null = null
-      let displayCanvasBlank: boolean | null = null
-      const probeSourceBlank = () => {
-        sourceBlank ??= isEffectivelyBlankPreviewSource(source)
-        return sourceBlank
-      }
-      const probeSnapshotCanvasBlank = () => {
-        if (!committedPreviewSnapshot.canvas) return true
-        snapshotCanvasBlank ??= isEffectivelyBlankPreviewSource(committedPreviewSnapshot.canvas)
-        return snapshotCanvasBlank
-      }
-      const probeDisplayCanvasBlank = () => {
-        displayCanvasBlank ??= isEffectivelyBlankPreviewSource(displayCanvas)
-        return displayCanvasBlank
-      }
-      if (
-        committedPreviewSnapshot.guardFrame !== null &&
-        performance.now() > committedPreviewSnapshot.guardUntilMs
-      ) {
-        clearReleasedScrubSnapshotGuard()
-      }
-      if (
-        committedPreviewSnapshot.guardFrame !== null &&
-        committedPreviewSnapshot.canvas &&
-        shouldRejectBlankReleasedScrubHandoff({
-          releaseGuardFrame: committedPreviewSnapshot.guardFrame,
-          renderedFrame,
-          currentFrame: playbackState.currentFrame,
-          previewFrame: playbackState.previewFrame,
-          isPlaying: playbackState.isPlaying,
-          snapshotFrame: committedPreviewSnapshot.frame,
-          probeRenderedFrameBlank: probeSourceBlank,
-          probeSnapshotFrameBlank: probeSnapshotCanvasBlank,
-        })
-      ) {
-        if (source === scrubOffscreenCanvasRef.current) {
-          scrubOffscreenRenderedFrameRef.current = null
+    // Presentation decisions (blank-frame rejection, released-scrub guard,
+    // paused transport hold) live in the gate; the pump only feeds it renders.
+    const presentation = createPreviewPresentationGate({
+      getDisplayCanvas: () => scrubCanvasRef.current,
+      getDisplayedFrame: () => usePreviewBridgeStore.getState().displayedFrame,
+      getPlaybackState: () => usePlaybackStore.getState(),
+      isDisplayVisible: () => showFastScrubOverlayRef.current,
+      getCommittedSnapshot: () => committedPreviewSnapshot,
+      getOffscreenCanvas: () => scrubOffscreenCanvasRef.current,
+      discardOffscreenRender: (source, renderedFrame, options) => {
+        if (source !== scrubOffscreenCanvasRef.current) return
+        scrubOffscreenRenderedFrameRef.current = null
+        if (options.invalidateCache) {
           scrubRendererRef.current?.invalidateFrameCache({ frames: [renderedFrame] })
         }
-        // A resize or layout rebuild can clear the display canvas while this
-        // delayed render is in flight. Reassert the immutable committed copy
-        // instead of merely declining the blank replacement.
-        drawSourceToPreviewDisplayCanvas(displayCtx, displayCanvas, committedPreviewSnapshot.canvas)
-        setDisplayedFrame(renderedFrame)
-        return
-      }
-      const shouldReleaseScrubSnapshotGuardAfterDraw =
-        committedPreviewSnapshot.guardFrame === renderedFrame &&
-        source !== committedPreviewSnapshot.canvas &&
-        !probeSourceBlank()
-      if (
-        shouldPreservePausedTransportPresentation({
-          holdActive: performance.now() <= pausedTransportHoldUntilMs,
-          heldFrame: pausedTransportHeldFrame,
-          renderedFrame,
-          displayedFrame,
-          currentFrame: playbackState.currentFrame,
-          previewFrame: playbackState.previewFrame,
-          isPlaying: playbackState.isPlaying,
-        })
-      ) {
-        return
-      }
-      if (
-        performance.now() <= transportSettlingUntilMs &&
-        displayedFrame !== null &&
-        Math.abs(renderedFrame - displayedFrame) <= 1 &&
-        shouldRejectBlankTransportHandoff({
-          isTransportSettling: true,
-          renderedFrame,
-          displayedFrame,
-          probeRenderedFrameBlank: probeSourceBlank,
-          probeDisplayedFrameBlank: probeDisplayCanvasBlank,
-        })
-      ) {
-        if (source === scrubOffscreenCanvasRef.current) {
-          scrubOffscreenRenderedFrameRef.current = null
-        }
-        return
-      }
-      drawSourceToPreviewDisplayCanvas(displayCtx, displayCanvas, source)
-      setDisplayedFrame(renderedFrame)
-      recordPreviewScrubPresentationQuality(renderedFrame, usedFallback)
-      recordPreviewScrubPresented(renderedFrame)
-      if (
-        !playbackState.isPlaying &&
-        playbackState.previewFrame === null &&
-        playbackState.currentFrame === renderedFrame
-      ) {
-        if (source !== committedPreviewSnapshot.canvas) {
-          captureCommittedPreviewSnapshot(renderedFrame)
-        }
-        settleActivePreviewRenderTarget(renderedFrame)
-      }
-      if (shouldReleaseScrubSnapshotGuardAfterDraw) {
-        // Only a replacement that actually reached the front buffer may
-        // release the guard. Earlier transport/pause checks can reject a
-        // nonblank candidate without presenting it.
-        clearReleasedScrubSnapshotGuard()
-      }
-      resolvePlaybackColdStartVisibleFrame(renderedFrame, 'rendered_overlay')
-    }
-
-    const drawToDisplay = (renderedFrame: number, usedFallback = false) => {
-      const offscreen = scrubOffscreenCanvasRef.current
-      if (!offscreen) return
-      drawSourceToDisplay(offscreen, renderedFrame, usedFallback)
-    }
+      },
+      getPausedTransportHold: () => ({
+        heldFrame: pausedTransportHeldFrame,
+        holdUntilMs: pausedTransportHoldUntilMs,
+      }),
+      getTransportSettlingUntilMs: () => transportSettlingUntilMs,
+      setDisplayedFrame,
+      recordPresentation: (frame, usedFallback) => {
+        recordPreviewScrubPresentationQuality(frame, usedFallback)
+        recordPreviewScrubPresented(frame)
+      },
+      settleActiveRenderTarget: settleActivePreviewRenderTarget,
+      markColdStartVisibleFrame: (frame) =>
+        resolvePlaybackColdStartVisibleFrame(frame, 'rendered_overlay'),
+    })
 
     const usesRenderedPlaybackOverlay = (state: PlaybackStoreSnapshot) =>
       shouldUseRenderedPlaybackOverlay(state, forceFastScrubOverlay)
@@ -590,7 +418,7 @@ export function usePreviewRenderPump({
             bufferedFrames: transitionSessionBufferedFramesRef.current.size,
           })
         }
-        drawSourceToDisplay(bufferedFrame, frame)
+        presentation.drawSourceToDisplay(bufferedFrame, frame)
         showPlaybackTransitionOverlayForFrame()
         return true
       }
@@ -607,7 +435,7 @@ export function usePreviewRenderPump({
           bufferedFrames: transitionSessionBufferedFramesRef.current.size,
         })
       }
-      drawToDisplay(frame)
+      presentation.drawToDisplay(frame)
       showPlaybackTransitionOverlayForFrame()
       return true
     }
@@ -1091,8 +919,8 @@ export function usePreviewRenderPump({
                 isTransportSettling: true,
                 renderedFrame: frameToRender,
                 displayedFrame,
-                probeRenderedFrameBlank: () => isEffectivelyBlankPreviewSource(renderedSource),
-                probeDisplayedFrameBlank: () => isEffectivelyBlankPreviewSource(displayedSource),
+                probeRenderedFrameBlank: () => presentation.isEffectivelyBlankPreviewSource(renderedSource),
+                probeDisplayedFrameBlank: () => presentation.isEffectivelyBlankPreviewSource(displayedSource),
               })
             ) {
               // The known-good same-frame front buffer remains visible. The
@@ -1275,7 +1103,7 @@ export function usePreviewRenderPump({
                 playbackState.previewFrame === null
               ) {
                 if (frameToRender === playbackState.currentFrame) {
-                  drawToDisplay(frameToRender, priorityRenderUsedFallback)
+                  presentation.drawToDisplay(frameToRender, priorityRenderUsedFallback)
                   showFastScrubOverlayForFrame()
                 }
                 continue
@@ -1286,13 +1114,13 @@ export function usePreviewRenderPump({
                 playbackState.previewFrame !== null
               ) {
                 if (frameToRender === playbackState.previewFrame) {
-                  drawToDisplay(frameToRender, priorityRenderUsedFallback)
+                  presentation.drawToDisplay(frameToRender, priorityRenderUsedFallback)
                   showFastScrubOverlayForFrame()
                 }
                 continue
               }
               if (targetNeedsRenderedPath) {
-                drawToDisplay(frameToRender, priorityRenderUsedFallback)
+                presentation.drawToDisplay(frameToRender, priorityRenderUsedFallback)
                 showFastScrubOverlayForFrame()
                 continue
               }
@@ -1301,7 +1129,7 @@ export function usePreviewRenderPump({
               continue
             }
 
-            drawToDisplay(frameToRender, priorityRenderUsedFallback)
+            presentation.drawToDisplay(frameToRender, priorityRenderUsedFallback)
             if (shouldShowPlaybackTransitionOverlay) {
               tracePump('transition-overlay')
               showPlaybackTransitionOverlayForFrame()
@@ -1500,7 +1328,7 @@ export function usePreviewRenderPump({
           reverseWindow.schedule(currentFrame)
         }
         if (!renderOwnerActive && scrubOffscreenRenderedFrameRef.current === currentFrame) {
-          drawToDisplay(currentFrame)
+          presentation.drawToDisplay(currentFrame)
           lastRafPresentedFrame = currentFrame
         } else {
           // Check if this frame was pre-rendered by the transition prepare.
@@ -1509,7 +1337,7 @@ export function usePreviewRenderPump({
           // transition frame due to mediabunny decode).
           const buffered = transitionSessionBufferedFramesRef.current.get(currentFrame)
           if (buffered) {
-            drawSourceToDisplay(buffered, currentFrame)
+            presentation.drawSourceToDisplay(buffered, currentFrame)
             scrubOffscreenRenderedFrameRef.current = currentFrame
             lastRafPresentedFrame = currentFrame
             // Pre-start the render loop for the next uncached frame so the
@@ -1538,7 +1366,7 @@ export function usePreviewRenderPump({
         // Frame hasn't advanced but the async render completed since the
         // last vsync. Present it now synchronously to eliminate 3:2 pulldown
         // judder (50ms/16ms alternating intervals on 30fps@60Hz displays).
-        drawToDisplay(currentFrame)
+        presentation.drawToDisplay(currentFrame)
         lastRafPresentedFrame = currentFrame
       }
 
@@ -1930,7 +1758,7 @@ export function usePreviewRenderPump({
 
         pausedTransportHeldFrame = pausedFrame
         pausedTransportHoldUntilMs = performance.now() + 750
-        captureCommittedPreviewSnapshot(pausedFrame)
+        presentation.captureCommittedSnapshot(pausedFrame)
 
         schedulePausedPlaybackLookahead(pausedFrame, 'post_pause')
         primeActivePreviewDecoderAtFrame(pausedFrame)
@@ -2277,15 +2105,15 @@ export function usePreviewRenderPump({
       const renderedPlaybackActive = usesRenderedPlaybackOverlay(state)
       const renderedPlaybackWasActive = usesRenderedPlaybackOverlay(prev)
       if (state.previewFrame !== null && prev.previewFrame === null) {
-        clearReleasedScrubSnapshotGuard()
+        presentation.clearReleasedScrubGuard()
         // Snapshot at gesture entry, not only when the committed render first
         // completed. The preview controller can be rebuilt between those two
         // moments (resize/workspace/layout changes), while the visible canvas
         // remains the authoritative frame the hover must return to.
-        captureCommittedPreviewSnapshot(prev.currentFrame)
+        presentation.captureCommittedSnapshot(prev.currentFrame)
       }
       if (state.isPlaying || state.currentFrame !== prev.currentFrame) {
-        clearReleasedScrubSnapshotGuard()
+        presentation.clearReleasedScrubGuard()
       }
       if (
         state.isPlaying ||
@@ -2309,7 +2137,7 @@ export function usePreviewRenderPump({
         // Hover skimming may end on a nested frame whose sources were still
         // settling. Restore the last committed pixels synchronously instead
         // of leaving that transient frame visible while currentFrame rerenders.
-        drawSourceToDisplay(committedPreviewSnapshot.canvas, state.currentFrame)
+        presentation.drawSourceToDisplay(committedPreviewSnapshot.canvas, state.currentFrame)
         // Keep guarding until a nonblank exact render proves it can replace
         // this snapshot. Cancelled compound work can complete much later than
         // the pointer release and otherwise cache/present its cleared canvas.
@@ -2318,7 +2146,7 @@ export function usePreviewRenderPump({
           nowMs: performance.now(),
         })
       } else if (settlingReleasedScrubFrame !== null) {
-        clearReleasedScrubSnapshotGuard()
+        presentation.clearReleasedScrubGuard()
       }
       const activePreviewPresentationTarget = resolveActivePreviewPresentationTarget({
         state,
@@ -2591,7 +2419,7 @@ export function usePreviewRenderPump({
         renderedFrame: scrubOffscreenRenderedFrameRef.current,
       }
       if (shouldPresentPreparedPlaybackFrame(preparedPlaybackFrame)) {
-        drawToDisplay(preparedPlaybackFrame.targetFrame)
+        presentation.drawToDisplay(preparedPlaybackFrame.targetFrame)
         return
       }
 
@@ -2719,7 +2547,7 @@ export function usePreviewRenderPump({
       if (!invalidation) return
 
       const currentFrame = playbackState.currentFrame
-      clearReleasedScrubSnapshotGuard()
+      presentation.clearReleasedScrubGuard()
       const gradeBypassChanged =
         state.colorGradeBypassed !== prev.colorGradeBypassed ||
         state.colorGradeComparisonMode !== prev.colorGradeComparisonMode
@@ -2758,7 +2586,7 @@ export function usePreviewRenderPump({
         return
 
       const currentFrame = playbackState.currentFrame
-      clearReleasedScrubSnapshotGuard()
+      presentation.clearReleasedScrubGuard()
       if (scrubRendererRef.current) {
         scrubRendererRef.current.invalidateFrameCache({ frames: [currentFrame] })
       }
@@ -2781,7 +2609,7 @@ export function usePreviewRenderPump({
       )
         return
 
-      clearReleasedScrubSnapshotGuard()
+      presentation.clearReleasedScrubGuard()
       if (scrubRendererRef.current) {
         scrubRendererRef.current.invalidateFrameCache({ frames: [targetFrame] })
       }
