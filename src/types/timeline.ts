@@ -24,7 +24,7 @@ export interface TimelineTranscriptCaptionCue {
   text: string
 }
 
-export type TimelineTranscriptCaptionStyle = TextStyleFields & {
+type TimelineTranscriptCaptionStyle = TextStyleFields & {
   transform?: TransformProperties
 }
 

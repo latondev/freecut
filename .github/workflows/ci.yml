@@ -106,12 +106,28 @@ jobs:
       # Quality ratchet: fails only on dead code / complexity / duplication
       # INTRODUCED by the PR (gate new-only), never on inherited issues.
       #
-      # Advisory (continue-on-error) because the develop delta is not clean yet.
-      # Measured 2026-09-21 against both origin/staging and origin/main (same
-      # commit, 271 changed files): dead_code_introduced=5,
-      # complexity_introduced=96, duplication_introduced=0, verdict=fail.
-      # Drop that line once those introduced findings are worked down and the
-      # gate passes; re-measure first, do not assume it cleared.
+      # Advisory (continue-on-error) because the new-only attribution is
+      # file-scoped, so a refactor that moves files re-attributes their whole
+      # content. Re-measured 2026-09-21 on the engine/facade pass, per scope:
+      #   origin/staging..HEAD (533 changed files)  dead_code=19 complexity=148 dup=1
+      #   9f109fb6..HEAD     (318 changed files)    dead_code=13 complexity=68  dup=1
+      # Attribution of the 68: 63 are `src/runtime/renderer/**` functions that
+      # only MOVED (unchanged cyclomatic, and CRAP inflates because coverage is
+      # keyed by the old paths); 3 are a new boundary-checker script; the rest
+      # are unchanged functions inside touched files. The 13 dead-code findings
+      # are 10 class members whose call sites go through receivers typed as
+      # interfaces (spot-checked live: edit-2up-panels.tsx, client-render-engine
+      # .ts) and which scripts/fallow-unused-class-members.allowlist.json already
+      # reviews, plus 3 real unused types that this pass then deleted.
+      # duplication=1 is a clone pair inside src/runtime/composition-runtime/
+      # utils/audio-scene.ts, last changed in 39b89488 - an ancestor of the base,
+      # i.e. present before the changeset.
+      # So the verdict cannot go green for a move-heavy PR, and dropping
+      # continue-on-error would block refactors on artifacts rather than on
+      # quality. The blocking gates for this dimension are the two allowlist
+      # ratchets above (check:unused-exports / check:unused-class-members) and
+      # check:layer-boundaries; revisit this flag only with a per-symbol
+      # (rename-aware) metric.
       - name: Fallow quality ratchet
         if: github.event_name == 'pull_request'
         continue-on-error: true

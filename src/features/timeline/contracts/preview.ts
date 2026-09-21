@@ -43,7 +43,6 @@ export { useWaveform } from '../hooks/use-waveform'
 export {
   addItem,
   addItemOnNewTrack,
-  addItemWithLinkedAudio,
   applyAutoKeyframeOperations,
   commitMaskEdit,
   setItemEffects,
@@ -54,3 +53,4 @@ export {
   updateItemsTransformMap,
   updateVectorKeyframe,
 } from '../stores/timeline-actions'
+export { addItemWithLinkedAudio } from '../stores/actions/item-actions'

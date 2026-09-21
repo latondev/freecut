@@ -3,9 +3,8 @@
  * Editor modules should import timeline store types/selectors from here.
  */
 
-export type { TimelineState, TimelineActions } from '@/features/timeline/types'
-export { useTimelineSettingsStore } from '@/features/timeline/stores/timeline-settings-store'
 export { useItemsStore } from '@/features/timeline/stores/items-store'
+export { useTimelineSettingsStore } from '@/features/timeline/stores/timeline-settings-store'
 export { useTransitionsStore } from '@/features/timeline/stores/transitions-store'
 export { useMarkersStore } from '@/features/timeline/stores/markers-store'
 export { selectAudioGraphItems } from '@/features/timeline/stores/items-store-indexes'
@@ -18,7 +17,10 @@ export {
 export { useTimelineCommandStore } from '@/features/timeline/stores/timeline-command-store'
 export { execute as executeTimelineCommand } from '@/features/timeline/stores/actions/shared'
 export { captureSnapshot } from '@/features/timeline/stores/commands/snapshot'
-export { rateStretchItemWithoutHistory } from '@/features/timeline/stores/actions/item-edit-actions'
+export {
+  rateStretchItemWithoutHistory,
+  resetSpeedWithRipple,
+} from '@/features/timeline/stores/actions/item-edit-actions'
 export {
   addCompositionControl,
   removeCompositionControl,
@@ -78,7 +80,6 @@ export {
   removeKeyframesForProperty,
   removeMarker,
   removeTransition,
-  resetSpeedWithRipple,
   setInPoint,
   setOutPoint,
   toggleSnap,

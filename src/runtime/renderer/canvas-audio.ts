@@ -17,5 +17,4 @@ export {
   getAudioPacketPassthroughPlan,
   supportsWindowedAudioProcessing,
 } from './audio/planning'
-export type { AudioPacketPassthroughPlan } from './audio/types'
 export { processAudioWindows } from './audio/windowed'

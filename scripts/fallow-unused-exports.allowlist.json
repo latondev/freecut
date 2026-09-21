@@ -191,21 +191,6 @@
       "reason": "unreviewed: carried over by the 2026-07-09 re-baseline; trace individually before deleting."
     },
     {
-      "path": "src/features/timeline/stores/actions/edit/rate-stretch-actions.ts",
-      "exportName": "resetSpeedWithRipple",
-      "reason": "deps-contract: called by the editor clip panel (`video-section.tsx`) through the editor timeline-store contract. Reviewed 2026-09-21 while retiring the timeline-store facade; Fallow does not attribute the multi-hop re-export (timeline-actions -> item-edit-actions -> this definition) to the definition site."
-    },
-    {
-      "path": "src/features/timeline/stores/actions/item-edit-actions.ts",
-      "exportName": "resetSpeedWithRipple",
-      "reason": "deps-contract: re-export of the rate-stretch action, consumed by the editor clip panel through the timeline-store contract. This entry documents the same barrel-attribution limit as the definition site above."
-    },
-    {
-      "path": "src/features/timeline/stores/actions/item-actions.ts",
-      "exportName": "addItemWithLinkedAudio",
-      "reason": "deps-contract: called by the preview canvas media drop (`use-canvas-media-drop.ts`) through the preview timeline contract. Reviewed 2026-09-21 while retiring the timeline-store facade; Fallow does not attribute the barrel re-export (timeline-actions) to this definition site."
-    },
-    {
       "path": "src/infrastructure/analysis/captioning/registry.ts",
       "exportName": "DEFAULT_MEDIA_CAPTIONING_PROVIDER_ID",
       "reason": "unreviewed: carried over by the 2026-07-09 re-baseline; trace individually before deleting."
