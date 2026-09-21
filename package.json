@@ -38,6 +38,7 @@
     "test:coverage": "vp test run --coverage",
     "headless": "node headless/render.mjs",
     "headless:frame": "node headless/frame.mjs",
+    "headless:oracle": "node headless/frame-oracle.mjs",
     "headless:layout": "node headless/layout.mjs",
     "headless:edit": "node headless/edit.mjs",
     "headless:serve": "node headless/serve.mjs",
