@@ -144,8 +144,6 @@ import {
   setPropertyExpression,
   removePropertyExpression,
   setTracks,
-  trimItemEnd,
-  trimItemStart,
   updateItem,
   updateKeyframe,
   updateKeyframes,
@@ -166,10 +164,12 @@ import {
 } from '@/features/editor/deps/timeline-motion'
 import {
   clearSpanDragVisuals,
+  clearSpanTrimVisuals,
   createMotionSpanDragCommands,
-  setSpanDragVisualOffset,
+  createMotionSpanTrimCommands,
   type SpanDragState,
-} from './motion-span-drag'
+  type SpanTrimState,
+} from './motion-span-interactions'
 import {
   createMotionTimeViewportController,
   formatFrameTime,
@@ -693,41 +693,6 @@ type MotionRow =
   | { kind: 'group'; track: TimelineTrack; items: TimelineItem[] }
   | { kind: 'layer'; item: TimelineItem; track: TimelineTrack | undefined; depth: number }
 
-
-interface SpanTrimState {
-  pointerId: number
-  itemId: string
-  handle: 'start' | 'end'
-  startX: number
-  laneWidth: number
-  deltaFrames: number
-  from: number
-  durationInFrames: number
-  segment: HTMLButtonElement
-  segmentWidthPx: number
-  segmentInlineWidth: string
-  segmentInlineTransform: string
-  segmentInlineWillChange: string
-  timelineVisuals: HTMLElement[]
-}
-
-function applySpanTrimVisuals(trim: SpanTrimState, visibleFrameRange: number) {
-  const offsetPx = (trim.deltaFrames / visibleFrameRange) * trim.laneWidth
-  trim.segment.style.transform =
-    trim.handle === 'start' ? `translateX(${offsetPx}px)` : trim.segmentInlineTransform
-  trim.segment.style.width = `${Math.max(
-    1,
-    trim.segmentWidthPx + (trim.handle === 'start' ? -offsetPx : offsetPx),
-  )}px`
-  if (trim.handle === 'start') setSpanDragVisualOffset(trim.timelineVisuals, offsetPx)
-}
-
-function clearSpanTrimVisuals(trim: SpanTrimState) {
-  trim.segment.style.width = trim.segmentInlineWidth
-  trim.segment.style.transform = trim.segmentInlineTransform
-  trim.segment.style.willChange = trim.segmentInlineWillChange
-  clearSpanDragVisuals(trim.timelineVisuals)
-}
 
 interface RowReorderDragState {
   pointerId: number
@@ -4688,109 +4653,18 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
   const moveSpanDrag = spanDrag.move
   const endSpanDrag = spanDrag.end
   const cancelSpanDrag = spanDrag.cancel
-  const beginSpanTrim = useCallback(
-    (event: React.PointerEvent<HTMLSpanElement>, item: TimelineItem, handle: 'start' | 'end') => {
-      if (event.button !== 0) return
-      event.preventDefault()
-      event.stopPropagation()
-      const lane = event.currentTarget.closest<HTMLElement>('[data-motion-timeline-lane]')
-      const laneWidth = lane?.getBoundingClientRect().width ?? 0
-      const segment = event.currentTarget.closest<HTMLButtonElement>(
-        '[data-testid^="motion-layer-span-"]',
-      )
-      if (laneWidth <= 0 || !segment) return
-      const row = segment.closest<HTMLElement>('[data-motion-layer-item-id]')
-      const timelineVisuals = Array.from(
-        row?.querySelectorAll<HTMLElement>('[data-motion-span-drag-visual]') ?? [],
-      ).filter((visual) => visual !== segment)
-      const segmentRect = segment.getBoundingClientRect()
-      pause()
-      selectItems([item.id])
-      const next: SpanTrimState = {
-        pointerId: event.pointerId,
-        itemId: item.id,
-        handle,
-        startX: event.clientX,
-        laneWidth,
-        deltaFrames: 0,
-        from: item.from,
-        durationInFrames: item.durationInFrames,
-        segment,
-        segmentWidthPx: segmentRect.width,
-        segmentInlineWidth: segment.style.width,
-        segmentInlineTransform: segment.style.transform,
-        segmentInlineWillChange: segment.style.willChange,
-        timelineVisuals,
-      }
-      segment.style.willChange = 'transform, width'
-      if (handle === 'start') {
-        for (const visual of timelineVisuals) visual.style.willChange = 'transform'
-      }
-      spanTrimRef.current = next
-      event.currentTarget.setPointerCapture?.(event.pointerId)
-    },
-    [pause, selectItems],
+  const spanTrim = useMemo(
+    () =>
+      createMotionSpanTrimCommands({
+        state: { trimRef: spanTrimRef, animationFrameRef: spanTrimAnimationFrameRef },
+        deps: { durationInFrames, visibleFrameRange, pause, selectItems },
+      }),
+    [durationInFrames, pause, selectItems, visibleFrameRange],
   )
-
-  const moveSpanTrim = useCallback(
-    (event: React.PointerEvent<HTMLSpanElement>) => {
-      const trim = spanTrimRef.current
-      if (!trim || trim.pointerId !== event.pointerId) return
-      event.preventDefault()
-      event.stopPropagation()
-      const rawDelta = Math.round(
-        ((event.clientX - trim.startX) / trim.laneWidth) * visibleFrameRange,
-      )
-      const minDelta = trim.handle === 'start' ? -trim.from : -(trim.durationInFrames - 1)
-      const maxDelta =
-        trim.handle === 'start'
-          ? trim.durationInFrames - 1
-          : durationInFrames - (trim.from + trim.durationInFrames)
-      const deltaFrames = Math.max(minDelta, Math.min(maxDelta, rawDelta))
-      if (deltaFrames === trim.deltaFrames) return
-      const next = { ...trim, deltaFrames }
-      spanTrimRef.current = next
-      if (spanTrimAnimationFrameRef.current !== null) return
-      spanTrimAnimationFrameRef.current = requestAnimationFrame(() => {
-        spanTrimAnimationFrameRef.current = null
-        const latestTrim = spanTrimRef.current
-        if (latestTrim) applySpanTrimVisuals(latestTrim, visibleFrameRange)
-      })
-    },
-    [durationInFrames, visibleFrameRange],
-  )
-
-  const finishSpanTrim = useCallback(
-    (event: React.PointerEvent<HTMLSpanElement>, commit: boolean) => {
-      const trim = spanTrimRef.current
-      if (!trim || trim.pointerId !== event.pointerId) return
-      event.preventDefault()
-      event.stopPropagation()
-      if (spanTrimAnimationFrameRef.current !== null) {
-        cancelAnimationFrame(spanTrimAnimationFrameRef.current)
-        spanTrimAnimationFrameRef.current = null
-      }
-      clearSpanTrimVisuals(trim)
-      spanTrimRef.current = null
-      if (!commit || trim.deltaFrames === 0) return
-      if (trim.handle === 'start') {
-        trimItemStart(trim.itemId, trim.deltaFrames, { forceLinked: true })
-      } else {
-        trimItemEnd(trim.itemId, trim.deltaFrames, { forceLinked: true })
-      }
-    },
-    [],
-  )
-
-  const endSpanTrim = useCallback(
-    (event: React.PointerEvent<HTMLSpanElement>) => finishSpanTrim(event, true),
-    [finishSpanTrim],
-  )
-  const cancelSpanTrim = useCallback(
-    (event: React.PointerEvent<HTMLSpanElement>) => finishSpanTrim(event, false),
-    [finishSpanTrim],
-  )
-
+  const beginSpanTrim = spanTrim.begin
+  const moveSpanTrim = spanTrim.move
+  const endSpanTrim = spanTrim.end
+  const cancelSpanTrim = spanTrim.cancel
   const beginRowReorder = useCallback(
     (event: React.PointerEvent<HTMLButtonElement>, track: TimelineTrack) => {
       if (event.button !== 0) return
