@@ -2696,6 +2696,40 @@ describe('CompositingTimeline', { timeout: 15_000 }, () => {
     expect(itemsState.tracks.some((candidate) => candidate.id === track.id)).toBe(false)
   })
 
+  it('copies a layer to the clipboard from the row context menu', async () => {
+    render(<CompositingTimeline />)
+    fireEvent.contextMenu(screen.getByRole('button', { name: /1hero rectangle/i }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy' }))
+
+    expect(useClipboardStore.getState().itemsClipboard?.originalIds).toEqual([shape.id])
+  })
+
+  it('pastes a copied layer onto a new track', async () => {
+    render(<CompositingTimeline />)
+    const layerName = screen.getByRole('button', { name: /1hero rectangle/i })
+    const trackCountBefore = useItemsStore.getState().tracks.length
+
+    fireEvent.contextMenu(layerName)
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy' }))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.contextMenu(layerName)
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Paste' }))
+
+    const itemsState = useItemsStore.getState()
+    expect(itemsState.items.filter((item) => item.id !== shape.id)).toHaveLength(1)
+    expect(itemsState.tracks.length).toBeGreaterThan(trackCountBefore)
+  })
+
+  it('duplicates a layer from the row context menu', async () => {
+    render(<CompositingTimeline />)
+    fireEvent.contextMenu(screen.getByRole('button', { name: /1hero rectangle/i }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Duplicate' }))
+
+    const itemsState = useItemsStore.getState()
+    expect(itemsState.tracks.some((track) => track.name === 'Hero rectangle copy')).toBe(true)
+    expect(itemsState.items).toHaveLength(2)
+  })
+
   it('preserves a multi-selection when grouping from a selected layer context menu', async () => {
     const secondTrack = makeTimelineTrack({
       id: 'layer-track-2',
