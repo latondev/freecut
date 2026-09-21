@@ -187,13 +187,9 @@ import {
   getVisibleMotionRetimeRange,
   getRetimeKeyboardDelta,
   applyMotionSelectionFrameUpdates,
-  captureMotionSelectionRetimeKeyframeVisuals,
-  captureMotionSelectionRetimeConnectorVisuals,
-  captureMotionSelectionRetimeRangeVisual,
-  applyMotionSelectionRetimeVisuals,
   restoreMotionSelectionRetimeVisuals,
-  hasMotionSelectionRetimeChanges,
   type MotionSelectionRetimeDragState,
+  createMotionSelectionRetimeCommands,
 } from './motion-selection-retime'
 import { getAnimatablePropertyBaseValue } from '@/features/editor/deps/keyframes'
 import {
@@ -3583,130 +3579,40 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     [layerEntries, selectedItemIdSet],
   )
 
-  const applySelectionRetimePreview = useCallback(() => {
-    selectionRetimeAnimationFrameRef.current = null
-    const drag = selectionRetimeDragRef.current
-    const targetFrame = pendingSelectionRetimeFrameRef.current
-    pendingSelectionRetimeFrameRef.current = null
-    if (!drag || targetFrame === null) return
-
-    const updates = buildMotionSelectionRetimeUpdates(
-      drag.selection,
-      drag.itemById,
-      drag.edge,
-      targetFrame,
+  // Retiming commands over the drag's refs: the refs keep an in-flight gesture
+  // (and its preview frame) alive while the callbacks come from this render.
+  const selectionRetime = useMemo(
+    () =>
+      createMotionSelectionRetimeCommands({
+        state: {
+          dragRef: selectionRetimeDragRef,
+          pendingFrameRef: pendingSelectionRetimeFrameRef,
+          animationFrameRef: selectionRetimeAnimationFrameRef,
+        },
+        deps: {
+          durationInFrames,
+          visibleFrameRange,
+          selection: motionSelectionDragState,
+          selectionTimeRange: motionSelectionTimeRange,
+          itemById,
+          getRuler: () => motionRulerRef.current,
+          getScrollArea: () => motionScrollAreaRef.current,
+          getRangeElement: () => motionSelectionRetimeRangeRef.current,
+          getTimeViewport: () => timeViewportRef.current,
+        },
+      }),
+    [
       durationInFrames,
-    )
-    drag.lastUpdates = updates
-    applyMotionSelectionRetimeVisuals(drag, updates, timeViewportRef.current)
-  }, [durationInFrames])
-
-  const flushSelectionRetimePreview = useCallback(() => {
-    if (selectionRetimeAnimationFrameRef.current !== null) {
-      cancelAnimationFrame(selectionRetimeAnimationFrameRef.current)
-    }
-    applySelectionRetimePreview()
-  }, [applySelectionRetimePreview])
-
-  const beginSelectionRetime = useCallback(
-    (event: ReactPointerEvent<HTMLButtonElement>, edge: 'start' | 'end') => {
-      if (!motionSelectionDragState || !motionSelectionTimeRange) return
-      const ruler = motionRulerRef.current
-      if (!ruler) return
-      event.preventDefault()
-      event.stopPropagation()
-      const rect = ruler.getBoundingClientRect()
-      const keyframeVisuals = captureMotionSelectionRetimeKeyframeVisuals(
-        motionScrollAreaRef.current,
-        motionSelectionDragState,
-        itemById,
-      )
-      selectionRetimeDragRef.current = {
-        pointerId: event.pointerId,
-        edge,
-        startClientX: event.clientX,
-        rulerWidth: Math.max(1, rect.width),
-        initialEdgeFrame:
-          edge === 'start'
-            ? motionSelectionTimeRange.startFrame
-            : motionSelectionTimeRange.endFrame,
-        selection: motionSelectionDragState,
-        itemById,
-        snapshot: captureSnapshot(),
-        hasMoved: false,
-        lastUpdates: null,
-        keyframeVisuals,
-        connectorVisuals: captureMotionSelectionRetimeConnectorVisuals(
-          motionScrollAreaRef.current,
-          motionSelectionDragState,
-        ),
-        rangeVisual: captureMotionSelectionRetimeRangeVisual(motionSelectionRetimeRangeRef.current),
-      }
-      event.currentTarget.setPointerCapture?.(event.pointerId)
-    },
-    [itemById, motionSelectionDragState, motionSelectionTimeRange],
+      itemById,
+      motionSelectionDragState,
+      motionSelectionTimeRange,
+      visibleFrameRange,
+    ],
   )
-
-  const moveSelectionRetime = useCallback(
-    (event: ReactPointerEvent<HTMLButtonElement>) => {
-      const drag = selectionRetimeDragRef.current
-      if (!drag || drag.pointerId !== event.pointerId) return
-      event.preventDefault()
-      event.stopPropagation()
-      const deltaFrames = Math.round(
-        ((event.clientX - drag.startClientX) / drag.rulerWidth) * visibleFrameRange,
-      )
-      if (deltaFrames === 0 && !drag.hasMoved) return
-      drag.hasMoved = true
-      pendingSelectionRetimeFrameRef.current = drag.initialEdgeFrame + deltaFrames
-      if (selectionRetimeAnimationFrameRef.current === null) {
-        selectionRetimeAnimationFrameRef.current = requestAnimationFrame(
-          applySelectionRetimePreview,
-        )
-      }
-    },
-    [applySelectionRetimePreview, visibleFrameRange],
-  )
-
-  const endSelectionRetime = useCallback(
-    (event: ReactPointerEvent<HTMLButtonElement>) => {
-      const drag = selectionRetimeDragRef.current
-      if (!drag || drag.pointerId !== event.pointerId) return
-      event.preventDefault()
-      event.stopPropagation()
-      if (drag.hasMoved) {
-        flushSelectionRetimePreview()
-        const updates = drag.lastUpdates
-        if (updates && hasMotionSelectionRetimeChanges(drag, updates)) {
-          flushSync(() => applyMotionSelectionFrameUpdates(updates))
-          restoreMotionSelectionRetimeVisuals(drag, false)
-          useTimelineCommandStore
-            .getState()
-            .addUndoEntry({ type: 'MOVE_KEYFRAME_GRAPH', payload: {} }, drag.snapshot)
-          useTimelineSettingsStore.getState().markDirty()
-        } else {
-          restoreMotionSelectionRetimeVisuals(drag, true)
-        }
-      }
-      pendingSelectionRetimeFrameRef.current = null
-      selectionRetimeDragRef.current = null
-    },
-    [flushSelectionRetimePreview],
-  )
-
-  const cancelSelectionRetime = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-    const drag = selectionRetimeDragRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    event.preventDefault()
-    event.stopPropagation()
-    if (selectionRetimeAnimationFrameRef.current !== null) {
-      cancelAnimationFrame(selectionRetimeAnimationFrameRef.current)
-      selectionRetimeAnimationFrameRef.current = null
-    }
-    pendingSelectionRetimeFrameRef.current = null
-    restoreMotionSelectionRetimeVisuals(drag, true)
-    selectionRetimeDragRef.current = null
-  }, [])
+  const beginSelectionRetime = selectionRetime.begin
+  const moveSelectionRetime = selectionRetime.move
+  const endSelectionRetime = selectionRetime.end
+  const cancelSelectionRetime = selectionRetime.cancel
 
   const nudgeSelectionRetime = useCallback(
     (edge: 'start' | 'end', deltaFrames: number) => {

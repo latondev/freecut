@@ -1,11 +1,20 @@
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { captureSnapshot, useKeyframesStore } from '@/features/editor/deps/timeline-motion'
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
+import { flushSync } from 'react-dom'
+import {
+  captureSnapshot,
+  useKeyframesStore,
+  useTimelineCommandStore,
+  useTimelineSettingsStore,
+} from '@/features/editor/deps/timeline-motion'
 import type {
   MotionSelectionDragState,
   MotionSelectionFrameUpdates,
   MotionSelectionTimeRange,
 } from './motion-keyframe-selection'
-import { getMotionSelectionTimeRange } from './motion-keyframe-selection'
+import {
+  buildMotionSelectionRetimeUpdates,
+  getMotionSelectionTimeRange,
+} from './motion-keyframe-selection'
 import type { MotionTimeViewport } from './motion-time-viewport-controller'
 import type { TimelineItem } from '@/types/timeline'
 // Selection retime: the batch keyframe move driven from the ruler range handles.
@@ -127,7 +136,7 @@ function getMotionRetimeReferenceKey(itemId: string, keyframeId: string): string
   return `${itemId}\u0000${keyframeId}`
 }
 
-export function captureMotionSelectionRetimeKeyframeVisuals(
+function captureMotionSelectionRetimeKeyframeVisuals(
   root: HTMLElement | null,
   selection: MotionSelectionDragState,
   itemById: Readonly<Record<string, TimelineItem>>,
@@ -167,7 +176,7 @@ export function captureMotionSelectionRetimeKeyframeVisuals(
   })
 }
 
-export function captureMotionSelectionRetimeConnectorVisuals(
+function captureMotionSelectionRetimeConnectorVisuals(
   root: HTMLElement | null,
   selection: MotionSelectionDragState,
 ): MotionSelectionRetimeConnectorVisual[] {
@@ -210,7 +219,7 @@ export function captureMotionSelectionRetimeConnectorVisuals(
   return visuals
 }
 
-export function captureMotionSelectionRetimeRangeVisual(
+function captureMotionSelectionRetimeRangeVisual(
   element: HTMLDivElement | null,
 ): MotionSelectionRetimeRangeVisual | null {
   if (!element) return null
@@ -287,7 +296,7 @@ function buildMotionSelectionRetimePreview(
   }
 }
 
-export function applyMotionSelectionRetimeVisuals(
+function applyMotionSelectionRetimeVisuals(
   drag: MotionSelectionRetimeDragState,
   updates: MotionSelectionFrameUpdates,
   viewport: MotionTimeViewport,
@@ -413,7 +422,7 @@ export function restoreMotionSelectionRetimeVisuals(
   restoreAttribute(rangeVisual.endHandle, 'aria-valuenow', rangeVisual.endValueNow)
 }
 
-export function hasMotionSelectionRetimeChanges(
+function hasMotionSelectionRetimeChanges(
   drag: MotionSelectionRetimeDragState,
   updates: MotionSelectionFrameUpdates,
 ): boolean {
@@ -442,4 +451,160 @@ export function hasMotionSelectionRetimeChanges(
         ) !== update.frame,
     )
   )
+}
+
+export interface MotionSelectionRetimeState {
+  dragRef: { current: MotionSelectionRetimeDragState | null }
+  pendingFrameRef: { current: number | null }
+  animationFrameRef: { current: number | null }
+}
+
+export interface MotionSelectionRetimeDeps {
+  durationInFrames: number
+  visibleFrameRange: number
+  selection: MotionSelectionDragState | null
+  selectionTimeRange: MotionSelectionTimeRange | null
+  itemById: Record<string, TimelineItem>
+  getRuler: () => HTMLDivElement | null
+  getScrollArea: () => HTMLDivElement | null
+  getRangeElement: () => HTMLDivElement | null
+  getTimeViewport: () => MotionTimeViewport
+}
+
+export interface MotionSelectionRetimeCommands {
+  begin: (event: ReactPointerEvent<HTMLButtonElement>, edge: 'start' | 'end') => void
+  move: (event: ReactPointerEvent<HTMLButtonElement>) => void
+  end: (event: ReactPointerEvent<HTMLButtonElement>) => void
+  cancel: (event: ReactPointerEvent<HTMLButtonElement>) => void
+}
+
+/**
+ * Batch-retiming the selected keyframes from the ruler range handles.
+ *
+ * A drag captures the rendered keyframe diamonds, connectors and range element up
+ * front, previews by writing to them directly on one animation frame, and commits
+ * once on release — one undo entry for the whole gesture, and no React render per
+ * pointer move. Restoring differs by outcome: a cancelled drag puts the captured
+ * inline styles back, a committed drag keeps the previewed geometry and lets the
+ * store render own it.
+ */
+export function createMotionSelectionRetimeCommands(input: {
+  state: MotionSelectionRetimeState
+  deps: MotionSelectionRetimeDeps
+}): MotionSelectionRetimeCommands {
+  const { dragRef, pendingFrameRef, animationFrameRef } = input.state
+  const deps = input.deps
+
+  const applyPreview = (): void => {
+    animationFrameRef.current = null
+    const drag = dragRef.current
+    const targetFrame = pendingFrameRef.current
+    pendingFrameRef.current = null
+    if (!drag || targetFrame === null) return
+    const updates = buildMotionSelectionRetimeUpdates(
+      drag.selection,
+      drag.itemById,
+      drag.edge,
+      targetFrame,
+      deps.durationInFrames,
+    )
+    drag.lastUpdates = updates
+    applyMotionSelectionRetimeVisuals(drag, updates, deps.getTimeViewport())
+  }
+
+  const flushPreview = (): void => {
+    if (animationFrameRef.current !== null) {
+      cancelAnimationFrame(animationFrameRef.current)
+    }
+    applyPreview()
+  }
+
+  const begin = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    edge: 'start' | 'end',
+  ): void => {
+    if (!deps.selection || !deps.selectionTimeRange) return
+    const ruler = deps.getRuler()
+    if (!ruler) return
+    event.preventDefault()
+    event.stopPropagation()
+    const rect = ruler.getBoundingClientRect()
+    const scrollArea = deps.getScrollArea()
+    dragRef.current = {
+      pointerId: event.pointerId,
+      edge,
+      startClientX: event.clientX,
+      rulerWidth: Math.max(1, rect.width),
+      initialEdgeFrame:
+        edge === 'start' ? deps.selectionTimeRange.startFrame : deps.selectionTimeRange.endFrame,
+      selection: deps.selection,
+      itemById: deps.itemById,
+      snapshot: captureSnapshot(),
+      hasMoved: false,
+      lastUpdates: null,
+      keyframeVisuals: captureMotionSelectionRetimeKeyframeVisuals(
+        scrollArea,
+        deps.selection,
+        deps.itemById,
+      ),
+      connectorVisuals: captureMotionSelectionRetimeConnectorVisuals(scrollArea, deps.selection),
+      rangeVisual: captureMotionSelectionRetimeRangeVisual(deps.getRangeElement()),
+    }
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+  }
+
+  const move = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    event.preventDefault()
+    event.stopPropagation()
+    const deltaFrames = Math.round(
+      ((event.clientX - drag.startClientX) / drag.rulerWidth) * deps.visibleFrameRange,
+    )
+    if (deltaFrames === 0 && !drag.hasMoved) return
+    drag.hasMoved = true
+    pendingFrameRef.current = drag.initialEdgeFrame + deltaFrames
+    if (animationFrameRef.current === null) {
+      animationFrameRef.current = requestAnimationFrame(applyPreview)
+    }
+  }
+
+  const end = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (drag.hasMoved) {
+      flushPreview()
+      const updates = drag.lastUpdates
+      if (updates && hasMotionSelectionRetimeChanges(drag, updates)) {
+        flushSync(() => applyMotionSelectionFrameUpdates(updates))
+        restoreMotionSelectionRetimeVisuals(drag, false)
+        useTimelineCommandStore
+          .getState()
+          .addUndoEntry({ type: 'MOVE_KEYFRAME_GRAPH', payload: {} }, drag.snapshot)
+        useTimelineSettingsStore.getState().markDirty()
+      } else {
+        restoreMotionSelectionRetimeVisuals(drag, true)
+      }
+    }
+    pendingFrameRef.current = null
+    dragRef.current = null
+  }
+
+  const cancel = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (animationFrameRef.current !== null) {
+      cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = null
+    }
+    pendingFrameRef.current = null
+    restoreMotionSelectionRetimeVisuals(drag, true)
+    dragRef.current = null
+  }
+
+  return { begin, move, end, cancel }
 }
