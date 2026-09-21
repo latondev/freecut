@@ -171,6 +171,10 @@ import {
   type SpanTrimState,
 } from './motion-span-interactions'
 import {
+  createMotionRowReorderCommands,
+  type RowReorderDragState,
+} from './motion-row-reorder'
+import {
   createMotionTimeViewportController,
   formatFrameTime,
   getMotionPlayheadEdgeScrollVelocity,
@@ -694,18 +698,6 @@ type MotionRow =
   | { kind: 'layer'; item: TimelineItem; track: TimelineTrack | undefined; depth: number }
 
 
-interface RowReorderDragState {
-  pointerId: number
-  sourceTrackId: string
-  parentTrackId: string | null
-  startY: number
-  deltaY: number
-  originIndex: number
-  targetIndex: number
-  sourceRow: HTMLElement
-  dropCandidates: Array<{ trackId: string; centerY: number; row: HTMLElement }>
-  dropIndicator: HTMLDivElement
-}
 
 interface MotionSelectionRetimeDragState {
   pointerId: number
@@ -4665,149 +4657,22 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
   const moveSpanTrim = spanTrim.move
   const endSpanTrim = spanTrim.end
   const cancelSpanTrim = spanTrim.cancel
-  const beginRowReorder = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>, track: TimelineTrack) => {
-      if (event.button !== 0) return
-      event.preventDefault()
-      event.stopPropagation()
-      const parentTrackId = track.parentTrackId ?? null
-      const root = event.currentTarget.closest('[data-testid="compositing-timeline"]')
-      const siblingRows = Array.from(
-        root?.querySelectorAll<HTMLElement>('[data-motion-row-track-id]') ?? [],
-      ).filter((row) => (row.dataset.motionParentTrackId || null) === parentTrackId)
-      const siblingCenters = siblingRows.map((row) => {
-        const rect = row.getBoundingClientRect()
-        return {
-          trackId: row.dataset.motionRowTrackId!,
-          centerY: rect.top + rect.height / 2,
-          row,
-        }
-      })
-      const originIndex = siblingCenters.findIndex((candidate) => candidate.trackId === track.id)
-      if (originIndex < 0) return
-      const sourceRow = siblingCenters[originIndex]?.row
-      if (!sourceRow) return
-      const dropIndicator = document.createElement('div')
-      dropIndicator.className = 'pointer-events-none absolute inset-x-0 z-40 h-0.5 bg-primary'
-      sourceRow.style.willChange = 'transform'
-      const next: RowReorderDragState = {
-        pointerId: event.pointerId,
-        sourceTrackId: track.id,
-        parentTrackId,
-        startY: event.clientY,
-        deltaY: 0,
-        originIndex,
-        targetIndex: originIndex,
-        sourceRow,
-        dropCandidates: siblingCenters.filter((candidate) => candidate.trackId !== track.id),
-        dropIndicator,
-      }
-      rowReorderDragRef.current = next
-      setRowReorderDrag(next)
-      event.currentTarget.setPointerCapture?.(event.pointerId)
-    },
+  const rowReorder = useMemo(
+    () =>
+      createMotionRowReorderCommands({
+        state: {
+          dragRef: rowReorderDragRef,
+          animationFrameRef: rowReorderAnimationFrameRef,
+          pendingClientYRef: pendingRowReorderClientYRef,
+        },
+        deps: { setDrag: setRowReorderDrag },
+      }),
     [],
   )
-
-  const applyRowReorderPreview = useCallback((clientY: number) => {
-    const drag = rowReorderDragRef.current
-    if (!drag) return
-    const targetIndex = drag.dropCandidates.reduce(
-      (index, candidate) => index + (clientY > candidate.centerY ? 1 : 0),
-      0,
-    )
-    const dropAfterTarget = targetIndex >= drag.dropCandidates.length
-    const dropTarget = drag.dropCandidates[targetIndex] ?? drag.dropCandidates.at(-1) ?? null
-    const next = {
-      ...drag,
-      deltaY: clientY - drag.startY,
-      targetIndex,
-    }
-    rowReorderDragRef.current = next
-    drag.sourceRow.style.transform = `translate3d(0, ${next.deltaY}px, 0)`
-    if (dropTarget) {
-      dropTarget.row.appendChild(drag.dropIndicator)
-      drag.dropIndicator.style.top = dropAfterTarget ? '' : '0'
-      drag.dropIndicator.style.bottom = dropAfterTarget ? '0' : ''
-    } else {
-      drag.dropIndicator.remove()
-    }
-  }, [])
-
-  const moveRowReorder = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      const drag = rowReorderDragRef.current
-      if (!drag || drag.pointerId !== event.pointerId) return
-      event.preventDefault()
-      event.stopPropagation()
-      pendingRowReorderClientYRef.current = event.clientY
-      if (rowReorderAnimationFrameRef.current !== null) return
-      rowReorderAnimationFrameRef.current = window.requestAnimationFrame(() => {
-        rowReorderAnimationFrameRef.current = null
-        const clientY = pendingRowReorderClientYRef.current
-        pendingRowReorderClientYRef.current = null
-        if (clientY !== null) applyRowReorderPreview(clientY)
-      })
-    },
-    [applyRowReorderPreview],
-  )
-
-  const clearRowReorderPreview = useCallback((drag: RowReorderDragState) => {
-    if (rowReorderAnimationFrameRef.current !== null) {
-      window.cancelAnimationFrame(rowReorderAnimationFrameRef.current)
-      rowReorderAnimationFrameRef.current = null
-    }
-    pendingRowReorderClientYRef.current = null
-    drag.sourceRow.style.transform = ''
-    drag.sourceRow.style.willChange = ''
-    drag.dropIndicator.remove()
-  }, [])
-
-  const finishRowReorder = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      const activeDrag = rowReorderDragRef.current
-      if (!activeDrag || activeDrag.pointerId !== event.pointerId) return
-      event.preventDefault()
-      event.stopPropagation()
-      applyRowReorderPreview(event.clientY)
-      const drag = rowReorderDragRef.current
-      if (!drag) return
-      clearRowReorderPreview(drag)
-      rowReorderDragRef.current = null
-      setRowReorderDrag(null)
-      if (drag.targetIndex === drag.originIndex) return
-
-      const latestTracks = useItemsStore.getState().tracks
-      const siblings = latestTracks
-        .filter((track) => (track.parentTrackId ?? null) === drag.parentTrackId)
-        .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
-      const sourceIndex = siblings.findIndex((track) => track.id === drag.sourceTrackId)
-      if (sourceIndex < 0) return
-      const [source] = siblings.splice(sourceIndex, 1)
-      if (!source) return
-      siblings.splice(Math.max(0, Math.min(drag.targetIndex, siblings.length)), 0, source)
-      const orderByTrackId = new Map(siblings.map((track, index) => [track.id, index]))
-      setTracks(
-        latestTracks.map((track) => {
-          const order = orderByTrackId.get(track.id)
-          return order === undefined ? track : { ...track, order }
-        }),
-      )
-    },
-    [applyRowReorderPreview, clearRowReorderPreview],
-  )
-
-  const cancelRowReorder = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      const drag = rowReorderDragRef.current
-      if (!drag || drag.pointerId !== event.pointerId) return
-      clearRowReorderPreview(drag)
-      rowReorderDragRef.current = null
-      setRowReorderDrag(null)
-    },
-    [clearRowReorderPreview],
-  )
-
+  const beginRowReorder = rowReorder.begin
+  const moveRowReorder = rowReorder.move
+  const finishRowReorder = rowReorder.end
+  const cancelRowReorder = rowReorder.cancel
   const isRowReordering = rowReorderDrag !== null
   useEffect(() => {
     if (!isRowReordering) return
@@ -4818,13 +4683,7 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     }
   }, [isRowReordering])
 
-  useEffect(
-    () => () => {
-      const drag = rowReorderDragRef.current
-      if (drag) clearRowReorderPreview(drag)
-    },
-    [clearRowReorderPreview],
-  )
+  useEffect(() => () => rowReorder.dispose(), [rowReorder])
 
   const addGeneratedLayer = useCallback(
     (kind: GeneratedLayerKind) => {
