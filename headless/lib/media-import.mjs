@@ -92,7 +92,7 @@ async function hashFile(file) {
   return `sha256:${hash.digest('hex')}`
 }
 
-async function stageImport(workspace, body, requestHash) {
+async function stageImport(workspace, body, requestHash, syncFileFn = syncFile) {
   const source = safeSourcePath(workspace, body.sourceRelativePath)
   const extension = path.extname(source).toLowerCase()
   const mimeType = MIME_BY_EXT.get(extension)
@@ -159,6 +159,10 @@ async function stageImport(workspace, body, requestHash) {
       requestHash,
       sourceRelativePath: body.sourceRelativePath,
     }
+    // The blob must be durable before receipt.json (and later metadata.json)
+    // can describe it, otherwise a crash between the two leaves a promoted
+    // directory whose media file does not match its recorded size/hash.
+    await syncFileFn(target)
     await atomicWriteFile(
       path.join(root, 'receipt.json'),
       Buffer.from(
@@ -221,6 +225,25 @@ async function syncDirectory(directory) {
     if (process.platform !== 'win32') throw error
   } finally {
     await handle?.close().catch(() => {})
+  }
+}
+
+/**
+ * Flush a written file's data to stable storage.
+ *
+ * `syncDirectory` only makes the *names* in a directory durable, so a promoted
+ * media blob needs its own sync before any durable record describes it: without
+ * it a crash can leave `media/<id>` with an empty or partial file while its
+ * metadata claims the full size and hash, and the retry path rejects that id as
+ * MEDIA_ID_CONFLICT. Opened read-write because FlushFileBuffers needs a
+ * writable handle on Windows.
+ */
+async function syncFile(file) {
+  const handle = await fs.promises.open(file, 'r+')
+  try {
+    await handle.sync()
+  } finally {
+    await handle.close()
   }
 }
 
@@ -303,6 +326,7 @@ export async function importWorkspaceMedia(
     probe,
     registerTransient = () => () => {},
     syncDirectoryFn = syncDirectory,
+    syncFileFn = syncFile,
     afterPromotion,
   },
 ) {
@@ -336,7 +360,7 @@ export async function importWorkspaceMedia(
       }
     }
 
-    const staged = await stageImport(workspace, body, requestHash)
+    const staged = await stageImport(workspace, body, requestHash, syncFileFn)
     let unregister = () => {}
     let promoted = false
     try {

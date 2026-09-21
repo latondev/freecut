@@ -414,6 +414,30 @@ test('promotion fsyncs both rename parents before an injected crash boundary', a
   assert.equal(JSON.parse(fs.readFileSync(ledger, 'utf8')).state, 'pending')
 })
 
+test('the staged media blob is flushed before any durable record describes it', async (t) => {
+  const root = workspace(t)
+  const { body } = fixture(root)
+  const raw = Buffer.from(JSON.stringify(body))
+  const events = []
+  await assert.rejects(
+    () =>
+      importWorkspaceMedia(root, body, {
+        requestHash: requestHashOf(raw),
+        probe,
+        syncFileFn: async (file) => events.push(`sync:${path.basename(file)}`),
+        afterPromotion: async () => {
+          events.push('promoted')
+          throw new Error('injected crash')
+        },
+      }),
+    /injected crash/,
+  )
+  // The blob's own store is flushed before the promotion boundary, so a crash
+  // right after it cannot leave a promoted file whose bytes never landed.
+  assert.deepEqual(events, ['sync:source.mp4', 'promoted'])
+  assert.equal(fs.existsSync(path.join(root, 'media', body.mediaId)), true)
+})
+
 test('tampered or colliding deterministic media ids fail closed', async (t) => {
   const root = workspace(t)
   const { body } = fixture(root)
