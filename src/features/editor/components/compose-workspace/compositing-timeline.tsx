@@ -133,7 +133,6 @@ import {
   resolveExpressionReferenceValue,
   GROUP_HEADER_HEIGHT,
   KEYFRAME_EDGE_INSET,
-  KEYFRAME_DIAMOND_RENDERED_WIDTH_PX,
   moveItems,
   openComposition,
   removeKeyframes,
@@ -165,6 +164,15 @@ import {
   usePropertyLinkPickWhip,
   wouldCreateCompositionCycle,
 } from '@/features/editor/deps/timeline-motion'
+import {
+  createMotionTimeViewportController,
+  formatFrameTime,
+  getMotionPlayheadEdgeScrollVelocity,
+  normalizeMotionTimeViewport,
+  panMotionTimeViewport,
+  type MotionTimeViewport,
+  type MotionTimeViewportController,
+} from './motion-time-viewport-controller'
 import { getAnimatablePropertyBaseValue } from '@/features/editor/deps/keyframes'
 import {
   useGizmoStore,
@@ -258,8 +266,6 @@ function createGeneratedLayerItem(
   }
 }
 const RULER_DIVISIONS = 10
-const PLAYHEAD_EDGE_SCROLL_ZONE_PX = 48
-const PLAYHEAD_EDGE_SCROLL_MAX_PX_PER_SECOND = 720
 const EMPTY_LAYER_IDS: string[] = []
 const NO_TRANSFORM_PARENT = '__none__'
 
@@ -428,10 +434,6 @@ function getVisibleLinkedItems(items: TimelineItem[]): TimelineItem[] {
   return items.filter((item) => !hiddenAudioIds.has(item.id))
 }
 
-interface MotionTimeViewport {
-  startFrame: number
-  endFrame: number
-}
 
 interface MotionViewportPreviewElement {
   element: HTMLElement
@@ -487,7 +489,6 @@ interface MotionViewportPreviewState {
   navigator: MotionViewportPreviewNavigator | null
 }
 
-type MotionViewportUpdate = (viewport: MotionTimeViewport) => MotionTimeViewport
 
 function resolveMotionInlinePixels(value: string, referenceWidth: number, fallback: number) {
   const parsed = Number.parseFloat(value)
@@ -3380,102 +3381,6 @@ function buildPropertyLinkHandlers(params: {
   return { onPointerDown, onRemove }
 }
 
-function normalizeMotionTimeViewport(
-  viewport: MotionTimeViewport,
-  totalFrames: number,
-  roundToFrames = true,
-): MotionTimeViewport {
-  const contentEnd = Math.max(1, Math.round(totalFrames))
-  const requestedVisibleFrames = viewport.endFrame - viewport.startFrame
-  const visibleFrames = Math.max(
-    Math.min(1, contentEnd),
-    Math.min(
-      contentEnd,
-      roundToFrames ? Math.round(requestedVisibleFrames) : requestedVisibleFrames,
-    ),
-  )
-  const maxStart = Math.max(0, contentEnd - visibleFrames)
-  const requestedStartFrame = roundToFrames ? Math.round(viewport.startFrame) : viewport.startFrame
-  const startFrame = Math.max(0, Math.min(maxStart, requestedStartFrame))
-  return { startFrame, endFrame: startFrame + visibleFrames }
-}
-
-function getMotionTimelinePanGesture(
-  event: WheelEvent,
-  lockedAxis: 'x' | 'y' | null,
-): { axis: 'x' | 'y'; delta: number } | null {
-  if (event.ctrlKey || event.metaKey || event.altKey) return null
-  if (event.deltaX === 0 && event.deltaY === 0) return null
-  const axis = lockedAxis ?? (Math.abs(event.deltaX) > Math.abs(event.deltaY) ? 'x' : 'y')
-  return { axis, delta: axis === 'x' ? event.deltaX : event.deltaY }
-}
-
-function getMotionPlayheadEdgeScrollVelocity(
-  clientX: number,
-  bounds: Pick<DOMRect, 'left' | 'right'>,
-): number {
-  const leftDepth = PLAYHEAD_EDGE_SCROLL_ZONE_PX - (clientX - bounds.left)
-  if (leftDepth > 0) {
-    return (
-      -PLAYHEAD_EDGE_SCROLL_MAX_PX_PER_SECOND *
-      Math.min(1, leftDepth / PLAYHEAD_EDGE_SCROLL_ZONE_PX)
-    )
-  }
-  const rightDepth = PLAYHEAD_EDGE_SCROLL_ZONE_PX - (bounds.right - clientX)
-  if (rightDepth > 0) {
-    return (
-      PLAYHEAD_EDGE_SCROLL_MAX_PX_PER_SECOND *
-      Math.min(1, rightDepth / PLAYHEAD_EDGE_SCROLL_ZONE_PX)
-    )
-  }
-  return 0
-}
-
-function panMotionTimeViewport(
-  viewport: MotionTimeViewport,
-  panPixels: number,
-  timelineWidth: number,
-  totalFrames: number,
-): MotionTimeViewport {
-  const currentRange = Math.max(1, viewport.endFrame - viewport.startFrame)
-  const deltaFrames = (panPixels / Math.max(1, timelineWidth)) * currentRange
-  return normalizeMotionTimeViewport(
-    {
-      startFrame: viewport.startFrame + deltaFrames,
-      endFrame: viewport.endFrame + deltaFrames,
-    },
-    totalFrames,
-    false,
-  )
-}
-
-function zoomMotionTimeViewport(
-  viewport: MotionTimeViewport,
-  pivotRatio: number,
-  zoomFactor: number,
-  totalFrames: number,
-  minVisibleFrames = 1,
-): MotionTimeViewport {
-  const currentRange = Math.max(1, viewport.endFrame - viewport.startFrame)
-  const pivotFrame = viewport.startFrame + pivotRatio * currentRange
-  const nextRange = Math.max(
-    Math.min(totalFrames, Math.max(1, Math.round(minVisibleFrames))),
-    Math.min(totalFrames, Math.round(currentRange * zoomFactor)),
-  )
-  return normalizeMotionTimeViewport(
-    {
-      startFrame: pivotFrame - pivotRatio * nextRange,
-      endFrame: pivotFrame + (1 - pivotRatio) * nextRange,
-    },
-    totalFrames,
-  )
-}
-
-function formatFrameTime(frame: number, fps: number): string {
-  const seconds = frame / Math.max(1, fps)
-  if (seconds < 10) return `${seconds.toFixed(1)}s`
-  return `${Math.round(seconds)}s`
-}
 
 interface CompositingTimelineProps {
   className?: string
@@ -3695,26 +3600,34 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     },
     [],
   )
-  const wheelMotionViewportRef = useRef<MotionTimeViewport | null>(null)
-  const wheelMotionViewportAnimationFrameRef = useRef<number | null>(null)
-  const wheelMotionViewportCommitTimerRef = useRef<number | null>(null)
-  const wheelMotionPanAxisRef = useRef<'x' | 'y' | null>(null)
+  // Wheel navigation state lives in its own controller: queued viewport
+  // previews, the settle timer and the gesture's locked pan axis. The mirrors
+  // below keep it reading the current render without re-creating it, since a
+  // re-created controller would orphan an in-flight settle timer.
+  const durationInFramesRef = useRef(0)
+  const preparePreviewRef = useRef<() => void>(() => {})
+  const previewViewportRef = useRef<(viewport: MotionTimeViewport) => void>(() => {})
+  const commitViewportRef = useRef<
+    (viewport: MotionTimeViewport, roundToFrames?: boolean) => void
+  >(() => {})
+  const viewportControllerRef = useRef<MotionTimeViewportController | null>(null)
+  if (!viewportControllerRef.current) {
+    viewportControllerRef.current = createMotionTimeViewportController({
+      layerColumnWidth: LAYER_COLUMN_WIDTH,
+      getDurationInFrames: () => durationInFramesRef.current,
+      getTimeViewport: () => timeViewportRef.current,
+      preparePreview: () => preparePreviewRef.current(),
+      previewViewport: (viewport) => previewViewportRef.current(viewport),
+      commitViewport: (viewport, roundToFrames) =>
+        commitViewportRef.current(viewport, roundToFrames),
+      getScrollArea: () => motionScrollAreaRef.current,
+    })
+  }
+  const viewportController = viewportControllerRef.current
   const [motionScrollbarWidth, setMotionScrollbarWidth] = useState(0)
   const [allPathVertexItemIds, setAllPathVertexItemIds] = useState<Set<string>>(
     () => new Set(),
   )
-  const cancelQueuedMotionViewport = useCallback(() => {
-    if (wheelMotionViewportCommitTimerRef.current !== null) {
-      window.clearTimeout(wheelMotionViewportCommitTimerRef.current)
-      wheelMotionViewportCommitTimerRef.current = null
-    }
-    if (wheelMotionViewportAnimationFrameRef.current !== null) {
-      cancelAnimationFrame(wheelMotionViewportAnimationFrameRef.current)
-      wheelMotionViewportAnimationFrameRef.current = null
-    }
-    wheelMotionViewportRef.current = null
-    wheelMotionPanAxisRef.current = null
-  }, [])
   const middlePanRef = useRef<MotionMiddlePanState | null>(null)
   const latestScrubFrameRef = useRef<number | null>(null)
   const scrubAnimationFrameRef = useRef<number | null>(null)
@@ -4114,7 +4027,7 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     [discardMotionTimeViewportPreview, updateTimeViewport],
   )
   const fitMotionTimeViewport = useCallback(() => {
-    cancelQueuedMotionViewport()
+    viewportController.cancel()
     // Fit the active region when one is marked, else the comp itself — never the
     // content overhang past the comp end, which does not render. Read in/out at
     // click time so an IO drag doesn't re-render this whole timeline per frame.
@@ -4126,7 +4039,7 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     previewMotionTimeViewport(fittedViewport)
     commitMotionTimeViewport(fittedViewport)
   }, [
-    cancelQueuedMotionViewport,
+    viewportController,
     commitMotionTimeViewport,
     compositionEndFrame,
     durationInFrames,
@@ -4140,63 +4053,14 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     fitMotionTimeViewport()
   }, [fitMotionTimeViewport])
   useEffect(() => clearMotionTimeViewportPreview, [clearMotionTimeViewportPreview])
-  const queueMotionViewportUpdate = useCallback(
-    (update: MotionViewportUpdate) => {
-      if (!wheelMotionViewportRef.current) prepareMotionTimeViewportPreview()
-      const nextViewport = update(wheelMotionViewportRef.current ?? timeViewportRef.current)
-      wheelMotionViewportRef.current = nextViewport
-
-      if (wheelMotionViewportAnimationFrameRef.current === null) {
-        wheelMotionViewportAnimationFrameRef.current = requestAnimationFrame(() => {
-          wheelMotionViewportAnimationFrameRef.current = null
-          const pendingViewport = wheelMotionViewportRef.current
-          if (pendingViewport) {
-            previewMotionTimeViewport(
-              normalizeMotionTimeViewport(pendingViewport, durationInFrames, false),
-            )
-          }
-        })
-      }
-      if (wheelMotionViewportCommitTimerRef.current !== null) {
-        window.clearTimeout(wheelMotionViewportCommitTimerRef.current)
-      }
-      wheelMotionViewportCommitTimerRef.current = window.setTimeout(() => {
-        wheelMotionViewportCommitTimerRef.current = null
-        if (wheelMotionViewportAnimationFrameRef.current !== null) {
-          cancelAnimationFrame(wheelMotionViewportAnimationFrameRef.current)
-          wheelMotionViewportAnimationFrameRef.current = null
-        }
-        const finalViewport = wheelMotionViewportRef.current
-        if (finalViewport) {
-          const normalizedFinalViewport = normalizeMotionTimeViewport(
-            finalViewport,
-            durationInFrames,
-            false,
-          )
-          // A saturated main thread can let the settle timer win before the
-          // final queued RAF. Paint that exact endpoint synchronously so the
-          // deferred React render inherits identical diamond/grid geometry.
-          previewMotionTimeViewport(normalizedFinalViewport)
-          wheelMotionViewportRef.current = null
-          commitMotionTimeViewport(normalizedFinalViewport, false)
-        } else {
-          wheelMotionViewportRef.current = null
-        }
-        wheelMotionPanAxisRef.current = null
-      }, 100)
-    },
-    [
-      prepareMotionTimeViewportPreview,
-      previewMotionTimeViewport,
-      commitMotionTimeViewport,
-      durationInFrames,
-    ],
-  )
-  const prepareNavigatorMotionTimeViewportPreview = useCallback(() => {
-    cancelQueuedMotionViewport()
-    prepareMotionTimeViewportPreview()
-  }, [cancelQueuedMotionViewport, prepareMotionTimeViewportPreview])
-  useEffect(() => cancelQueuedMotionViewport, [cancelQueuedMotionViewport])
+  // Wire the controller to this render's viewport inputs. Assigned every render
+  // rather than captured at creation, so a composition switch cannot leave a
+  // queued preview working against a stale duration.
+  durationInFramesRef.current = durationInFrames
+  preparePreviewRef.current = prepareMotionTimeViewportPreview
+  previewViewportRef.current = previewMotionTimeViewport
+  commitViewportRef.current = commitMotionTimeViewport
+  useEffect(() => viewportController.cancel, [viewportController])
   useLayoutEffect(() => {
     const scrollArea = motionScrollAreaRef.current
     if (!scrollArea) return
@@ -5425,8 +5289,9 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
       const pointerId = playheadScrubPointerIdRef.current
       const clientX = playheadScrubClientXRef.current
       const surface = playheadScrubSurfaceRef.current
-      let viewport = playheadScrubViewportRef.current
-      if (pointerId === null || clientX === null || !surface || !viewport) return
+      const activeViewport = playheadScrubViewportRef.current
+      if (pointerId === null || clientX === null || !surface || !activeViewport) return
+      let viewport: MotionTimeViewport = activeViewport
 
       const rect = surface.getBoundingClientRect()
       const visibleRange = Math.max(1, viewport.endFrame - viewport.startFrame)
@@ -5502,84 +5367,12 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     ],
   )
 
-  const handleMotionTimelineWheel = useCallback(
-    (event: WheelEvent) => {
-      const isZoomGesture = event.ctrlKey || event.metaKey
-      const isVerticalScrollGesture = event.altKey && !isZoomGesture
-      const panGesture = getMotionTimelinePanGesture(event, wheelMotionPanAxisRef.current)
-      if (!isZoomGesture && !isVerticalScrollGesture && panGesture === null) return
-      const scrollArea = motionScrollAreaRef.current
-      if (!scrollArea) return
-      const rect = scrollArea.getBoundingClientRect()
-      const timelineLeft = rect.left + LAYER_COLUMN_WIDTH
-      const isTimelinePane = event.clientX >= timelineLeft
-      // The shared layer scroller must not receive ordinary wheel input from
-      // either pane. Consume during capture before nested property editors or
-      // native overflow scrolling can react to the same gesture.
-      event.preventDefault()
-      event.stopPropagation()
-
-      if (isVerticalScrollGesture) {
-        wheelMotionPanAxisRef.current = null
-        // Motion reserves Alt/Option+wheel (or the scrollbar) for deliberate
-        // vertical layer/property navigation while ordinary wheel owns time.
-        scrollArea.scrollTop += event.deltaY || event.deltaX
-        return
-      }
-
-      // Like Edit's non-scrollable track-header viewport, ordinary wheel over
-      // the layer column is safely consumed without creating a second pan.
-      if (!isTimelinePane) return
-
-      const measuredTimelineWidth = scrollArea.clientWidth - LAYER_COLUMN_WIDTH
-      const timelineWidth = Math.max(
-        1,
-        measuredTimelineWidth > 0 ? measuredTimelineWidth : rect.right - timelineLeft,
-      )
-      if (panGesture !== null) {
-        wheelMotionPanAxisRef.current = panGesture.axis
-        // Match Edit's timeline navigation ownership: a mouse wheel's deltaY
-        // and a trackpad's dominant deltaX both move only along the time axis.
-        // Lock that physical axis for the gesture so cross-axis noise cannot
-        // make the navigator thumb oscillate between deltas.
-        queueMotionViewportUpdate((current) =>
-          panMotionTimeViewport(current, panGesture.delta, timelineWidth, durationInFrames),
-        )
-        return
-      }
-
-      wheelMotionPanAxisRef.current = null
-      if (event.deltaY === 0) return
-      const pivotRatio = Math.max(0, Math.min(1, (event.clientX - timelineLeft) / timelineWidth))
-      const zoomFactor = event.deltaY > 0 ? 1.25 : 0.8
-      const minVisibleFrames = Math.min(
-        durationInFrames,
-        Math.max(
-          1,
-          Math.ceil(
-            Math.max(1, timelineWidth - KEYFRAME_EDGE_INSET * 2) /
-              KEYFRAME_DIAMOND_RENDERED_WIDTH_PX,
-          ),
-        ),
-      )
-      queueMotionViewportUpdate((current) =>
-        zoomMotionTimeViewport(current, pivotRatio, zoomFactor, durationInFrames, minVisibleFrames),
-      )
-    },
-    [durationInFrames, queueMotionViewportUpdate],
-  )
 
   useEffect(() => {
     const navigationRoot = motionViewportPreviewRootRef.current
     if (!navigationRoot) return
-    navigationRoot.addEventListener('wheel', handleMotionTimelineWheel, {
-      capture: true,
-      passive: false,
-    })
-    return () => {
-      navigationRoot.removeEventListener('wheel', handleMotionTimelineWheel, { capture: true })
-    }
-  }, [handleMotionTimelineWheel])
+    return viewportController.attach(navigationRoot)
+  }, [viewportController])
 
   useEffect(() => {
     const scrollArea = motionScrollAreaRef.current
@@ -6944,7 +6737,7 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
             contentFrameMax={durationInFrames}
             minVisibleFrames={Math.min(10, durationInFrames)}
             onViewportChange={commitMotionTimeViewport}
-            onViewportPreviewStart={prepareNavigatorMotionTimeViewportPreview}
+            onViewportPreviewStart={viewportController.prepareNavigatorPreview}
             onViewportPreview={previewMotionTimeViewport}
           />
           <div className="pointer-events-none absolute inset-x-2 bottom-1 top-[5px] overflow-hidden rounded-sm">
