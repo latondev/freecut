@@ -165,6 +165,12 @@ import {
   wouldCreateCompositionCycle,
 } from '@/features/editor/deps/timeline-motion'
 import {
+  clearSpanDragVisuals,
+  createMotionSpanDragCommands,
+  setSpanDragVisualOffset,
+  type SpanDragState,
+} from './motion-span-drag'
+import {
   createMotionTimeViewportController,
   formatFrameTime,
   getMotionPlayheadEdgeScrollVelocity,
@@ -687,25 +693,6 @@ type MotionRow =
   | { kind: 'group'; track: TimelineTrack; items: TimelineItem[] }
   | { kind: 'layer'; item: TimelineItem; track: TimelineTrack | undefined; depth: number }
 
-interface SpanDragState {
-  pointerId: number
-  startX: number
-  laneWidth: number
-  deltaFrames: number
-  items: Array<{ id: string; from: number; durationInFrames: number }>
-}
-
-function setSpanDragVisualOffset(elements: readonly HTMLElement[], offsetPx: number) {
-  const transform = `translateX(${offsetPx}px)`
-  for (const element of elements) element.style.transform = transform
-}
-
-function clearSpanDragVisuals(elements: readonly HTMLElement[]) {
-  for (const element of elements) {
-    element.style.removeProperty('transform')
-    element.style.removeProperty('will-change')
-  }
-}
 
 interface SpanTrimState {
   pointerId: number
@@ -4664,115 +4651,43 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     [expandMotionLayerItemIds, items, selectItems, tracks],
   )
 
-  const beginSpanDrag = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>, itemIds: string[]) => {
-      if (event.button !== 0) return
-      event.preventDefault()
-      event.stopPropagation()
-      const lane = event.currentTarget.parentElement
-      const laneWidth = lane?.getBoundingClientRect().width ?? 0
-      if (laneWidth <= 0) return
-      const itemIdSet = new Set(expandMotionLayerItemIds(itemIds))
-      const dragItems = items
-        .filter((item) => itemIdSet.has(item.id))
-        .map((item) => ({
-          id: item.id,
-          from: item.from,
-          durationInFrames: item.durationInFrames,
-        }))
-      if (dragItems.length === 0) return
-      pause()
-      if (itemIds.length === 1) {
-        selectLayer(itemIds[0]!, {
-          toggle: event.metaKey || event.ctrlKey,
-          range: event.shiftKey,
-        })
-      } else {
-        selectItems(itemIds)
-      }
-      const next: SpanDragState = {
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        laneWidth,
-        deltaFrames: 0,
-        items: dragItems,
-      }
-      const itemIdSetForVisuals = new Set(itemIds)
-      const visuals = new Set<HTMLElement>([event.currentTarget])
-      for (const row of motionScrollAreaRef.current?.querySelectorAll<HTMLElement>(
-        '[data-motion-layer-item-id]',
-      ) ?? []) {
-        if (!itemIdSetForVisuals.has(row.dataset.motionLayerItemId ?? '')) continue
-        for (const visual of row.querySelectorAll<HTMLElement>('[data-motion-span-drag-visual]')) {
-          visuals.add(visual)
-        }
-      }
-      spanDragVisualsRef.current = [...visuals]
-      for (const visual of spanDragVisualsRef.current) visual.style.willChange = 'transform'
-      spanDragRef.current = next
-      event.currentTarget.setPointerCapture?.(event.pointerId)
-    },
-    [expandMotionLayerItemIds, items, pause, selectItems, selectLayer],
+  // Span dragging is a command object over the component's drag refs, rebuilt
+  // when its inputs change; the refs keep an in-flight drag (and its preview
+  // frame) alive across renders.
+  const spanDrag = useMemo(
+    () =>
+      createMotionSpanDragCommands({
+        state: {
+          dragRef: spanDragRef,
+          visualsRef: spanDragVisualsRef,
+          animationFrameRef: spanDragAnimationFrameRef,
+        },
+        deps: {
+          items,
+          durationInFrames,
+          visibleFrameRange,
+          pause,
+          selectLayer,
+          selectItems,
+          moveItems,
+          expandLayerItemIds: expandMotionLayerItemIds,
+          getScrollArea: () => motionScrollAreaRef.current,
+        },
+      }),
+    [
+      durationInFrames,
+      expandMotionLayerItemIds,
+      items,
+      pause,
+      selectItems,
+      selectLayer,
+      visibleFrameRange,
+    ],
   )
-
-  const moveSpanDrag = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      const drag = spanDragRef.current
-      if (!drag || drag.pointerId !== event.pointerId) return
-      const rawDelta = Math.round(
-        ((event.clientX - drag.startX) / drag.laneWidth) * visibleFrameRange,
-      )
-      const minDelta = -Math.min(...drag.items.map((item) => item.from))
-      const maxDelta = Math.min(...drag.items.map((item) => durationInFrames - item.from - 1))
-      const deltaFrames = Math.max(minDelta, Math.min(maxDelta, rawDelta))
-      if (deltaFrames === drag.deltaFrames) return
-      const next = { ...drag, deltaFrames }
-      spanDragRef.current = next
-      if (spanDragAnimationFrameRef.current !== null) return
-      spanDragAnimationFrameRef.current = requestAnimationFrame(() => {
-        spanDragAnimationFrameRef.current = null
-        const latestDrag = spanDragRef.current
-        if (!latestDrag) return
-        setSpanDragVisualOffset(
-          spanDragVisualsRef.current,
-          (latestDrag.deltaFrames / visibleFrameRange) * latestDrag.laneWidth,
-        )
-      })
-    },
-    [durationInFrames, visibleFrameRange],
-  )
-
-  const endSpanDrag = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    const drag = spanDragRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    event.preventDefault()
-    event.stopPropagation()
-    if (spanDragAnimationFrameRef.current !== null) {
-      cancelAnimationFrame(spanDragAnimationFrameRef.current)
-      spanDragAnimationFrameRef.current = null
-    }
-    clearSpanDragVisuals(spanDragVisualsRef.current)
-    spanDragVisualsRef.current = []
-    spanDragRef.current = null
-    if (drag.deltaFrames !== 0) {
-      moveItems(drag.items.map((item) => ({ id: item.id, from: item.from + drag.deltaFrames })))
-    }
-  }, [])
-
-  const cancelSpanDrag = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    const drag = spanDragRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    event.preventDefault()
-    event.stopPropagation()
-    if (spanDragAnimationFrameRef.current !== null) {
-      cancelAnimationFrame(spanDragAnimationFrameRef.current)
-      spanDragAnimationFrameRef.current = null
-    }
-    clearSpanDragVisuals(spanDragVisualsRef.current)
-    spanDragVisualsRef.current = []
-    spanDragRef.current = null
-  }, [])
-
+  const beginSpanDrag = spanDrag.begin
+  const moveSpanDrag = spanDrag.move
+  const endSpanDrag = spanDrag.end
+  const cancelSpanDrag = spanDrag.cancel
   const beginSpanTrim = useCallback(
     (event: React.PointerEvent<HTMLSpanElement>, item: TimelineItem, handle: 'start' | 'end') => {
       if (event.button !== 0) return
