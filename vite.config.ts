@@ -238,13 +238,12 @@ export default defineConfig({
           if (normalizedId.includes('/src/features/effects/')) {
             return 'feature-effects'
           }
-          // Composition-runtime shares deeply coupled deps with editing-core
-          // (timeline stores, keyframes, export utils). Merging them into one
-          // chunk eliminates the circular chunk dependency that causes TDZ
-          // errors ("Cannot access before initialization") in production builds.
-          if (normalizedId.includes('/src/features/composition-runtime/')) {
-            return 'feature-editing-core'
-          }
+          // `src/runtime/composition-runtime/**` deliberately has no rule here.
+          // A rule pinning it to `feature-editing-core` used to exist but matched
+          // a path the code no longer lives at, so it was inert; the current
+          // graph has no chunk cycle to break (feature-editing-core imports only
+          // rolldown-runtime and app-shell), while re-pinning it would move ~130
+          // modules into that 1.6MB chunk.
 
           // React must be in its own chunk, loaded first to ensure proper initialization
           // This prevents "Cannot set properties of undefined" errors with React 19.2 features
