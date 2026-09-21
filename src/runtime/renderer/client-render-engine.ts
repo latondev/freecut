@@ -14,18 +14,8 @@
  */
 
 import type { CompositionInputProps } from '@/types/export'
-import type {
-  TimelineItem,
-  VideoItem,
-  ImageItem,
-  LottieItem,
-  ShapeItem,
-  TimelineTrack,
-} from '@/types/timeline'
-import {
-  LottieExportProvider,
-  isRenderableLottieSrc,
-} from '@/infrastructure/lottie/lottie-frame-provider'
+import type { TimelineItem, VideoItem, ImageItem, LottieItem, ShapeItem, TimelineTrack } from '@/types/timeline'
+import { LottieExportProvider, isRenderableLottieSrc } from '@/infrastructure/lottie/lottie-frame-provider'
 import { resolveLottieRenderSpec } from '@/infrastructure/lottie/lottie-text'
 import type { ItemKeyframes } from '@/types/keyframe'
 import type { ItemEffect } from '@/types/effects'
@@ -34,7 +24,6 @@ import { createLogger } from '@/shared/logging/logger'
 import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager'
 import { resolveMediaUrl, resolveProxyUrl } from '@/runtime/renderer/deps/media-library-contract'
 import { VideoSourcePool } from '@/runtime/player/video/VideoSourcePool'
-import { recordPreviewCompositionRender } from '@/shared/logging/preview-scrub-performance'
 import { recordPreviewCanvasPool } from '@/shared/logging/preview-scrub-performance'
 
 // Import subsystems
@@ -42,77 +31,26 @@ import { buildKeyframesMap } from './canvas-keyframes'
 import { getLogicalCanvasSize } from './canvas-render-scale'
 import { type AdjustmentLayerWithTrackOrder } from './canvas-effects'
 import { GpuPipelineManager } from './gpu-pipeline-manager'
-import { isItemFullyOccluding, type FrameOcclusionContext } from './frame-occlusion'
-import {
-  renderMasksToGpuTexture as renderMasksToGpuTexturePure,
-  applyTrackScopedMasks as applyTrackScopedMasksPure,
-  type RenderedTaskResult,
-} from './frame-mask-helpers'
-import {
-  renderTransitionFallbackCanvas as renderTransitionFallbackCanvasPure,
-  renderItemWithEffects as renderItemWithEffectsPure,
-  type FrameItemRenderDeps,
-} from './frame-render-tasks'
-import { compositeFrameResults } from './frame-compositing'
-import {
-  buildMaskFrameIndex,
-  getActiveMasksForFrame,
-  type MaskCanvasSettings,
-  type PreparedMask,
-} from './canvas-masks'
-import { type ActiveTransition } from './canvas-transitions'
+import type { RenderedTaskResult } from './frame-mask-helpers'
+import { FrameRenderPass, type FrameRenderDeps } from './frame-render-pass'
+import { buildMaskFrameIndex, getActiveMasksForFrame, type MaskCanvasSettings } from './canvas-masks'
 import { type CachedGifFrames, gifFrameCache } from '@/runtime/renderer/deps/timeline-gif-cache-contract'
 import { CanvasPool, TextMeasurementCache } from './canvas-pool'
-import {
-  acquireSharedPreviewVideoExtractorPool,
-  SharedVideoExtractorPool,
-  type VideoFrameSource,
-} from './shared-video-extractor'
-import { getCompositeOperation } from '@/types/blend-mode-css'
-import {
-  useCompositionsStore,
-  type SubComposition,
-} from '@/runtime/renderer/deps/timeline-compositions-contract'
-import { doesMaskAffectTrack } from '@/shared/utils/mask-scope'
+import { acquireSharedPreviewVideoExtractorPool, SharedVideoExtractorPool, type VideoFrameSource } from './shared-video-extractor'
+import { useCompositionsStore, type SubComposition } from '@/runtime/renderer/deps/timeline-compositions-contract'
 import type { FrameInvalidationRequest } from '@/shared/utils/frame-invalidation'
 import { collectReachableCompositionIdsFromTracks } from '@/runtime/renderer/deps/timeline-compositions-contract'
 import { appendVirtualTranscriptCaptionTrack } from '@/runtime/renderer/deps/caption-items-contract'
 
 // Item renderer
-import {
-  createFrameCompositionSceneCache,
-  hasCornerPin,
-  type PreviewPathVerticesOverride,
-  resolveCompositionRenderPlan,
-  resolveLiveTransitionRenderPlan,
-  collectFrameVideoCandidates,
-  getVideoTargetTimeSeconds,
-  resolveFrameRenderScene,
-  resolveTrackRenderState,
-} from '@/runtime/renderer/deps/composition-runtime-contract'
-import {
-  renderItem,
-  renderTransitionToGpuTexture,
-  type CanvasSettings,
-  type WorkerLoadedImage,
-  type ItemRenderContext,
-  type SubCompRenderData,
-} from './canvas-item-renderer'
+import { createFrameCompositionSceneCache, type PreviewPathVerticesOverride, resolveCompositionRenderPlan, resolveLiveTransitionRenderPlan, collectFrameVideoCandidates, getVideoTargetTimeSeconds, resolveTrackRenderState } from '@/runtime/renderer/deps/composition-runtime-contract'
+import { renderItem, type CanvasSettings, type WorkerLoadedImage, type ItemRenderContext, type SubCompRenderData } from './canvas-item-renderer'
 import { ScrubbingCache } from '@/runtime/renderer/deps/preview-contract'
-import {
-  resolveFrameRenderOptimization,
-  shouldUseScrubbingFrameCache,
-} from './render-path-optimizer'
+import { shouldUseScrubbingFrameCache } from './render-path-optimizer'
 import { ReverseVideoFrameCache } from './reverse-video-frame-cache'
 import { resolveReverseConformedVideoItem } from '@/shared/utils/reverse-conform-item'
 import { resolveCompositionSourceFrame } from './render-span'
-import {
-  itemHasEnabledGpuEffect,
-  isAnimatedImage,
-  isGifFormat,
-  shouldRenderResolvedItemAtFrame,
-  subCompositionRenderDataHasGpuEffects,
-} from './render-engine-predicates'
+import { itemHasEnabledGpuEffect, isAnimatedImage, isGifFormat, subCompositionRenderDataHasGpuEffects } from './render-engine-predicates'
 
 function getLog() {
   return createLogger('ClientRenderEngine')
@@ -582,52 +520,6 @@ export function resolveRenderedFrameCacheMode({
 // Performance panel's Timings track. Read with:
 //   window.__scrubPerf            // raw ring buffer
 //   — or record a Performance profile and look for `scrub.renderFrame.*`.
-interface ScrubPerfSample {
-  f: number
-  path: 'cache-hit' | 'direct' | 'full' | 'aborted'
-  ms: number
-  planMs?: number
-  taskMs?: number
-  gpuWaitMs?: number
-  compositeMs?: number
-  finalizeMs?: number
-  taskCount?: number
-  transitionCount?: number
-  slowTasks?: Array<{ id: string; kind: string; ms: number }>
-}
-type ScrubPerfGlobal = {
-  __SCRUB_PERF__?: boolean
-  __scrubPerf?: ScrubPerfSample[]
-}
-
-function scrubPerfStart(): number {
-  return (globalThis as ScrubPerfGlobal).__SCRUB_PERF__ ||
-    import.meta.env.DEV ||
-    import.meta.env.MODE === 'perf'
-    ? performance.now()
-    : -1
-}
-
-function recordScrubPerf(
-  frame: number,
-  path: ScrubPerfSample['path'],
-  startMs: number,
-  details: Omit<ScrubPerfSample, 'f' | 'path' | 'ms'> = {},
-): void {
-  if (startMs < 0) return
-  const w = globalThis as ScrubPerfGlobal
-  const ms = Number((performance.now() - startMs).toFixed(2))
-  recordPreviewCompositionRender({ frame, path, ms, ...details })
-  const buffer = (w.__scrubPerf ??= [])
-  buffer.push({ f: frame, path, ms, ...details })
-  if (buffer.length > 3000) buffer.shift()
-  try {
-    performance.measure(`scrub.renderFrame.${path}`, { start: startMs })
-  } catch {
-    /* User Timing unavailable — ignore */
-  }
-}
-
 /**
  * Identity of a Lottie item's animation/theme selection + text/color overrides.
  * When this changes the preloaded dotlottie renderer must be rebuilt with a
@@ -754,22 +646,19 @@ export async function createCompositionRenderer(
   const FRAME_CACHE_ENABLED = renderMode === 'preview'
   const scrubbingCache = FRAME_CACHE_ENABLED ? new ScrubbingCache() : null
   let lastRenderedFrame: number | null = null
-  let lastRenderAborted = false
-  let activePreviewFramePending = false
-  let activePreviewFallbackUsed = false
   let nonBlockingVideoFrameToleranceSeconds: number | undefined
   let liveDomVideoPlaybackActive = Boolean(domVideoElementProvider)
-  let scrubbingFrameCacheActive = shouldUseScrubbingFrameCache(
-    Boolean(scrubbingCache),
-    liveDomVideoPlaybackActive,
-  )
   const cacheRenderedFrame = (frame: number) => {
     // Sequential playback already has the decoder's live frame available and
     // should not copy every full-resolution output into the scrub cache. Those
     // GPU copies compete with the next frame's effects/composite work and retain
     // textures that playback is unlikely to revisit immediately. Paused seeks
     // still populate all cache tiers as before.
-    if (!scrubbingCache || !scrubbingFrameCacheActive || activePreviewFallbackUsed) {
+    if (
+      !scrubbingCache ||
+      !frameRenderDeps.scrubbingFrameCacheActive ||
+      frameRenderDeps.activePreviewFallbackUsed
+    ) {
       return
     }
 
@@ -1308,10 +1197,10 @@ export async function createCompositionRenderer(
     domVideoElementProvider,
   }
   itemRenderContext.markActivePreviewFramePending = () => {
-    activePreviewFramePending = true
+    frameRenderDeps.activePreviewFramePending = true
   }
   itemRenderContext.markActivePreviewFallbackUsed = () => {
-    activePreviewFallbackUsed = true
+    frameRenderDeps.activePreviewFallbackUsed = true
   }
 
   // Track the SubComposition identity we last built each entry from so we only
@@ -1893,7 +1782,7 @@ export async function createCompositionRenderer(
       fps,
     })
     itemRenderContext.captureDecodedVideoFrames =
-      Boolean(scrubbingCache && scrubbingFrameCacheActive) && renderedFrameCacheMode !== 'skip'
+      Boolean(scrubbingCache && frameRenderDeps.scrubbingFrameCacheActive) && renderedFrameCacheMode !== 'skip'
     itemRenderContext.nonBlockingVideoFrameToleranceSeconds = nonBlockingVideoFrameToleranceSeconds
     itemRenderContext.workerPredecodeWaitMs =
       nonBlockingVideoFrameToleranceSeconds === undefined
@@ -2056,6 +1945,53 @@ export async function createCompositionRenderer(
       }
     }
   }
+
+  // Renderer-lifetime dependencies for the per-frame pass, assembled once so the
+  // pass reads them instead of re-closing over the factory scope on every frame.
+  // The four mutable entries (abort/pending/fallback/cache-mode) live here so the
+  // prewarm and cache paths share exactly one storage location with the pass.
+  const frameRenderDeps: FrameRenderDeps = {
+    gpu,
+    canvasPool,
+    canvasSettings,
+    maskSettings,
+    itemRenderContext,
+    adjustmentLayers,
+    lottieItems,
+    transitionTrackOrderById,
+    videoExtractors,
+    sortedTracks,
+    tracksTopToBottom,
+    visibleTrackIds,
+    setupGpuCompositor,
+    scrubbingCache,
+    ctx,
+    canvas,
+    renderMode,
+    scrubbingFrameCacheActive: shouldUseScrubbingFrameCache(
+      Boolean(scrubbingCache),
+      liveDomVideoPlaybackActive,
+    ),
+    lastRenderAborted: false,
+    activePreviewFramePending: false,
+    activePreviewFallbackUsed: false,
+    cacheRenderedFrame,
+    detectFrameGpuEffects,
+    discardFrameResults,
+    ensureFrameGpuPipelines,
+    ensureLottieOverridesFresh,
+    lottieOverridesAreStale,
+    refreshFrameRenderContext,
+    resolveFrameSceneState,
+    perfMarkIfEnabled,
+    getCurrentKeyframes,
+    getCurrentItem,
+    getPreviewTransformOverride,
+    getPreviewEffectsOverride,
+    getPreviewCornerPinOverride,
+    getLiveItemSnapshot,
+  }
+  const frameRenderPass = new FrameRenderPass(frameRenderDeps)
 
   return {
     async preload(
@@ -2399,448 +2335,15 @@ export async function createCompositionRenderer(
     },
 
     async renderFrame(frame: number) {
-      const scrubPerfStartMs = scrubPerfStart()
-      lastRenderAborted = false
-      activePreviewFramePending = false
-      activePreviewFallbackUsed = false
-      itemRenderContext.previewRootTimelineFrame = frame
-      const isSupersededActivePreviewFrame = () =>
-        renderMode === 'preview' &&
-        itemRenderContext.isActivePreviewFrameSuperseded?.(frame) === true
-      const abortActivePreviewRender = () => {
-        if (!lastRenderAborted) {
-          recordScrubPerf(frame, 'aborted', scrubPerfStartMs)
-        }
-        lastRenderAborted = true
-      }
-      const runRenderFramePrologue = (): boolean => {
-        if (isSupersededActivePreviewFrame()) {
-          abortActivePreviewRender()
-          return false
-        }
-        if (
-          itemRenderContext.isActivePreviewFrameCurrent?.(frame) &&
-          itemRenderContext.isActivePreviewFrameDecodeReady?.(frame) === false
-        ) {
-          abortActivePreviewRender()
-          return false
-        }
-        // 3-tier cache lookup (preview only)
-        // Tier 1 (GPU texture) → Tier 3 (RAM ImageBitmap) → miss → full render
-        if (scrubbingCache && scrubbingFrameCacheActive) {
-          const cached = scrubbingCache.getFrame(frame)
-          if (cached) {
-            ctx.clearRect(0, 0, canvas.width, canvas.height)
-            ctx.drawImage(cached, 0, 0)
-            recordScrubPerf(frame, 'cache-hit', scrubPerfStartMs)
-            return false
-          }
-        }
-        return true
-      }
-      if (!runRenderFramePrologue()) return
-
-      refreshFrameRenderContext(frame)
-
-      // Rebuild any Lottie whose text/color overrides changed since preload, so
-      // live recolor/text edits show up. The sync guard keeps this ~free on the
-      // hot path — the await only runs the frame after an override edit.
-      if (renderMode === 'preview' && lottieItems.length > 0 && lottieOverridesAreStale()) {
-        await ensureLottieOverridesFresh()
-        if (isSupersededActivePreviewFrame()) {
-          abortActivePreviewRender()
-          return
-        }
-      }
-
-      const { activeMasks, frameScene } = resolveFrameSceneState(frame)
-      const { activeTransitions, transitionClipIds } = frameScene.transitionFrameState
-
-      const hasAnyGpuEffects = detectFrameGpuEffects(frame)
-      await ensureFrameGpuPipelines(hasAnyGpuEffects, activeTransitions.length > 0)
-      if (isSupersededActivePreviewFrame()) {
-        abortActivePreviewRender()
-        return
-      }
-
-      /**
-       * Render a single item with effects. Returns the canvas to composite
-       * (and canvases to release) for deferred compositing, or composites
-       * immediately in export mode.
-       */
-      const itemRenderDeps: FrameItemRenderDeps = {
-        frame,
-        canvasSettings,
-        maskSettings,
-        renderMode,
-        activeMasks,
-        adjustmentLayers,
-        gpu,
-        itemRenderContext,
-        canvasPool,
-        getCurrentItem,
-        getCurrentKeyframes,
-        getPreviewTransformOverride,
-        getPreviewCornerPinOverride,
-        getPreviewEffectsOverride,
-        getLiveItemSnapshot,
-      }
-      const renderItemWithEffects = (
-        baseItem: TimelineItem,
-        trackOrder: number,
-        deferred: boolean,
-        targetCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-        bakeMasks = true,
-        preferGpuTextureOutput = false,
-        allowDirectGpu = true,
-      ): Promise<RenderedTaskResult | null> =>
-        renderItemWithEffectsPure(
-          baseItem,
-          trackOrder,
-          deferred,
-          targetCtx,
-          itemRenderDeps,
-          bakeMasks,
-          preferGpuTextureOutput,
-          allowDirectGpu,
-        )
-
-      const getEffectiveBlendMode = (item: TimelineItem): TimelineItem['blendMode'] => {
-        const blendMode = item.blendMode
-        if (!blendMode || blendMode === 'normal') return blendMode
-        return blendMode
-      }
-
-      // Helper to check if item should be rendered
-      const shouldRenderItem = (baseItem: TimelineItem): boolean =>
-        shouldRenderResolvedItemAtFrame(getCurrentItem(baseItem), frame, transitionClipIds)
-      // === OCCLUSION CULLING OPTIMIZATION ===
-      // Find the topmost (lowest order) track with a fully occluding item.
-      // Skip rendering all tracks below it (higher order) since they'll be fully covered.
-      //
-      // An item is fully occluding if:
-      // - Covers entire canvas (after transform/keyframes)
-      // - Opacity = 1 (after keyframe animation)
-      // - No rotation (or 0/180 that still covers)
-      // - No corner radius
-      // - Is video/image (opaque content)
-      // - Not in a transition
-      // - No transparency effects
-      // - No active masks (masks could reveal content below)
-
-      const occlusionContext: FrameOcclusionContext = {
-        frame,
-        canvasWidth: canvas.width,
-        canvasHeight: canvas.height,
-        canvasSettings,
-        renderMode,
-        transitionClipIds,
-        adjustmentLayers,
-        getCurrentItem,
-        getCurrentKeyframes,
-        getPreviewEffectsOverride,
-        getLiveItemSnapshot,
-        hasTransparentVideoSource: (occItem) =>
-          videoExtractors.get(occItem.id)?.getCanBeTransparent() ?? false,
-      }
-      const isFullyOccluding = (baseItem: TimelineItem, trackOrder: number): boolean =>
-        isItemFullyOccluding(baseItem, trackOrder, occlusionContext)
-
-      // Find occlusion cutoff – the lowest track order with a fully occluding item
-      // If masks are active, disable occlusion culling (masks could reveal content)
-      const { occlusionCutoffOrder, renderTasks } = resolveFrameRenderScene<ActiveTransition>({
-        tracksByOrderDesc: sortedTracks,
-        tracksByOrderAsc: tracksTopToBottom,
-        visibleTrackIds,
-        activeTransitions,
-        getTransitionTrackOrder: (activeTransition) =>
-          transitionTrackOrderById.get(activeTransition.transition.id) ?? 0,
-        disableOcclusion: activeMasks.length > 0,
-        shouldRenderItem,
-        isFullyOccluding,
-      })
-
-      const logOcclusionCulling = (): void => {
-        if (occlusionCutoffOrder === null || !import.meta.env.DEV || frame % 30 !== 0) return
-        const occludingTask = sortedTracks
-          .filter(
-            (track) => visibleTrackIds.has(track.id) && (track.order ?? 0) === occlusionCutoffOrder,
-          )
-          .flatMap((track) => track.items ?? [])
-          .find((item) => shouldRenderItem(item) && isFullyOccluding(item, occlusionCutoffOrder))
-        if (occludingTask) {
-          getLog().debug(
-            `Occlusion culling: item ${occludingTask.id.substring(0, 8)} on track order ${occlusionCutoffOrder} fully occludes canvas`,
-          )
-        }
-      }
-      logOcclusionCulling()
-
-      const { shouldDirectRenderSingleTask, shouldUseDeferredGpuBatch } =
-        resolveFrameRenderOptimization({
-          activeMaskCount: activeMasks.length,
-          activeTransitionCount: activeTransitions.length,
-          hasGpuEffects: hasAnyGpuEffects,
-          renderTaskCount: renderTasks.length,
-        })
-      const hasNonNormalBlendItem = (t: (typeof renderTasks)[number]): boolean => {
-        if (t.type !== 'item') return false
-        const item = getCurrentItem(t.item)
-        const blendMode = getEffectiveBlendMode(item)
-        return Boolean(blendMode && blendMode !== 'normal')
-      }
-      const hasNonNormalBlend = renderTasks.some((t) => hasNonNormalBlendItem(t))
-      const { useGpuCompositor, gpuCompositeOutput } = await setupGpuCompositor(hasNonNormalBlend)
-      if (shouldUseDeferredGpuBatch && itemRenderContext.gpuPipeline) {
-        itemRenderContext.gpuPipeline.beginBatch()
-      }
-
-      const tryRenderDirectSingleTask = async (): Promise<boolean> => {
-        if (!shouldDirectRenderSingleTask) return false
-        if (isSupersededActivePreviewFrame()) {
-          abortActivePreviewRender()
-          return true
-        }
-        const directTask = renderTasks[0]
-        if (directTask?.type === 'item') {
-          const blendMode = getEffectiveBlendMode(getCurrentItem(directTask.item))
-          try {
-            if (blendMode && blendMode !== 'normal') {
-              ctx.globalCompositeOperation = getCompositeOperation(blendMode)
-            }
-
-            await renderItemWithEffects(directTask.item, directTask.trackOrder, false, ctx)
-          } finally {
-            if (blendMode && blendMode !== 'normal') {
-              ctx.globalCompositeOperation = 'source-over'
-            }
-          }
-        }
-
-        if (isSupersededActivePreviewFrame() || activePreviewFramePending) {
-          abortActivePreviewRender()
-          return true
-        }
-
-        cacheRenderedFrame(frame)
-        recordScrubPerf(frame, 'direct', scrubPerfStartMs)
-        return true
-      }
-      if (await tryRenderDirectSingleTask()) return
-
-      // === PERFORMANCE: Use pooled canvas instead of creating new one each frame ===
-      const { canvas: contentCanvas, ctx: contentCtx } = canvasPool.acquire()
-      const scrubPerfTaskStartMs = perfMarkIfEnabled(scrubPerfStartMs)
-      let scrubPerfTaskEndMs = scrubPerfTaskStartMs
-      let scrubPerfGpuWaitEndMs = scrubPerfTaskStartMs
-      let scrubPerfCompositeEndMs = scrubPerfTaskStartMs
-
-      // Render tracks in order (bottom to top), with transitions at their track position
-      // Track order: higher values render first (behind), lower values render last (on top)
-      let skippedTracks = 0
-      let finalCompositeSource: OffscreenCanvas = contentCanvas
-
-      // Parallelize item rendering (video decode is the bottleneck).
-      // Collect all renderable items in z-order, fire all renders concurrently,
-      // then composite results in z-order.
-      const scrubSlowTasks: Array<{ id: string; kind: string; ms: number }> = []
-      {
-        if (occlusionCutoffOrder !== null) {
-          skippedTracks = sortedTracks.filter(
-            (track) => visibleTrackIds.has(track.id) && (track.order ?? 0) > occlusionCutoffOrder,
-          ).length
-        }
-
-        const renderMasksToGpuTexture = (masks: PreparedMask[]) =>
-          renderMasksToGpuTexturePure(masks, { gpu, canvasSettings, maskSettings })
-
-        const renderTransitionFallbackCanvas = (
-          task: Extract<(typeof renderTasks)[number], { type: 'transition' }>,
-        ): Promise<RenderedTaskResult> =>
-          renderTransitionFallbackCanvasPure(task, {
-            frame,
-            activeMasks,
-            itemRenderContext,
-            canvasPool,
-          })
-
-        const applyTrackScopedMasks = (
-          result: RenderedTaskResult | null,
-          trackOrder: number,
-          skipMasks: boolean,
-        ): RenderedTaskResult | null =>
-          applyTrackScopedMasksPure(result, trackOrder, skipMasks, {
-            activeMasks,
-            canvasPool,
-            maskSettings,
-          })
-
-        const renderTask = async (
-          task: (typeof renderTasks)[number],
-        ): Promise<RenderedTaskResult | null> => {
-          const taskStartMs = perfMarkIfEnabled(scrubPerfStartMs)
-          try {
-            if (isSupersededActivePreviewFrame()) return null
-            if (task.type === 'item') {
-              const item = getCurrentItem(task.item)
-              const canSeparateMasks =
-                useGpuCompositor && gpu.texturePool && !hasCornerPin(item.cornerPin)
-              return renderItemWithEffects(
-                task.item,
-                task.trackOrder,
-                true,
-                contentCtx,
-                !canSeparateMasks,
-                false,
-              )
-            }
-            const transitionMasks = activeMasks.filter((mask) =>
-              doesMaskAffectTrack(mask.trackOrder, task.trackOrder),
-            )
-            if (
-              useGpuCompositor &&
-              gpu.texturePool &&
-              transitionMasks.length === 0 &&
-              itemRenderContext.gpuTransitionPipeline
-            ) {
-              const transitionTexture = gpu.texturePool.acquire(
-                canvasSettings.width,
-                canvasSettings.height,
-              )
-              const renderedToTexture = await renderTransitionToGpuTexture(
-                transitionTexture,
-                task.transition,
-                frame,
-                itemRenderContext,
-                task.trackOrder,
-                gpu.texturePool,
-              )
-              if (renderedToTexture) {
-                return {
-                  gpuTexture: transitionTexture,
-                  poolCanvases: [],
-                } satisfies RenderedTaskResult
-              }
-              gpu.texturePool.release(transitionTexture)
-            }
-            // Transitions: render to a dedicated canvas
-            return renderTransitionFallbackCanvas(task)
-          } finally {
-            if (taskStartMs >= 0) {
-              const taskMs = performance.now() - taskStartMs
-              if (taskMs >= 8) {
-                const currentItem = task.type === 'item' ? getCurrentItem(task.item) : null
-                scrubSlowTasks.push({
-                  id:
-                    currentItem?.id ??
-                    (task.type === 'transition' ? task.transition.transition.id : 'unknown'),
-                  kind: currentItem?.type ?? task.type,
-                  ms: Number(taskMs.toFixed(2)),
-                })
-              }
-            }
-          }
-        }
-
-        const renderTasksWithInteractionLimit = async () => {
-          const results: Array<RenderedTaskResult | null> = Array(renderTasks.length).fill(null)
-          const concurrency =
-            renderMode === 'preview' ? Math.min(1, renderTasks.length) : renderTasks.length
-          let nextTaskIndex = 0
-          const worker = async () => {
-            while (nextTaskIndex < renderTasks.length) {
-              if (isSupersededActivePreviewFrame()) return
-              const taskIndex = nextTaskIndex++
-              results[taskIndex] = await renderTask(renderTasks[taskIndex]!)
-            }
-          }
-          await Promise.all(Array.from({ length: concurrency }, () => worker()))
-          return results
-        }
-
-        let results: Array<RenderedTaskResult | null>
-        try {
-          // Ordinary playback/export retains full parallelism. Active scrubs
-          // cap item-level concurrency so a complex frame cannot exhaust the
-          // canvas pool while its exact worker bitmaps are still arriving.
-          results = await renderTasksWithInteractionLimit()
-          scrubPerfTaskEndMs = perfMarkIfEnabled(scrubPerfStartMs)
-        } finally {
-          // End GPU pool mode before compositing, even if one task fails.
-          if (shouldUseDeferredGpuBatch && itemRenderContext.gpuPipeline) {
-            itemRenderContext.gpuPipeline.endBatch()
-          }
-        }
-
-        if (isSupersededActivePreviewFrame() || activePreviewFramePending) {
-          discardFrameResults(results, contentCanvas)
-          abortActivePreviewRender()
-          return
-        }
-
-        // Consume pooled WebGPU canvases synchronously below. Awaiting the queue
-        // here crosses a task boundary, allowing the browser to present and
-        // discard a GPUCanvasContext texture before Canvas2D reads it. The first
-        // drawImage performs the required GPU stall and preserves heavy effect
-        // stacks without intermittent black frames.
-        scrubPerfGpuWaitEndMs = perfMarkIfEnabled(scrubPerfStartMs)
-
-        finalCompositeSource = await compositeFrameResults({
-          useGpuCompositor,
-          gpu,
-          gpuCompositeOutput,
-          canvasSettings,
-          maskSettings,
-          renderTasks,
-          results,
-          activeMasks,
-          contentCanvas,
-          contentCtx,
-          itemRenderContext,
-          canvasPool,
-          getCurrentItem,
-          getEffectiveBlendMode,
-          applyTrackScopedMasks,
-          renderMasksToGpuTexture,
-          renderTransitionFallbackCanvas,
-          renderItemWithEffects,
-        })
-        scrubPerfCompositeEndMs = perfMarkIfEnabled(scrubPerfStartMs)
-      }
-
-      // Log occlusion culling stats periodically (only in development)
-      if (import.meta.env.DEV && skippedTracks > 0 && frame % 30 === 0) {
-        getLog().debug(`Occlusion culling: skipped ${skippedTracks} tracks at frame ${frame}`)
-      }
-
-      ctx.drawImage(finalCompositeSource, 0, 0)
-
-      // Release content canvas back to pool
-      canvasPool.release(contentCanvas)
-      cacheRenderedFrame(frame)
-      const recordFullFramePerf = (): void => {
-        if (scrubPerfStartMs < 0) return
-        const scrubPerfEndMs = performance.now()
-        recordScrubPerf(frame, 'full', scrubPerfStartMs, {
-          planMs: Number((scrubPerfTaskStartMs - scrubPerfStartMs).toFixed(2)),
-          taskMs: Number((scrubPerfTaskEndMs - scrubPerfTaskStartMs).toFixed(2)),
-          gpuWaitMs: Number((scrubPerfGpuWaitEndMs - scrubPerfTaskEndMs).toFixed(2)),
-          compositeMs: Number((scrubPerfCompositeEndMs - scrubPerfGpuWaitEndMs).toFixed(2)),
-          finalizeMs: Number((scrubPerfEndMs - scrubPerfCompositeEndMs).toFixed(2)),
-          taskCount: renderTasks.length,
-          transitionCount: activeTransitions.length,
-          slowTasks: scrubSlowTasks.length > 0 ? scrubSlowTasks : undefined,
-        })
-      }
-      recordFullFramePerf()
+      await frameRenderPass.run(frame)
     },
 
     wasLastRenderAborted() {
-      return lastRenderAborted
+      return frameRenderDeps.lastRenderAborted
     },
 
     wasLastRenderFallback() {
-      return activePreviewFallbackUsed
+      return frameRenderDeps.activePreviewFallbackUsed
     },
 
     async prewarmFrame(frame: number) {
@@ -2976,7 +2479,7 @@ export async function createCompositionRenderer(
     ) {
       itemRenderContext.domVideoElementProvider = provider
       liveDomVideoPlaybackActive = Boolean(provider)
-      scrubbingFrameCacheActive = shouldUseScrubbingFrameCache(
+      frameRenderDeps.scrubbingFrameCacheActive = shouldUseScrubbingFrameCache(
         Boolean(scrubbingCache),
         liveDomVideoPlaybackActive,
       )

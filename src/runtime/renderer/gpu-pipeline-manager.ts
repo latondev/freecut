@@ -120,10 +120,7 @@ export class GpuPipelineManager {
     return this.texturePool
   }
 
-  ensureCompositeOutput(
-    width: number,
-    height: number,
-  ): { canvas: OffscreenCanvas; ctx: GPUCanvasContext } | null {
+  ensureCompositeOutput(width: number, height: number): GpuCompositeOutput | null {
     if (!this.effects) return null
 
     const dimensionsChanged = this.compositeW !== width || this.compositeH !== height
@@ -190,4 +187,10 @@ export class GpuPipelineManager {
     this.effects?.destroy()
     this.effects = null
   }
+}
+
+/** The offscreen canvas compositing renders into, plus its WebGPU context. */
+export interface GpuCompositeOutput {
+  canvas: OffscreenCanvas
+  ctx: GPUCanvasContext
 }

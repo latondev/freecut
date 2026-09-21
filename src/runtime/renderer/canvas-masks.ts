@@ -516,24 +516,8 @@ export function getActiveMasksForFrame(
   getPreviewPathVerticesOverride?: PreviewPathVerticesOverride,
   getLiveItem?: (itemId: string) => ShapeItem | undefined,
   getExpressionItem?: (itemId: string) => TimelineItem | undefined,
-): Array<{
-  path?: Path2D
-  bitmapMask?: OffscreenCanvas
-  inverted: boolean
-  feather: number
-  maskType: 'clip' | 'alpha'
-  opacity: number
-  trackOrder: number
-}> {
-  const activeMasks: Array<{
-    path?: Path2D
-    bitmapMask?: OffscreenCanvas
-    inverted: boolean
-    feather: number
-    maskType: 'clip' | 'alpha'
-    opacity: number
-    trackOrder: number
-  }> = []
+): PreparedMask[] {
+  const activeMasks: PreparedMask[] = []
   const liveMasks = index.masks.map(({ mask, trackOrder }) => ({
     mask: getLiveItem?.(mask.id) ?? mask,
     trackOrder,
