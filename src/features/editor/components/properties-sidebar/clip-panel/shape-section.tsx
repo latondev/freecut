@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import type { ShapeItem, ShapeType, TimelineItem } from '@/types/timeline'
-import { useKeyframesStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { useKeyframesStore, updateItem } from '@/features/editor/deps/timeline-store'
 import { useGizmoStore, useMaskEditorStore } from '@/features/editor/deps/preview'
 import { hasPathVertexKeyframes } from '@/features/editor/deps/keyframes'
 import {
@@ -36,6 +36,7 @@ import {
   getSwappedShapeLinearGradientColors,
 } from '@/shared/graphics/shapes/linear-gradient'
 import { getPathClosureUpdates, getShapeSectionControlVisibility } from './shape-section-visibility'
+import { demixValue } from '../utils'
 
 // Shape type options
 const SHAPE_TYPE_OPTIONS: { value: ShapeType; labelKey: string }[] = [
@@ -72,9 +73,12 @@ interface ShapeSectionProps {
  */
 export function ShapeSection({ items }: ShapeSectionProps) {
   const { t } = useTranslation()
-  const updateItem = useTimelineStore((s) => s.updateItem)
-  const { isEditing, editingItemId, penMode, selectedVertexIndex, startEditing, stopEditing } =
-    useMaskEditorStore()
+  const isEditing = useMaskEditorStore((s) => s.isEditing)
+  const editingItemId = useMaskEditorStore((s) => s.editingItemId)
+  const penMode = useMaskEditorStore((s) => s.penMode)
+  const selectedVertexIndex = useMaskEditorStore((s) => s.selectedVertexIndex)
+  const startEditing = useMaskEditorStore((s) => s.startEditing)
+  const stopEditing = useMaskEditorStore((s) => s.stopEditing)
 
   // Gizmo store for live property preview
   const setPropertiesPreviewNew = useGizmoStore((s) => s.setPropertiesPreviewNew)
@@ -244,7 +248,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
         updateItem(item.id, updates)
       })
     },
-    [shapeItems, updateItem],
+    [shapeItems],
   )
 
   // Shape type change - also update label to match shape type
@@ -419,7 +423,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
       const updates = getSwappedShapeLinearGradientColors(item)
       if (updates) updateItem(item.id, updates)
     })
-  }, [shapeItems, updateItem])
+  }, [shapeItems])
 
   const handleStrokeEnabledChange = useCallback(
     (enabled: boolean) => {
@@ -468,7 +472,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
       }
       updateItem(singlePathShape.id, getPathClosureUpdates(singlePathShape, closed))
     },
-    [pathTopologyLocked, singlePathShape, updateItem],
+    [pathTopologyLocked, singlePathShape],
   )
 
   const handleReversePath = useCallback(() => {
@@ -480,7 +484,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
     updateItem(singlePathShape.id, {
       pathVertices: reversePathVertices(singlePathShape.pathVertices),
     })
-  }, [pathTopologyLocked, singlePathShape, updateItem])
+  }, [pathTopologyLocked, singlePathShape])
 
   const handleSetFirstVertex = useCallback(() => {
     if (!singlePathShape?.pathVertices || selectedVertexIndex === null) return
@@ -491,7 +495,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
     updateItem(singlePathShape.id, {
       pathVertices: rotateClosedPathStart(singlePathShape.pathVertices, selectedVertexIndex),
     })
-  }, [pathTopologyLocked, selectedVertexIndex, singlePathShape, updateItem])
+  }, [pathTopologyLocked, selectedVertexIndex, singlePathShape])
 
   // Corner radius handlers with live preview
   const handleCornerRadiusLiveChange = useCallback(
@@ -1096,8 +1100,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
               keyframe={{
                 itemIds,
                 property: 'trimPathStart',
-                currentValue:
-                  sharedValues.trimPathStart === 'mixed' ? 0 : sharedValues.trimPathStart,
+                currentValue: demixValue(sharedValues.trimPathStart, 0),
               }}
               onReset={() => resetNumericProperty('trimPathStart', 0)}
               resetLabel={t('editor.shapeSection.resetToDefault')}
@@ -1115,7 +1118,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
               keyframe={{
                 itemIds,
                 property: 'trimPathEnd',
-                currentValue: sharedValues.trimPathEnd === 'mixed' ? 100 : sharedValues.trimPathEnd,
+                currentValue: demixValue(sharedValues.trimPathEnd, 100),
               }}
               onReset={() => resetNumericProperty('trimPathEnd', 100)}
               resetLabel={t('editor.shapeSection.resetToDefault')}
@@ -1134,8 +1137,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
               keyframe={{
                 itemIds,
                 property: 'trimPathOffset',
-                currentValue:
-                  sharedValues.trimPathOffset === 'mixed' ? 0 : sharedValues.trimPathOffset,
+                currentValue: demixValue(sharedValues.trimPathOffset, 0),
               }}
               onReset={() => resetNumericProperty('trimPathOffset', 0)}
               resetLabel={t('editor.shapeSection.resetToDefault')}
@@ -1163,8 +1165,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
               keyframe={{
                 itemIds,
                 property: 'taperStartWidth',
-                currentValue:
-                  sharedValues.taperStartWidth === 'mixed' ? 100 : sharedValues.taperStartWidth,
+                currentValue: demixValue(sharedValues.taperStartWidth, 100),
               }}
               onReset={() => resetNumericProperty('taperStartWidth', 100)}
               resetLabel={t('editor.shapeSection.resetToDefault')}
@@ -1182,8 +1183,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
               keyframe={{
                 itemIds,
                 property: 'taperStartLength',
-                currentValue:
-                  sharedValues.taperStartLength === 'mixed' ? 0 : sharedValues.taperStartLength,
+                currentValue: demixValue(sharedValues.taperStartLength, 0),
               }}
               onReset={() => resetNumericProperty('taperStartLength', 0)}
               resetLabel={t('editor.shapeSection.resetToDefault')}
@@ -1201,8 +1201,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
               keyframe={{
                 itemIds,
                 property: 'taperEndWidth',
-                currentValue:
-                  sharedValues.taperEndWidth === 'mixed' ? 100 : sharedValues.taperEndWidth,
+                currentValue: demixValue(sharedValues.taperEndWidth, 100),
               }}
               onReset={() => resetNumericProperty('taperEndWidth', 100)}
               resetLabel={t('editor.shapeSection.resetToDefault')}
@@ -1220,8 +1219,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
               keyframe={{
                 itemIds,
                 property: 'taperEndLength',
-                currentValue:
-                  sharedValues.taperEndLength === 'mixed' ? 0 : sharedValues.taperEndLength,
+                currentValue: demixValue(sharedValues.taperEndLength, 0),
               }}
               onReset={() => resetNumericProperty('taperEndLength', 0)}
               resetLabel={t('editor.shapeSection.resetToDefault')}

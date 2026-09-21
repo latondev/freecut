@@ -1,6 +1,5 @@
 import type { AudioItem, TextItem, TimelineItem, VideoItem } from '@/types/timeline'
 import { getTextItemPlainText } from '@/shared/utils/text-item-spans'
-import { getLinkedItems } from '../utils/linked-items'
 import { useTransitionsStore } from './transitions-store'
 
 export interface ItemsIndexState {
@@ -9,6 +8,7 @@ export interface ItemsIndexState {
   itemById: Record<string, TimelineItem>
   itemsByLinkedGroupId: Record<string, TimelineItem[]>
   linkedItemsByItemId: Record<string, TimelineItem[]>
+  captionIdsByClipId: Record<string, string[]>
   maxItemEndFrame: number
 }
 
@@ -253,6 +253,14 @@ function areItemArraysEqual(a: TimelineItem[] | undefined, b: TimelineItem[]): b
   return true
 }
 
+function areStringArraysEqual(a: string[] | undefined, b: string[]): boolean {
+  if (!a || a.length !== b.length) return false
+  for (let i = 0; i < b.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
 function buildItemsByTrackId(
   items: TimelineItem[],
   previous: Record<string, TimelineItem[]>,
@@ -330,6 +338,61 @@ export function selectReplaceableCaptionClipIds(state: { items: TimelineItem[] }
   captionCacheItems = state.items
   captionCacheSet = buildReplaceableCaptionClipIds(state.items)
   return captionCacheSet
+}
+
+// Items-keyed memo for per-cue caption ownership (embedded subtitles and
+// subtitle imports). Every mounted clip asks whether it owns consolidatable
+// captions on each store notification; a raw scan would be O(N²).
+let consolidatableCaptionItems: TimelineItem[] | null = null
+let consolidatableCaptionClipIds: Set<string> = new Set()
+
+export function selectConsolidatableCaptionClipIds(state: {
+  items: TimelineItem[]
+}): Set<string> {
+  if (consolidatableCaptionItems === state.items) return consolidatableCaptionClipIds
+  const ids = new Set<string>()
+  for (const item of state.items) {
+    if (item.type !== 'text') continue
+    const source = item.captionSource
+    if (
+      source &&
+      (source.type === 'embedded-subtitles' || source.type === 'subtitle-import') &&
+      source.clipId
+    ) {
+      ids.add(source.clipId)
+    }
+  }
+  consolidatableCaptionItems = state.items
+  consolidatableCaptionClipIds = ids
+  return ids
+}
+
+// Items-keyed memo for the audio mixer graph. Returning the same array while
+// items are unchanged keeps the mixer panel from re-filtering (and rebuilding
+// its graph) on every unrelated item edit.
+let audioGraphItemsCacheItems: TimelineItem[] | null = null
+let audioGraphItemsCache: TimelineItem[] = []
+
+export function selectAudioGraphItems(state: { items: TimelineItem[] }): TimelineItem[] {
+  if (audioGraphItemsCacheItems === state.items) return audioGraphItemsCache
+  audioGraphItemsCacheItems = state.items
+  audioGraphItemsCache = state.items.filter(
+    (item) => item.type === 'audio' || item.type === 'video' || item.type === 'composition',
+  )
+  return audioGraphItemsCache
+}
+
+// Items-keyed memo for consumers that only need stable item ids (marquee hit
+// testing at the timeline root). Avoids re-allocating the id array on every
+// unrelated items update.
+let itemIdsCacheItems: TimelineItem[] | null = null
+let itemIdsCache: string[] = []
+
+export function selectItemIds(state: { items: TimelineItem[] }): string[] {
+  if (itemIdsCacheItems === state.items) return itemIdsCache
+  itemIdsCacheItems = state.items
+  itemIdsCache = state.items.map((item) => item.id)
+  return itemIdsCache
 }
 
 function buildReplaceableCaptionClipIds(items: TimelineItem[]): Set<string> {
@@ -484,6 +547,27 @@ function buildItemById(
   return next
 }
 
+function buildCaptionIdsByClipId(
+  items: TimelineItem[],
+  previous: Record<string, string[]>,
+): Record<string, string[]> {
+  const grouped: Record<string, string[]> = {}
+  for (const item of items) {
+    if (item.type !== 'text') continue
+    const clipId = item.captionSource?.clipId
+    if (clipId) {
+      ;(grouped[clipId] ??= []).push(item.id)
+    }
+  }
+
+  const next: Record<string, string[]> = {}
+  for (const [clipId, ids] of Object.entries(grouped)) {
+    const previousIds = previous[clipId]
+    next[clipId] = previousIds && areStringArraysEqual(previousIds, ids) ? previousIds : ids
+  }
+  return next
+}
+
 export function buildItemsMediaDependencyIds(items: TimelineItem[]): string[] {
   const mediaIds = new Set<string>()
   for (const item of items) {
@@ -511,7 +595,11 @@ export function withItemIndexes(
   items: TimelineItem[],
   previous: Pick<
     ItemsIndexState,
-    'itemsByTrackId' | 'itemById' | 'itemsByLinkedGroupId' | 'linkedItemsByItemId'
+    | 'itemsByTrackId'
+    | 'itemById'
+    | 'itemsByLinkedGroupId'
+    | 'linkedItemsByItemId'
+    | 'captionIdsByClipId'
   >,
 ): ItemsIndexState {
   const itemsByLinkedGroupId = buildItemsByLinkedGroupId(items, previous.itemsByLinkedGroupId)
@@ -525,6 +613,7 @@ export function withItemIndexes(
       itemsByLinkedGroupId,
       previous.linkedItemsByItemId,
     ),
+    captionIdsByClipId: buildCaptionIdsByClipId(items, previous.captionIdsByClipId),
     maxItemEndFrame: computeMaxItemEndFrame(items),
   }
 }
@@ -546,6 +635,7 @@ export function getTransitionLinkedIds(itemId: string): Set<string> {
 export function buildRippleShiftByItemId(
   items: TimelineItem[],
   deletedItems: TimelineItem[],
+  linkedItemsByItemId: Record<string, TimelineItem[]> = {},
 ): Map<string, number> {
   const shiftByItemId = new Map<string, number>()
 
@@ -566,7 +656,9 @@ export function buildRippleShiftByItemId(
   for (const item of items) {
     if (visited.has(item.id)) continue
 
-    const linkedItems = getLinkedItems(items, item.id)
+    // Use the precomputed linked index (which also covers legacy pairs) instead
+    // of re-scanning the whole array with getLinkedItems per item (O(N²)).
+    const linkedItems = linkedItemsByItemId[item.id] ?? [item]
     for (const linkedItem of linkedItems) {
       visited.add(linkedItem.id)
     }

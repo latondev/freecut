@@ -119,7 +119,6 @@ import {
   DopesheetEditor,
   PickWhipIcon,
   PropertyLinkPickWhipOverlay,
-  duplicateItemsWithTrackChanges,
   getAnimatablePropertiesForItem,
   getProceduralBands,
   getPropertyAccordionGroups,
@@ -133,20 +132,16 @@ import {
   resolveExpressionReferenceValue,
   GROUP_HEADER_HEIGHT,
   KEYFRAME_EDGE_INSET,
-  KEYFRAME_DIAMOND_RENDERED_WIDTH_PX,
   moveItems,
   openComposition,
   removeKeyframes,
   removeVectorKeyframe,
-  removeItems,
   ROW_HEIGHT,
   resolveDroppedMediaEntriesFromPayload,
   setTransformParents,
   setPropertyExpression,
   removePropertyExpression,
   setTracks,
-  trimItemEnd,
-  trimItemStart,
   updateItem,
   updateKeyframe,
   updateKeyframes,
@@ -165,6 +160,37 @@ import {
   usePropertyLinkPickWhip,
   wouldCreateCompositionCycle,
 } from '@/features/editor/deps/timeline-motion'
+import {
+  clearSpanDragVisuals,
+  clearSpanTrimVisuals,
+  createMotionSpanDragCommands,
+  createMotionSpanTrimCommands,
+  type SpanDragState,
+  type SpanTrimState,
+} from './motion-span-interactions'
+import {
+  createMotionRowReorderCommands,
+  type RowReorderDragState,
+} from './motion-row-reorder'
+import {
+  createMotionTimeViewportController,
+  formatFrameTime,
+  getMotionPlayheadEdgeScrollVelocity,
+  normalizeMotionTimeViewport,
+  panMotionTimeViewport,
+  type MotionTimeViewport,
+  type MotionTimeViewportController,
+} from './motion-time-viewport-controller'
+import { createMotionLayerClipboardCommands } from './motion-layer-clipboard'
+import { createMotionLayerSelectionCommands } from './motion-layer-selection'
+import {
+  getVisibleMotionRetimeRange,
+  getRetimeKeyboardDelta,
+  applyMotionSelectionFrameUpdates,
+  restoreMotionSelectionRetimeVisuals,
+  type MotionSelectionRetimeDragState,
+  createMotionSelectionRetimeCommands,
+} from './motion-selection-retime'
 import { getAnimatablePropertyBaseValue } from '@/features/editor/deps/keyframes'
 import {
   useGizmoStore,
@@ -183,7 +209,7 @@ import {
   commitTextMotionEdit,
   trimCompositionToActiveRegion,
   updateTextMotionLive,
-  useTimelineStore,
+  useMarkersStore,
 } from '@/features/editor/deps/timeline-store'
 import {
   clearMediaDragData,
@@ -207,20 +233,22 @@ import {
   getMotionSelectionTimeRange,
   mergeMotionKeyframeSelection,
   type MotionSelectionDragState,
-  type MotionSelectionFrameUpdates,
-  type MotionSelectionTimeRange,
 } from './motion-keyframe-selection'
 import {
   buildMotionVectorSeparationProperties,
   canCombineMotionVectorRowWithoutBake,
-  getMotionVectorProxy,
-  getStoredMotionVectorKeyframeId,
   isMotionVectorRowSeparated,
   MOTION_VECTOR_ROW_DEFINITIONS,
   motionVectorSeparationNeedsBake,
   shouldUseMotionVectorRow,
   toMotionVectorProxyKeyframes,
 } from './motion-vector-rows'
+import {
+  findStoredVectorKeyframe,
+  getStoredVectorKeyframeId,
+  getVectorPropertyProxy,
+  toVectorScalePercent,
+} from '@/features/editor/deps/keyframes-contract'
 import { MotionIoLane, MOTION_IO_LANE_HEIGHT } from './motion-io-lane'
 import { MotionActiveRegionOverlay, MotionCompEndRulerDim } from './motion-region-overlay'
 import { getVisibleMotionPathProperties } from './motion-path-property-visibility'
@@ -254,8 +282,6 @@ function createGeneratedLayerItem(
   }
 }
 const RULER_DIVISIONS = 10
-const PLAYHEAD_EDGE_SCROLL_ZONE_PX = 48
-const PLAYHEAD_EDGE_SCROLL_MAX_PX_PER_SECOND = 720
 const EMPTY_LAYER_IDS: string[] = []
 const NO_TRANSFORM_PARENT = '__none__'
 
@@ -307,127 +333,6 @@ const MAX_DIMENSION_BAKE_FRAMES = 10_000
 const PROCEDURAL_HATCH =
   'repeating-linear-gradient(45deg, rgba(56,189,248,0.55) 0 2px, transparent 2px 5px)'
 
-type ClipboardTimelineItem = Omit<TimelineItem, 'id'>
-type CompositionById = Parameters<typeof wouldCreateCompositionCycle>[0]['compositionById']
-
-function clipboardHasLinkedPair(
-  items: ClipboardTimelineItem[],
-  item: ClipboardTimelineItem,
-): boolean {
-  if (!item.linkedGroupId) return false
-  return items.some(
-    (candidate) =>
-      candidate.linkedGroupId === item.linkedGroupId &&
-      ((candidate.type === 'audio' && item.type === 'video') ||
-        (candidate.type === 'video' && item.type === 'audio')),
-  )
-}
-
-function createPastedLinkedGroupIds(items: ClipboardTimelineItem[]): Map<string, string> {
-  const result = new Map<string, string>()
-  for (const item of items) {
-    if (!item.linkedGroupId || result.has(item.linkedGroupId)) continue
-    if (clipboardHasLinkedPair(items, item)) result.set(item.linkedGroupId, crypto.randomUUID())
-  }
-  return result
-}
-
-function wouldSkipPastedComposition(
-  item: ClipboardTimelineItem,
-  activeCompositionId: string | null,
-  compositionById: CompositionById,
-): boolean {
-  if (!activeCompositionId || !('compositionId' in item)) return false
-  if (typeof item.compositionId !== 'string') return false
-  return wouldCreateCompositionCycle({
-    parentCompositionId: activeCompositionId,
-    insertedCompositionId: item.compositionId,
-    compositionById,
-  })
-}
-
-function createPastedLayerTrack(params: {
-  item: ClipboardTimelineItem
-  sourceTrack: TimelineTrack | undefined
-  trackId: string
-  order: number
-  parentTrackId: string | undefined
-}): TimelineTrack {
-  const fallback: TimelineTrack = {
-    id: params.trackId,
-    name: params.item.label || params.item.type,
-    kind: params.item.type === 'audio' ? 'audio' : 'video',
-    order: params.order,
-    height: LAYER_ROW_HEIGHT,
-    locked: false,
-    syncLock: true,
-    visible: true,
-    muted: false,
-    solo: false,
-    items: [],
-  }
-  return {
-    ...(params.sourceTrack ?? fallback),
-    id: params.trackId,
-    name: `${params.sourceTrack?.name ?? params.item.label ?? params.item.type} copy`,
-    order: params.order,
-    parentTrackId: params.parentTrackId,
-    isGroup: false,
-    items: [],
-  }
-}
-
-function createPastedLayer(params: {
-  item: ClipboardTimelineItem
-  index: number
-  pasteFrame: number
-  maxOrder: number
-  parentTrackId: string | undefined
-  activeCompositionId: string | null
-  compositionById: CompositionById
-  trackById: Map<string, TimelineTrack>
-  linkedGroupIds: Map<string, string>
-}): { track: TimelineTrack; item: TimelineItem } | null {
-  if (wouldSkipPastedComposition(params.item, params.activeCompositionId, params.compositionById)) {
-    return null
-  }
-  const trackId = crypto.randomUUID()
-  const itemId = crypto.randomUUID()
-  return {
-    track: createPastedLayerTrack({
-      item: params.item,
-      sourceTrack: params.trackById.get(params.item.trackId),
-      trackId,
-      order: params.maxOrder + params.index + 1,
-      parentTrackId: params.parentTrackId,
-    }),
-    item: {
-      ...params.item,
-      id: itemId,
-      originId: itemId,
-      trackId,
-      from: Math.max(0, params.pasteFrame + params.item.from),
-      linkedGroupId: params.item.linkedGroupId
-        ? params.linkedGroupIds.get(params.item.linkedGroupId)
-        : undefined,
-    } as TimelineItem,
-  }
-}
-
-function getVisibleLinkedItems(items: TimelineItem[]): TimelineItem[] {
-  const hiddenAudioIds = new Set(
-    items.flatMap((item) => {
-      const companion = getLinkedAudioCompanion(items, item)
-      return companion ? [companion.id] : []
-    }),
-  )
-  return items.filter((item) => !hiddenAudioIds.has(item.id))
-}
-
-interface MotionTimeViewport {
-  startFrame: number
-  endFrame: number
-}
 
 interface MotionViewportPreviewElement {
   element: HTMLElement
@@ -483,7 +388,6 @@ interface MotionViewportPreviewState {
   navigator: MotionViewportPreviewNavigator | null
 }
 
-type MotionViewportUpdate = (viewport: MotionTimeViewport) => MotionTimeViewport
 
 function resolveMotionInlinePixels(value: string, referenceWidth: number, fallback: number) {
   const parsed = Number.parseFloat(value)
@@ -682,128 +586,8 @@ type MotionRow =
   | { kind: 'group'; track: TimelineTrack; items: TimelineItem[] }
   | { kind: 'layer'; item: TimelineItem; track: TimelineTrack | undefined; depth: number }
 
-interface SpanDragState {
-  pointerId: number
-  startX: number
-  laneWidth: number
-  deltaFrames: number
-  items: Array<{ id: string; from: number; durationInFrames: number }>
-}
 
-function setSpanDragVisualOffset(elements: readonly HTMLElement[], offsetPx: number) {
-  const transform = `translateX(${offsetPx}px)`
-  for (const element of elements) element.style.transform = transform
-}
 
-function clearSpanDragVisuals(elements: readonly HTMLElement[]) {
-  for (const element of elements) {
-    element.style.removeProperty('transform')
-    element.style.removeProperty('will-change')
-  }
-}
-
-interface SpanTrimState {
-  pointerId: number
-  itemId: string
-  handle: 'start' | 'end'
-  startX: number
-  laneWidth: number
-  deltaFrames: number
-  from: number
-  durationInFrames: number
-  segment: HTMLButtonElement
-  segmentWidthPx: number
-  segmentInlineWidth: string
-  segmentInlineTransform: string
-  segmentInlineWillChange: string
-  timelineVisuals: HTMLElement[]
-}
-
-function applySpanTrimVisuals(trim: SpanTrimState, visibleFrameRange: number) {
-  const offsetPx = (trim.deltaFrames / visibleFrameRange) * trim.laneWidth
-  trim.segment.style.transform =
-    trim.handle === 'start' ? `translateX(${offsetPx}px)` : trim.segmentInlineTransform
-  trim.segment.style.width = `${Math.max(
-    1,
-    trim.segmentWidthPx + (trim.handle === 'start' ? -offsetPx : offsetPx),
-  )}px`
-  if (trim.handle === 'start') setSpanDragVisualOffset(trim.timelineVisuals, offsetPx)
-}
-
-function clearSpanTrimVisuals(trim: SpanTrimState) {
-  trim.segment.style.width = trim.segmentInlineWidth
-  trim.segment.style.transform = trim.segmentInlineTransform
-  trim.segment.style.willChange = trim.segmentInlineWillChange
-  clearSpanDragVisuals(trim.timelineVisuals)
-}
-
-interface RowReorderDragState {
-  pointerId: number
-  sourceTrackId: string
-  parentTrackId: string | null
-  startY: number
-  deltaY: number
-  originIndex: number
-  targetIndex: number
-  sourceRow: HTMLElement
-  dropCandidates: Array<{ trackId: string; centerY: number; row: HTMLElement }>
-  dropIndicator: HTMLDivElement
-}
-
-interface MotionSelectionRetimeDragState {
-  pointerId: number
-  edge: 'start' | 'end'
-  startClientX: number
-  rulerWidth: number
-  initialEdgeFrame: number
-  selection: MotionSelectionDragState
-  itemById: Record<string, TimelineItem>
-  snapshot: ReturnType<typeof captureSnapshot>
-  hasMoved: boolean
-  lastUpdates: MotionSelectionFrameUpdates | null
-  keyframeVisuals: MotionSelectionRetimeKeyframeVisual[]
-  connectorVisuals: MotionSelectionRetimeConnectorVisual[]
-  rangeVisual: MotionSelectionRetimeRangeVisual | null
-}
-
-interface MotionSelectionRetimeKeyframeVisual {
-  element: HTMLButtonElement
-  storageKey: string
-  initialAbsoluteFrame: number
-  inlineTransform: string
-  inlineWillChange: string
-}
-
-interface MotionSelectionRetimeConnectorVisual {
-  element: HTMLDivElement
-  fromReferenceKey: string
-  toReferenceKey: string
-  initialLeft: number
-  initialRight: number
-  inlineLeft: string
-  inlineWidth: string
-  inlineWillChange: string
-}
-
-interface MotionSelectionRetimeRangeVisual {
-  element: HTMLDivElement
-  label: HTMLSpanElement | null
-  startHandle: HTMLButtonElement | null
-  endHandle: HTMLButtonElement | null
-  inlineLeft: string
-  inlineWidth: string
-  inlineVisibility: string
-  inlineWillChange: string
-  title: string | null
-  labelText: string | null
-  labelDisplay: string | null
-  startValueMin: string | null
-  startValueMax: string | null
-  startValueNow: string | null
-  endValueMin: string | null
-  endValueMax: string | null
-  endValueNow: string | null
-}
 
 interface InlineCurveState {
   compositionId: string
@@ -867,367 +651,6 @@ const MotionPlayheadOverlay = memo(function MotionPlayheadOverlay({
   )
 })
 
-interface VisibleMotionRetimeRange {
-  startFrame: number
-  endFrame: number
-  widthPercent: number
-}
-
-function getVisibleMotionRetimeRange(
-  range: ReturnType<typeof getMotionSelectionTimeRange>,
-  viewport: MotionTimeViewport,
-): VisibleMotionRetimeRange | null {
-  if (!range || range.keyframeCount < 2 || range.startFrame >= range.endFrame) return null
-  if (range.endFrame < viewport.startFrame || range.startFrame > viewport.endFrame) return null
-  const startFrame = Math.max(viewport.startFrame, range.startFrame)
-  const endFrame = Math.min(viewport.endFrame, range.endFrame)
-  return {
-    startFrame,
-    endFrame,
-    widthPercent:
-      ((endFrame - startFrame) / Math.max(1, viewport.endFrame - viewport.startFrame)) * 100,
-  }
-}
-
-function getRetimeKeyboardDelta(event: ReactKeyboardEvent<HTMLButtonElement>): number | null {
-  const direction = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0
-  return direction === 0 ? null : direction * (event.shiftKey ? 10 : 1)
-}
-
-function applyMotionSelectionFrameUpdates(updates: MotionSelectionFrameUpdates): void {
-  const keyframesStore = useKeyframesStore.getState()
-  if (updates.scalar.length > 0) {
-    keyframesStore._updateKeyframes(
-      updates.scalar.map((update) => ({
-        itemId: update.itemId,
-        property: update.property,
-        keyframeId: update.keyframeId,
-        updates: { frame: update.frame },
-      })),
-    )
-  }
-  for (const update of updates.vector) {
-    keyframesStore._updateVectorKeyframe(update.itemId, update.property, update.keyframeId, {
-      frame: update.frame,
-    })
-  }
-}
-
-function getMotionRetimeStorageKey(
-  itemId: string,
-  kind: 'scalar' | 'vector',
-  property: string,
-  keyframeId: string,
-): string {
-  return `${itemId}\u0000${kind}\u0000${property}\u0000${keyframeId}`
-}
-
-function getMotionRetimeReferenceKey(itemId: string, keyframeId: string): string {
-  return `${itemId}\u0000${keyframeId}`
-}
-
-function captureMotionSelectionRetimeKeyframeVisuals(
-  root: HTMLElement | null,
-  selection: MotionSelectionDragState,
-  itemById: Readonly<Record<string, TimelineItem>>,
-): MotionSelectionRetimeKeyframeVisual[] {
-  if (!root) return []
-  const elementByReferenceKey = new Map<string, HTMLButtonElement>()
-  for (const element of root.querySelectorAll<HTMLButtonElement>(
-    '[data-motion-item-id][data-motion-keyframe-id]',
-  )) {
-    const itemId = element.dataset.motionItemId
-    const keyframeId = element.dataset.motionKeyframeId
-    if (itemId && keyframeId) {
-      elementByReferenceKey.set(getMotionRetimeReferenceKey(itemId, keyframeId), element)
-    }
-  }
-
-  return selection.entries.flatMap((entry) => {
-    const item = itemById[entry.ref.itemId]
-    const element = elementByReferenceKey.get(
-      getMotionRetimeReferenceKey(entry.ref.itemId, entry.ref.keyframeId),
-    )
-    if (!item || !element) return []
-    return [
-      {
-        element,
-        storageKey: getMotionRetimeStorageKey(
-          entry.ref.itemId,
-          entry.storage.kind,
-          entry.storage.property,
-          entry.storage.keyframeId,
-        ),
-        initialAbsoluteFrame: item.from + entry.initialFrame,
-        inlineTransform: element.style.transform,
-        inlineWillChange: element.style.willChange,
-      },
-    ]
-  })
-}
-
-function captureMotionSelectionRetimeConnectorVisuals(
-  root: HTMLElement | null,
-  selection: MotionSelectionDragState,
-): MotionSelectionRetimeConnectorVisual[] {
-  if (!root) return []
-  const selectedReferenceKeys = new Set(
-    selection.entries.map((entry) =>
-      getMotionRetimeReferenceKey(entry.ref.itemId, entry.ref.keyframeId),
-    ),
-  )
-  const visuals: MotionSelectionRetimeConnectorVisual[] = []
-  for (const element of root.querySelectorAll<HTMLDivElement>(
-    '[data-motion-item-id][data-motion-connector-from-keyframe-id][data-motion-connector-to-keyframe-id]',
-  )) {
-    const itemId = element.dataset.motionItemId
-    const fromKeyframeId = element.dataset.motionConnectorFromKeyframeId
-    const toKeyframeId = element.dataset.motionConnectorToKeyframeId
-    if (!itemId || !fromKeyframeId || !toKeyframeId) continue
-    const fromReferenceKey = getMotionRetimeReferenceKey(itemId, fromKeyframeId)
-    const toReferenceKey = getMotionRetimeReferenceKey(itemId, toKeyframeId)
-    if (
-      !selectedReferenceKeys.has(fromReferenceKey) &&
-      !selectedReferenceKeys.has(toReferenceKey)
-    ) {
-      continue
-    }
-    const initialLeft = Number.parseFloat(element.style.left)
-    const initialWidth = Number.parseFloat(element.style.width)
-    if (!Number.isFinite(initialLeft) || !Number.isFinite(initialWidth)) continue
-    visuals.push({
-      element,
-      fromReferenceKey,
-      toReferenceKey,
-      initialLeft,
-      initialRight: initialLeft + initialWidth,
-      inlineLeft: element.style.left,
-      inlineWidth: element.style.width,
-      inlineWillChange: element.style.willChange,
-    })
-  }
-  return visuals
-}
-
-function captureMotionSelectionRetimeRangeVisual(
-  element: HTMLDivElement | null,
-): MotionSelectionRetimeRangeVisual | null {
-  if (!element) return null
-  const label = element.querySelector<HTMLSpanElement>('[data-motion-selection-retime-label]')
-  const startHandle = element.querySelector<HTMLButtonElement>(
-    '[data-motion-selection-retime-edge="start"]',
-  )
-  const endHandle = element.querySelector<HTMLButtonElement>(
-    '[data-motion-selection-retime-edge="end"]',
-  )
-  return {
-    element,
-    label,
-    startHandle,
-    endHandle,
-    inlineLeft: element.style.left,
-    inlineWidth: element.style.width,
-    inlineVisibility: element.style.visibility,
-    inlineWillChange: element.style.willChange,
-    title: element.getAttribute('title'),
-    labelText: label?.textContent ?? null,
-    labelDisplay: label?.style.display ?? null,
-    startValueMin: startHandle?.getAttribute('aria-valuemin') ?? null,
-    startValueMax: startHandle?.getAttribute('aria-valuemax') ?? null,
-    startValueNow: startHandle?.getAttribute('aria-valuenow') ?? null,
-    endValueMin: endHandle?.getAttribute('aria-valuemin') ?? null,
-    endValueMax: endHandle?.getAttribute('aria-valuemax') ?? null,
-    endValueNow: endHandle?.getAttribute('aria-valuenow') ?? null,
-  }
-}
-
-function buildMotionSelectionRetimePreview(
-  drag: MotionSelectionRetimeDragState,
-  updates: MotionSelectionFrameUpdates,
-): { absoluteFrameByStorageKey: Map<string, number>; range: MotionSelectionTimeRange } | null {
-  const localFrameByStorageKey = new Map<string, number>()
-  for (const update of updates.scalar) {
-    localFrameByStorageKey.set(
-      getMotionRetimeStorageKey(update.itemId, 'scalar', update.property, update.keyframeId),
-      update.frame,
-    )
-  }
-  for (const update of updates.vector) {
-    localFrameByStorageKey.set(
-      getMotionRetimeStorageKey(update.itemId, 'vector', update.property, update.keyframeId),
-      update.frame,
-    )
-  }
-
-  const absoluteFrameByStorageKey = new Map<string, number>()
-  const absoluteFrames: number[] = []
-  for (const entry of drag.selection.entries) {
-    const item = drag.itemById[entry.ref.itemId]
-    if (!item) continue
-    const storageKey = getMotionRetimeStorageKey(
-      entry.ref.itemId,
-      entry.storage.kind,
-      entry.storage.property,
-      entry.storage.keyframeId,
-    )
-    const absoluteFrame = item.from + (localFrameByStorageKey.get(storageKey) ?? entry.initialFrame)
-    absoluteFrameByStorageKey.set(storageKey, absoluteFrame)
-    absoluteFrames.push(absoluteFrame)
-  }
-  if (absoluteFrames.length === 0) return null
-  return {
-    absoluteFrameByStorageKey,
-    range: {
-      startFrame: Math.min(...absoluteFrames),
-      endFrame: Math.max(...absoluteFrames),
-      keyframeCount: drag.selection.entries.length,
-      itemCount: new Set(drag.selection.entries.map((entry) => entry.ref.itemId)).size,
-    },
-  }
-}
-
-function applyMotionSelectionRetimeVisuals(
-  drag: MotionSelectionRetimeDragState,
-  updates: MotionSelectionFrameUpdates,
-  viewport: MotionTimeViewport,
-): void {
-  const preview = buildMotionSelectionRetimePreview(drag, updates)
-  if (!preview) return
-  const visibleFrameRange = Math.max(1, viewport.endFrame - viewport.startFrame)
-  const offsetPxByReferenceKey = new Map<string, number>()
-  for (const entry of drag.selection.entries) {
-    const item = drag.itemById[entry.ref.itemId]
-    if (!item) continue
-    const storageKey = getMotionRetimeStorageKey(
-      entry.ref.itemId,
-      entry.storage.kind,
-      entry.storage.property,
-      entry.storage.keyframeId,
-    )
-    const initialAbsoluteFrame = item.from + entry.initialFrame
-    const absoluteFrame = preview.absoluteFrameByStorageKey.get(storageKey) ?? initialAbsoluteFrame
-    offsetPxByReferenceKey.set(
-      getMotionRetimeReferenceKey(entry.ref.itemId, entry.ref.keyframeId),
-      ((absoluteFrame - initialAbsoluteFrame) / visibleFrameRange) * drag.rulerWidth,
-    )
-  }
-  for (const visual of drag.keyframeVisuals) {
-    const absoluteFrame =
-      preview.absoluteFrameByStorageKey.get(visual.storageKey) ?? visual.initialAbsoluteFrame
-    const offsetPx =
-      ((absoluteFrame - visual.initialAbsoluteFrame) / visibleFrameRange) * drag.rulerWidth
-    visual.element.style.transform = `translate3d(${offsetPx}px, 0, 0)`
-    visual.element.style.willChange = 'transform'
-  }
-  for (const visual of drag.connectorVisuals) {
-    const nextLeft = visual.initialLeft + (offsetPxByReferenceKey.get(visual.fromReferenceKey) ?? 0)
-    const nextRight = visual.initialRight + (offsetPxByReferenceKey.get(visual.toReferenceKey) ?? 0)
-    visual.element.style.left = `${Math.min(nextLeft, nextRight)}px`
-    visual.element.style.width = `${Math.abs(nextRight - nextLeft)}px`
-    visual.element.style.willChange = 'left, width'
-  }
-
-  const rangeVisual = drag.rangeVisual
-  if (!rangeVisual) return
-  const visibleRange = getVisibleMotionRetimeRange(preview.range, viewport)
-  if (!visibleRange) {
-    rangeVisual.element.style.visibility = 'hidden'
-    return
-  }
-  const selectionDuration = preview.range.endFrame - preview.range.startFrame
-  const layerSuffix = preview.range.itemCount === 1 ? '' : 's'
-  rangeVisual.element.style.visibility = 'visible'
-  rangeVisual.element.style.left = `${
-    ((visibleRange.startFrame - viewport.startFrame) / visibleFrameRange) * 100
-  }%`
-  rangeVisual.element.style.width = `${Math.max(0.4, visibleRange.widthPercent)}%`
-  rangeVisual.element.style.willChange = 'left, width'
-  rangeVisual.element.title = `${preview.range.keyframeCount} selected keyframes across ${preview.range.itemCount} layer${layerSuffix} · ${selectionDuration}f`
-  if (rangeVisual.label) {
-    rangeVisual.label.textContent = `${preview.range.keyframeCount} keys · ${selectionDuration}f`
-    rangeVisual.label.style.display = visibleRange.widthPercent >= 8 ? '' : 'none'
-  }
-  rangeVisual.startHandle?.setAttribute('aria-valuemax', String(preview.range.endFrame - 1))
-  rangeVisual.startHandle?.setAttribute('aria-valuenow', String(preview.range.startFrame))
-  rangeVisual.endHandle?.setAttribute('aria-valuemin', String(preview.range.startFrame + 1))
-  rangeVisual.endHandle?.setAttribute('aria-valuenow', String(preview.range.endFrame))
-}
-
-function restoreMotionSelectionRetimeVisuals(
-  drag: MotionSelectionRetimeDragState,
-  restoreRange: boolean,
-): void {
-  for (const visual of drag.keyframeVisuals) {
-    visual.element.style.transform = visual.inlineTransform
-    visual.element.style.willChange = visual.inlineWillChange
-  }
-  for (const visual of drag.connectorVisuals) {
-    if (restoreRange) {
-      visual.element.style.left = visual.inlineLeft
-      visual.element.style.width = visual.inlineWidth
-    }
-    visual.element.style.willChange = visual.inlineWillChange
-  }
-  const rangeVisual = drag.rangeVisual
-  if (!rangeVisual) return
-  rangeVisual.element.style.visibility = rangeVisual.inlineVisibility
-  rangeVisual.element.style.willChange = rangeVisual.inlineWillChange
-  if (!restoreRange) return
-  rangeVisual.element.style.left = rangeVisual.inlineLeft
-  rangeVisual.element.style.width = rangeVisual.inlineWidth
-  if (rangeVisual.title === null) rangeVisual.element.removeAttribute('title')
-  else rangeVisual.element.setAttribute('title', rangeVisual.title)
-  if (rangeVisual.label) {
-    rangeVisual.label.textContent = rangeVisual.labelText
-    rangeVisual.label.style.display = rangeVisual.labelDisplay ?? ''
-  }
-  const restoreAttribute = (
-    element: HTMLButtonElement | null,
-    name: string,
-    value: string | null,
-  ) => {
-    if (!element) return
-    if (value === null) element.removeAttribute(name)
-    else element.setAttribute(name, value)
-  }
-  restoreAttribute(rangeVisual.startHandle, 'aria-valuemin', rangeVisual.startValueMin)
-  restoreAttribute(rangeVisual.startHandle, 'aria-valuemax', rangeVisual.startValueMax)
-  restoreAttribute(rangeVisual.startHandle, 'aria-valuenow', rangeVisual.startValueNow)
-  restoreAttribute(rangeVisual.endHandle, 'aria-valuemin', rangeVisual.endValueMin)
-  restoreAttribute(rangeVisual.endHandle, 'aria-valuemax', rangeVisual.endValueMax)
-  restoreAttribute(rangeVisual.endHandle, 'aria-valuenow', rangeVisual.endValueNow)
-}
-
-function hasMotionSelectionRetimeChanges(
-  drag: MotionSelectionRetimeDragState,
-  updates: MotionSelectionFrameUpdates,
-): boolean {
-  const initialFrameByStorageKey = new Map(
-    drag.selection.entries.map((entry) => [
-      getMotionRetimeStorageKey(
-        entry.ref.itemId,
-        entry.storage.kind,
-        entry.storage.property,
-        entry.storage.keyframeId,
-      ),
-      entry.initialFrame,
-    ]),
-  )
-  return (
-    updates.scalar.some(
-      (update) =>
-        initialFrameByStorageKey.get(
-          getMotionRetimeStorageKey(update.itemId, 'scalar', update.property, update.keyframeId),
-        ) !== update.frame,
-    ) ||
-    updates.vector.some(
-      (update) =>
-        initialFrameByStorageKey.get(
-          getMotionRetimeStorageKey(update.itemId, 'vector', update.property, update.keyframeId),
-        ) !== update.frame,
-    )
-  )
-}
 
 interface MotionSelectionRetimeRangeProps {
   range: ReturnType<typeof getMotionSelectionTimeRange>
@@ -1647,10 +1070,6 @@ function withoutPropertyExpressions(itemKeyframes: ItemKeyframes | undefined) {
   }
 }
 
-function toMotionScalePercent(value: number, baseValue: number): number {
-  return Math.abs(baseValue) <= Number.EPSILON ? 100 : (value / baseValue) * 100
-}
-
 function getMotionVectorValue(
   property: VectorAnimatableProperty,
   transform: ReturnType<typeof resolveTransform>,
@@ -1659,8 +1078,8 @@ function getMotionVectorValue(
   if (property === 'position') return { x: transform.x, y: transform.y }
   if (property === 'scale') {
     return {
-      x: toMotionScalePercent(transform.width, baseTransform.width),
-      y: toMotionScalePercent(transform.height, baseTransform.height),
+      x: toVectorScalePercent(transform.width, baseTransform.width),
+      y: toVectorScalePercent(transform.height, baseTransform.height),
     }
   }
   return { x: transform.anchorX, y: transform.anchorY }
@@ -1842,16 +1261,6 @@ function useMotionPositionValueSource(
   return useMemo(() => createMotionPositionValueSource(() => contextRef.current), [])
 }
 
-function findMotionVectorKeyframe(
-  itemKeyframes: ItemKeyframes | undefined,
-  property: VectorAnimatableProperty,
-  keyframeId: string,
-): VectorKeyframe | undefined {
-  return itemKeyframes?.vectorProperties
-    ?.find((candidate) => candidate.property === property)
-    ?.keyframes.find((keyframe) => keyframe.id === keyframeId)
-}
-
 interface ResolvedMotionVectorReference {
   reference: KeyframeRef
   proxy: { property: VectorAnimatableProperty; axis: 'x' | 'y' }
@@ -1862,12 +1271,12 @@ function resolveMotionVectorReference(
   itemKeyframes: ItemKeyframes | undefined,
   reference: KeyframeRef,
 ): ResolvedMotionVectorReference | null {
-  const proxy = getMotionVectorProxy(reference.property)
+  const proxy = getVectorPropertyProxy(reference.property)
   if (!proxy) return null
-  const keyframe = findMotionVectorKeyframe(
+  const keyframe = findStoredVectorKeyframe(
     itemKeyframes,
     proxy.property,
-    getStoredMotionVectorKeyframeId(reference.keyframeId, proxy.axis),
+    getStoredVectorKeyframeId(reference.keyframeId, proxy.axis),
   )
   return keyframe ? { reference, proxy, keyframe } : null
 }
@@ -2228,12 +1637,12 @@ const MotionDopesheetContent = memo(function MotionDopesheetContent({
     for (let index = selectedKeyframes.length - 1; index >= 0; index -= 1) {
       const reference = selectedKeyframes[index]!
       if (reference.itemId !== item.id) continue
-      const proxy = getMotionVectorProxy(reference.property)
+      const proxy = getVectorPropertyProxy(reference.property)
       if (!proxy || values.has(proxy.property)) continue
-      const keyframe = findMotionVectorKeyframe(
+      const keyframe = findStoredVectorKeyframe(
         itemKeyframes,
         proxy.property,
-        getStoredMotionVectorKeyframeId(reference.keyframeId, proxy.axis),
+        getStoredVectorKeyframeId(reference.keyframeId, proxy.axis),
       )
       if (keyframe) values.set(proxy.property, keyframe.value)
     }
@@ -3104,7 +2513,7 @@ const MotionDopesheetContent = memo(function MotionDopesheetContent({
           onAddKeyframe={(property, frame) => {
             const absoluteFrame = clampAbsoluteFrame(frame)
             const propertyRelativeFrame = absoluteFrame - item.from
-            const vectorProxy = getMotionVectorProxy(property)
+            const vectorProxy = getVectorPropertyProxy(property)
             if (
               vectorProxy &&
               motionVectorRows.some((row) => row.property === vectorProxy.property)
@@ -3356,7 +2765,7 @@ function isMotionPropertyVisible(
   proceduralPropertyIds: ReadonlySet<AnimatableProperty>,
 ): boolean {
   const hasKeys = (keyframesByProperty[property]?.length ?? 0) > 0
-  const vectorProperty = getMotionVectorProxy(property)?.property
+  const vectorProperty = getVectorPropertyProxy(property)?.property
   const hasLink = getDirectPropertyLinks(itemKeyframes).some(
     (link) => link.targetProperty === property || link.targetProperty === vectorProperty,
   )
@@ -3390,102 +2799,6 @@ function buildPropertyLinkHandlers(params: {
   return { onPointerDown, onRemove }
 }
 
-function normalizeMotionTimeViewport(
-  viewport: MotionTimeViewport,
-  totalFrames: number,
-  roundToFrames = true,
-): MotionTimeViewport {
-  const contentEnd = Math.max(1, Math.round(totalFrames))
-  const requestedVisibleFrames = viewport.endFrame - viewport.startFrame
-  const visibleFrames = Math.max(
-    Math.min(1, contentEnd),
-    Math.min(
-      contentEnd,
-      roundToFrames ? Math.round(requestedVisibleFrames) : requestedVisibleFrames,
-    ),
-  )
-  const maxStart = Math.max(0, contentEnd - visibleFrames)
-  const requestedStartFrame = roundToFrames ? Math.round(viewport.startFrame) : viewport.startFrame
-  const startFrame = Math.max(0, Math.min(maxStart, requestedStartFrame))
-  return { startFrame, endFrame: startFrame + visibleFrames }
-}
-
-function getMotionTimelinePanGesture(
-  event: WheelEvent,
-  lockedAxis: 'x' | 'y' | null,
-): { axis: 'x' | 'y'; delta: number } | null {
-  if (event.ctrlKey || event.metaKey || event.altKey) return null
-  if (event.deltaX === 0 && event.deltaY === 0) return null
-  const axis = lockedAxis ?? (Math.abs(event.deltaX) > Math.abs(event.deltaY) ? 'x' : 'y')
-  return { axis, delta: axis === 'x' ? event.deltaX : event.deltaY }
-}
-
-function getMotionPlayheadEdgeScrollVelocity(
-  clientX: number,
-  bounds: Pick<DOMRect, 'left' | 'right'>,
-): number {
-  const leftDepth = PLAYHEAD_EDGE_SCROLL_ZONE_PX - (clientX - bounds.left)
-  if (leftDepth > 0) {
-    return (
-      -PLAYHEAD_EDGE_SCROLL_MAX_PX_PER_SECOND *
-      Math.min(1, leftDepth / PLAYHEAD_EDGE_SCROLL_ZONE_PX)
-    )
-  }
-  const rightDepth = PLAYHEAD_EDGE_SCROLL_ZONE_PX - (bounds.right - clientX)
-  if (rightDepth > 0) {
-    return (
-      PLAYHEAD_EDGE_SCROLL_MAX_PX_PER_SECOND *
-      Math.min(1, rightDepth / PLAYHEAD_EDGE_SCROLL_ZONE_PX)
-    )
-  }
-  return 0
-}
-
-function panMotionTimeViewport(
-  viewport: MotionTimeViewport,
-  panPixels: number,
-  timelineWidth: number,
-  totalFrames: number,
-): MotionTimeViewport {
-  const currentRange = Math.max(1, viewport.endFrame - viewport.startFrame)
-  const deltaFrames = (panPixels / Math.max(1, timelineWidth)) * currentRange
-  return normalizeMotionTimeViewport(
-    {
-      startFrame: viewport.startFrame + deltaFrames,
-      endFrame: viewport.endFrame + deltaFrames,
-    },
-    totalFrames,
-    false,
-  )
-}
-
-function zoomMotionTimeViewport(
-  viewport: MotionTimeViewport,
-  pivotRatio: number,
-  zoomFactor: number,
-  totalFrames: number,
-  minVisibleFrames = 1,
-): MotionTimeViewport {
-  const currentRange = Math.max(1, viewport.endFrame - viewport.startFrame)
-  const pivotFrame = viewport.startFrame + pivotRatio * currentRange
-  const nextRange = Math.max(
-    Math.min(totalFrames, Math.max(1, Math.round(minVisibleFrames))),
-    Math.min(totalFrames, Math.round(currentRange * zoomFactor)),
-  )
-  return normalizeMotionTimeViewport(
-    {
-      startFrame: pivotFrame - pivotRatio * nextRange,
-      endFrame: pivotFrame + (1 - pivotRatio) * nextRange,
-    },
-    totalFrames,
-  )
-}
-
-function formatFrameTime(frame: number, fps: number): string {
-  const seconds = frame / Math.max(1, fps)
-  if (seconds < 10) return `${seconds.toFixed(1)}s`
-  return `${Math.round(seconds)}s`
-}
 
 interface CompositingTimelineProps {
   className?: string
@@ -3705,26 +3018,34 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     },
     [],
   )
-  const wheelMotionViewportRef = useRef<MotionTimeViewport | null>(null)
-  const wheelMotionViewportAnimationFrameRef = useRef<number | null>(null)
-  const wheelMotionViewportCommitTimerRef = useRef<number | null>(null)
-  const wheelMotionPanAxisRef = useRef<'x' | 'y' | null>(null)
+  // Wheel navigation state lives in its own controller: queued viewport
+  // previews, the settle timer and the gesture's locked pan axis. The mirrors
+  // below keep it reading the current render without re-creating it, since a
+  // re-created controller would orphan an in-flight settle timer.
+  const durationInFramesRef = useRef(0)
+  const preparePreviewRef = useRef<() => void>(() => {})
+  const previewViewportRef = useRef<(viewport: MotionTimeViewport) => void>(() => {})
+  const commitViewportRef = useRef<
+    (viewport: MotionTimeViewport, roundToFrames?: boolean) => void
+  >(() => {})
+  const viewportControllerRef = useRef<MotionTimeViewportController | null>(null)
+  if (!viewportControllerRef.current) {
+    viewportControllerRef.current = createMotionTimeViewportController({
+      layerColumnWidth: LAYER_COLUMN_WIDTH,
+      getDurationInFrames: () => durationInFramesRef.current,
+      getTimeViewport: () => timeViewportRef.current,
+      preparePreview: () => preparePreviewRef.current(),
+      previewViewport: (viewport) => previewViewportRef.current(viewport),
+      commitViewport: (viewport, roundToFrames) =>
+        commitViewportRef.current(viewport, roundToFrames),
+      getScrollArea: () => motionScrollAreaRef.current,
+    })
+  }
+  const viewportController = viewportControllerRef.current
   const [motionScrollbarWidth, setMotionScrollbarWidth] = useState(0)
   const [allPathVertexItemIds, setAllPathVertexItemIds] = useState<Set<string>>(
     () => new Set(),
   )
-  const cancelQueuedMotionViewport = useCallback(() => {
-    if (wheelMotionViewportCommitTimerRef.current !== null) {
-      window.clearTimeout(wheelMotionViewportCommitTimerRef.current)
-      wheelMotionViewportCommitTimerRef.current = null
-    }
-    if (wheelMotionViewportAnimationFrameRef.current !== null) {
-      cancelAnimationFrame(wheelMotionViewportAnimationFrameRef.current)
-      wheelMotionViewportAnimationFrameRef.current = null
-    }
-    wheelMotionViewportRef.current = null
-    wheelMotionPanAxisRef.current = null
-  }, [])
   const middlePanRef = useRef<MotionMiddlePanState | null>(null)
   const latestScrubFrameRef = useRef<number | null>(null)
   const scrubAnimationFrameRef = useRef<number | null>(null)
@@ -3781,7 +3102,7 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
   // Keep this a boolean selector so an I/O drag does not invalidate the whole
   // timeline on every frame. A full-comp range stays visible/editable after a
   // trim, but cannot be trimmed again.
-  const canTrimToActiveRegion = useTimelineStore(
+  const canTrimToActiveRegion = useMarkersStore(
     useCallback(
       (state) => {
         const currentComposition = activeCompositionId
@@ -4124,11 +3445,11 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     [discardMotionTimeViewportPreview, updateTimeViewport],
   )
   const fitMotionTimeViewport = useCallback(() => {
-    cancelQueuedMotionViewport()
+    viewportController.cancel()
     // Fit the active region when one is marked, else the comp itself — never the
     // content overhang past the comp end, which does not render. Read in/out at
     // click time so an IO drag doesn't re-render this whole timeline per frame.
-    const { inPoint, outPoint } = useTimelineStore.getState()
+    const { inPoint, outPoint } = useMarkersStore.getState()
     const fittedViewport =
       inPoint !== null && outPoint !== null && outPoint > inPoint
         ? { startFrame: inPoint, endFrame: outPoint }
@@ -4136,7 +3457,7 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     previewMotionTimeViewport(fittedViewport)
     commitMotionTimeViewport(fittedViewport)
   }, [
-    cancelQueuedMotionViewport,
+    viewportController,
     commitMotionTimeViewport,
     compositionEndFrame,
     durationInFrames,
@@ -4150,63 +3471,14 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     fitMotionTimeViewport()
   }, [fitMotionTimeViewport])
   useEffect(() => clearMotionTimeViewportPreview, [clearMotionTimeViewportPreview])
-  const queueMotionViewportUpdate = useCallback(
-    (update: MotionViewportUpdate) => {
-      if (!wheelMotionViewportRef.current) prepareMotionTimeViewportPreview()
-      const nextViewport = update(wheelMotionViewportRef.current ?? timeViewportRef.current)
-      wheelMotionViewportRef.current = nextViewport
-
-      if (wheelMotionViewportAnimationFrameRef.current === null) {
-        wheelMotionViewportAnimationFrameRef.current = requestAnimationFrame(() => {
-          wheelMotionViewportAnimationFrameRef.current = null
-          const pendingViewport = wheelMotionViewportRef.current
-          if (pendingViewport) {
-            previewMotionTimeViewport(
-              normalizeMotionTimeViewport(pendingViewport, durationInFrames, false),
-            )
-          }
-        })
-      }
-      if (wheelMotionViewportCommitTimerRef.current !== null) {
-        window.clearTimeout(wheelMotionViewportCommitTimerRef.current)
-      }
-      wheelMotionViewportCommitTimerRef.current = window.setTimeout(() => {
-        wheelMotionViewportCommitTimerRef.current = null
-        if (wheelMotionViewportAnimationFrameRef.current !== null) {
-          cancelAnimationFrame(wheelMotionViewportAnimationFrameRef.current)
-          wheelMotionViewportAnimationFrameRef.current = null
-        }
-        const finalViewport = wheelMotionViewportRef.current
-        if (finalViewport) {
-          const normalizedFinalViewport = normalizeMotionTimeViewport(
-            finalViewport,
-            durationInFrames,
-            false,
-          )
-          // A saturated main thread can let the settle timer win before the
-          // final queued RAF. Paint that exact endpoint synchronously so the
-          // deferred React render inherits identical diamond/grid geometry.
-          previewMotionTimeViewport(normalizedFinalViewport)
-          wheelMotionViewportRef.current = null
-          commitMotionTimeViewport(normalizedFinalViewport, false)
-        } else {
-          wheelMotionViewportRef.current = null
-        }
-        wheelMotionPanAxisRef.current = null
-      }, 100)
-    },
-    [
-      prepareMotionTimeViewportPreview,
-      previewMotionTimeViewport,
-      commitMotionTimeViewport,
-      durationInFrames,
-    ],
-  )
-  const prepareNavigatorMotionTimeViewportPreview = useCallback(() => {
-    cancelQueuedMotionViewport()
-    prepareMotionTimeViewportPreview()
-  }, [cancelQueuedMotionViewport, prepareMotionTimeViewportPreview])
-  useEffect(() => cancelQueuedMotionViewport, [cancelQueuedMotionViewport])
+  // Wire the controller to this render's viewport inputs. Assigned every render
+  // rather than captured at creation, so a composition switch cannot leave a
+  // queued preview working against a stale duration.
+  durationInFramesRef.current = durationInFrames
+  preparePreviewRef.current = prepareMotionTimeViewportPreview
+  previewViewportRef.current = previewMotionTimeViewport
+  commitViewportRef.current = commitMotionTimeViewport
+  useEffect(() => viewportController.cancel, [viewportController])
   useLayoutEffect(() => {
     const scrollArea = motionScrollAreaRef.current
     if (!scrollArea) return
@@ -4307,130 +3579,40 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     [layerEntries, selectedItemIdSet],
   )
 
-  const applySelectionRetimePreview = useCallback(() => {
-    selectionRetimeAnimationFrameRef.current = null
-    const drag = selectionRetimeDragRef.current
-    const targetFrame = pendingSelectionRetimeFrameRef.current
-    pendingSelectionRetimeFrameRef.current = null
-    if (!drag || targetFrame === null) return
-
-    const updates = buildMotionSelectionRetimeUpdates(
-      drag.selection,
-      drag.itemById,
-      drag.edge,
-      targetFrame,
+  // Retiming commands over the drag's refs: the refs keep an in-flight gesture
+  // (and its preview frame) alive while the callbacks come from this render.
+  const selectionRetime = useMemo(
+    () =>
+      createMotionSelectionRetimeCommands({
+        state: {
+          dragRef: selectionRetimeDragRef,
+          pendingFrameRef: pendingSelectionRetimeFrameRef,
+          animationFrameRef: selectionRetimeAnimationFrameRef,
+        },
+        deps: {
+          durationInFrames,
+          visibleFrameRange,
+          selection: motionSelectionDragState,
+          selectionTimeRange: motionSelectionTimeRange,
+          itemById,
+          getRuler: () => motionRulerRef.current,
+          getScrollArea: () => motionScrollAreaRef.current,
+          getRangeElement: () => motionSelectionRetimeRangeRef.current,
+          getTimeViewport: () => timeViewportRef.current,
+        },
+      }),
+    [
       durationInFrames,
-    )
-    drag.lastUpdates = updates
-    applyMotionSelectionRetimeVisuals(drag, updates, timeViewportRef.current)
-  }, [durationInFrames])
-
-  const flushSelectionRetimePreview = useCallback(() => {
-    if (selectionRetimeAnimationFrameRef.current !== null) {
-      cancelAnimationFrame(selectionRetimeAnimationFrameRef.current)
-    }
-    applySelectionRetimePreview()
-  }, [applySelectionRetimePreview])
-
-  const beginSelectionRetime = useCallback(
-    (event: ReactPointerEvent<HTMLButtonElement>, edge: 'start' | 'end') => {
-      if (!motionSelectionDragState || !motionSelectionTimeRange) return
-      const ruler = motionRulerRef.current
-      if (!ruler) return
-      event.preventDefault()
-      event.stopPropagation()
-      const rect = ruler.getBoundingClientRect()
-      const keyframeVisuals = captureMotionSelectionRetimeKeyframeVisuals(
-        motionScrollAreaRef.current,
-        motionSelectionDragState,
-        itemById,
-      )
-      selectionRetimeDragRef.current = {
-        pointerId: event.pointerId,
-        edge,
-        startClientX: event.clientX,
-        rulerWidth: Math.max(1, rect.width),
-        initialEdgeFrame:
-          edge === 'start'
-            ? motionSelectionTimeRange.startFrame
-            : motionSelectionTimeRange.endFrame,
-        selection: motionSelectionDragState,
-        itemById,
-        snapshot: captureSnapshot(),
-        hasMoved: false,
-        lastUpdates: null,
-        keyframeVisuals,
-        connectorVisuals: captureMotionSelectionRetimeConnectorVisuals(
-          motionScrollAreaRef.current,
-          motionSelectionDragState,
-        ),
-        rangeVisual: captureMotionSelectionRetimeRangeVisual(motionSelectionRetimeRangeRef.current),
-      }
-      event.currentTarget.setPointerCapture?.(event.pointerId)
-    },
-    [itemById, motionSelectionDragState, motionSelectionTimeRange],
+      itemById,
+      motionSelectionDragState,
+      motionSelectionTimeRange,
+      visibleFrameRange,
+    ],
   )
-
-  const moveSelectionRetime = useCallback(
-    (event: ReactPointerEvent<HTMLButtonElement>) => {
-      const drag = selectionRetimeDragRef.current
-      if (!drag || drag.pointerId !== event.pointerId) return
-      event.preventDefault()
-      event.stopPropagation()
-      const deltaFrames = Math.round(
-        ((event.clientX - drag.startClientX) / drag.rulerWidth) * visibleFrameRange,
-      )
-      if (deltaFrames === 0 && !drag.hasMoved) return
-      drag.hasMoved = true
-      pendingSelectionRetimeFrameRef.current = drag.initialEdgeFrame + deltaFrames
-      if (selectionRetimeAnimationFrameRef.current === null) {
-        selectionRetimeAnimationFrameRef.current = requestAnimationFrame(
-          applySelectionRetimePreview,
-        )
-      }
-    },
-    [applySelectionRetimePreview, visibleFrameRange],
-  )
-
-  const endSelectionRetime = useCallback(
-    (event: ReactPointerEvent<HTMLButtonElement>) => {
-      const drag = selectionRetimeDragRef.current
-      if (!drag || drag.pointerId !== event.pointerId) return
-      event.preventDefault()
-      event.stopPropagation()
-      if (drag.hasMoved) {
-        flushSelectionRetimePreview()
-        const updates = drag.lastUpdates
-        if (updates && hasMotionSelectionRetimeChanges(drag, updates)) {
-          flushSync(() => applyMotionSelectionFrameUpdates(updates))
-          restoreMotionSelectionRetimeVisuals(drag, false)
-          useTimelineCommandStore
-            .getState()
-            .addUndoEntry({ type: 'MOVE_KEYFRAME_GRAPH', payload: {} }, drag.snapshot)
-          useTimelineSettingsStore.getState().markDirty()
-        } else {
-          restoreMotionSelectionRetimeVisuals(drag, true)
-        }
-      }
-      pendingSelectionRetimeFrameRef.current = null
-      selectionRetimeDragRef.current = null
-    },
-    [flushSelectionRetimePreview],
-  )
-
-  const cancelSelectionRetime = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-    const drag = selectionRetimeDragRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    event.preventDefault()
-    event.stopPropagation()
-    if (selectionRetimeAnimationFrameRef.current !== null) {
-      cancelAnimationFrame(selectionRetimeAnimationFrameRef.current)
-      selectionRetimeAnimationFrameRef.current = null
-    }
-    pendingSelectionRetimeFrameRef.current = null
-    restoreMotionSelectionRetimeVisuals(drag, true)
-    selectionRetimeDragRef.current = null
-  }, [])
+  const beginSelectionRetime = selectionRetime.begin
+  const moveSelectionRetime = selectionRetime.move
+  const endSelectionRetime = selectionRetime.end
+  const cancelSelectionRetime = selectionRetime.cancel
 
   const nudgeSelectionRetime = useCallback(
     (edge: 'start' | 'end', deltaFrames: number) => {
@@ -4559,103 +3741,30 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     [tracks],
   )
 
-  const selectLayer = useCallback(
-    (itemId: string, modifiers: { toggle?: boolean; range?: boolean } = {}) => {
-      if (modifiers.range) {
-        const anchorId = selectionAnchorIdRef.current ?? selectedItemIds.at(-1) ?? null
-        const anchorIndex = anchorId ? visibleLayerIds.indexOf(anchorId) : -1
-        const itemIndex = visibleLayerIds.indexOf(itemId)
-        if (anchorIndex >= 0 && itemIndex >= 0) {
-          const rangeStart = Math.min(anchorIndex, itemIndex)
-          const rangeEnd = Math.max(anchorIndex, itemIndex)
-          selectItems(
-            Array.from(
-              new Set([...selectedItemIds, ...visibleLayerIds.slice(rangeStart, rangeEnd + 1)]),
-            ),
-          )
-          return
-        }
-      }
-
-      selectionAnchorIdRef.current = itemId
-      if (!modifiers.toggle) {
-        selectItems([itemId])
-        return
-      }
-      selectItems(
-        selectedItemIdSet.has(itemId)
-          ? selectedItemIds.filter((id) => id !== itemId)
-          : [...selectedItemIds, itemId],
-      )
-    },
-    [selectItems, selectedItemIdSet, selectedItemIds, visibleLayerIds],
+  // Selection and grouping are commands over the current selection and row
+  // order; the anchor ref survives re-renders so Shift ranges keep their origin.
+  const layerSelection = useMemo(
+    () =>
+      createMotionLayerSelectionCommands({
+        state: { anchorIdRef: selectionAnchorIdRef },
+        deps: {
+          selectedItemIds,
+          selectedItemIdSet,
+          visibleLayerIds,
+          layerEntries,
+          tracks,
+          layerRowHeight: LAYER_ROW_HEIGHT,
+          selectItems,
+          formatGroupName: (groupNumber) => t('editor.compose.groupName', { count: groupNumber }),
+        },
+      }),
+    [layerEntries, selectItems, selectedItemIdSet, selectedItemIds, t, tracks, visibleLayerIds],
   )
-
-  const prepareLayerContextMenu = useCallback(
-    (itemId: string) => {
-      if (selectedItemIdSet.has(itemId)) return
-      selectionAnchorIdRef.current = itemId
-      selectItems([itemId])
-    },
-    [selectItems, selectedItemIdSet],
-  )
-
-  const prepareGroupContextMenu = useCallback(
-    (itemIds: string[]) => {
-      if (itemIds.length > 0 && itemIds.every((itemId) => selectedItemIdSet.has(itemId))) return
-      selectItems(itemIds)
-    },
-    [selectItems, selectedItemIdSet],
-  )
-
-  const createGroupFromSelection = useCallback(() => {
-    const selectedTrackIds = Array.from(
-      new Set(
-        layerEntries
-          .filter((entry) => selectedItemIdSet.has(entry.item.id))
-          .map((entry) => entry.track?.id)
-          .filter((id): id is string => Boolean(id)),
-      ),
-    )
-    if (selectedTrackIds.length < 2) return
-    const selectedTracks = tracks.filter((track) => selectedTrackIds.includes(track.id))
-    const groupId = crypto.randomUUID()
-    const groupNumber = tracks.filter((track) => track.isGroup).length + 1
-    const group: TimelineTrack = {
-      id: groupId,
-      name: t('editor.compose.groupName', { count: groupNumber }),
-      kind: 'video',
-      height: LAYER_ROW_HEIGHT,
-      locked: false,
-      syncLock: true,
-      visible: true,
-      muted: false,
-      solo: false,
-      order: Math.min(...selectedTracks.map((track) => track.order)),
-      items: [],
-      isGroup: true,
-      isCollapsed: false,
-    }
-    setTracks([
-      ...tracks.map((track) =>
-        selectedTrackIds.includes(track.id) ? { ...track, parentTrackId: groupId } : track,
-      ),
-      group,
-    ])
-  }, [layerEntries, selectedItemIdSet, t, tracks])
-
-  const ungroupTracks = useCallback(
-    (groupId: string) => {
-      setTracks(
-        tracks
-          .filter((track) => track.id !== groupId)
-          .map((track) =>
-            track.parentTrackId === groupId ? { ...track, parentTrackId: undefined } : track,
-          ),
-      )
-    },
-    [tracks],
-  )
+  const selectLayer = layerSelection.selectLayer
+  const prepareLayerContextMenu = layerSelection.prepareLayerContextMenu
+  const prepareGroupContextMenu = layerSelection.prepareGroupContextMenu
+  const createGroupFromSelection = layerSelection.createGroupFromSelection
+  const ungroupTracks = layerSelection.ungroupTracks
 
   const beginRename = useCallback((target: RenameTarget, name: string) => {
     setRenameTarget(target)
@@ -4678,493 +3787,100 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     setRenameDraft('')
   }, [items, renameDraft, renameTarget, updateLayerTrack])
 
-  const copyLayers = useCallback(
-    (itemIds: string[]) => {
-      const itemIdSet = new Set(expandMotionLayerItemIds(itemIds))
-      const copiedItems = items.filter((item) => itemIdSet.has(item.id))
-      if (copiedItems.length === 0) return
-      useClipboardStore
-        .getState()
-        .copyItems(copiedItems, usePlaybackStore.getState().currentFrame, 'copy')
-      toast.success(itemIds.length === 1 ? 'Copied layer' : `Copied ${itemIds.length} layers`)
-    },
-    [expandMotionLayerItemIds, items],
+  // Layer clipboard commands. Rebuilt when the data they read changes; the
+  // clipboard itself lives in its own store and is read at call time.
+  const layerClipboard = useMemo(
+    () =>
+      createMotionLayerClipboardCommands({
+        items,
+        tracks,
+        trackById,
+        compositionById,
+        activeCompositionId,
+        layerRowHeight: LAYER_ROW_HEIGHT,
+        selectItems,
+        expandLayerItemIds: expandMotionLayerItemIds,
+      }),
+    [
+      activeCompositionId,
+      compositionById,
+      expandMotionLayerItemIds,
+      items,
+      selectItems,
+      trackById,
+      tracks,
+    ],
   )
+  const copyLayers = layerClipboard.copy
+  const duplicateLayers = layerClipboard.duplicate
+  const pasteLayers = layerClipboard.paste
+  const deleteLayers = layerClipboard.delete
 
-  const duplicateLayers = useCallback(
-    (itemIds: string[], sourceGroup?: TimelineTrack) => {
-      const expandedItemIds = expandMotionLayerItemIds(itemIds)
-      const sourceItems = expandedItemIds
-        .map((itemId) => items.find((item) => item.id === itemId))
-        .filter((item): item is TimelineItem => Boolean(item))
-      if (sourceItems.length === 0) return
-
-      const maxOrder = Math.max(-1, ...tracks.map((track) => track.order))
-      const duplicatedGroupId = sourceGroup ? crypto.randomUUID() : null
-      const newTracks: TimelineTrack[] = []
-      if (sourceGroup && duplicatedGroupId) {
-        newTracks.push({
-          ...sourceGroup,
-          id: duplicatedGroupId,
-          name: `${sourceGroup.name} copy`,
-          order: maxOrder + 1,
-          items: [],
-          isCollapsed: false,
-        })
-      }
-
-      const positions = sourceItems.map((item, index) => {
-        const sourceTrack = trackById.get(item.trackId)
-        const newTrackId = crypto.randomUUID()
-        newTracks.push({
-          ...(sourceTrack ?? {
-            name: item.label || item.type,
-            kind: item.type === 'audio' ? 'audio' : 'video',
-            height: LAYER_ROW_HEIGHT,
-            locked: false,
-            syncLock: true,
-            visible: true,
-            muted: false,
-            solo: false,
-            items: [],
-          }),
-          id: newTrackId,
-          name: `${item.label ?? sourceTrack?.name ?? item.type} copy`,
-          order: maxOrder + newTracks.length + index + 1,
-          parentTrackId: duplicatedGroupId ?? sourceTrack?.parentTrackId,
-          isGroup: false,
-          items: [],
-        } as TimelineTrack)
-        return { from: item.from, trackId: newTrackId }
-      })
-
-      const duplicatedItems = duplicateItemsWithTrackChanges(
-        [...tracks, ...newTracks],
-        sourceItems.map((item) => item.id),
-        positions,
-      )
-      const duplicatedHiddenAudioIds = new Set(
-        duplicatedItems.flatMap((item) => {
-          const companion = getLinkedAudioCompanion(duplicatedItems, item)
-          return companion ? [companion.id] : []
-        }),
-      )
-      selectItems(
-        duplicatedItems
-          .filter((item) => !duplicatedHiddenAudioIds.has(item.id))
-          .map((item) => item.id),
-      )
-    },
-    [expandMotionLayerItemIds, items, selectItems, trackById, tracks],
+  // Span dragging is a command object over the component's drag refs, rebuilt
+  // when its inputs change; the refs keep an in-flight drag (and its preview
+  // frame) alive across renders.
+  const spanDrag = useMemo(
+    () =>
+      createMotionSpanDragCommands({
+        state: {
+          dragRef: spanDragRef,
+          visualsRef: spanDragVisualsRef,
+          animationFrameRef: spanDragAnimationFrameRef,
+        },
+        deps: {
+          items,
+          durationInFrames,
+          visibleFrameRange,
+          pause,
+          selectLayer,
+          selectItems,
+          moveItems,
+          expandLayerItemIds: expandMotionLayerItemIds,
+          getScrollArea: () => motionScrollAreaRef.current,
+        },
+      }),
+    [
+      durationInFrames,
+      expandMotionLayerItemIds,
+      items,
+      pause,
+      selectItems,
+      selectLayer,
+      visibleFrameRange,
+    ],
   )
-
-  const pasteLayers = useCallback(
-    (parentTrackId?: string) => {
-      const clipboard = useClipboardStore.getState().itemsClipboard
-      if (!clipboard || clipboard.items.length === 0) return
-
-      const pasteFrame = usePlaybackStore.getState().currentFrame
-      const maxOrder = Math.max(-1, ...tracks.map((track) => track.order))
-      const pastedLinkedGroupIds = createPastedLinkedGroupIds(clipboard.items)
-      const pastedLayers = clipboard.items.flatMap((item, index) => {
-        const pasted = createPastedLayer({
-          item,
-          index,
-          pasteFrame,
-          maxOrder,
-          parentTrackId,
-          activeCompositionId,
-          compositionById,
-          trackById,
-          linkedGroupIds: pastedLinkedGroupIds,
-        })
-        return pasted ? [pasted] : []
-      })
-      const newTracks = pastedLayers.map((layer) => layer.track)
-      const newItems = pastedLayers.map((layer) => layer.item)
-      if (newItems.length === 0) return
-      addItemsOnNewTracks(newItems, [...tracks, ...newTracks])
-      const visiblePastedItems = getVisibleLinkedItems(newItems)
-      selectItems(visiblePastedItems.map((item) => item.id))
-      toast.success(
-        visiblePastedItems.length === 1
-          ? 'Pasted layer'
-          : `Pasted ${visiblePastedItems.length} layers`,
-      )
-    },
-    [activeCompositionId, compositionById, selectItems, trackById, tracks],
+  const beginSpanDrag = spanDrag.begin
+  const moveSpanDrag = spanDrag.move
+  const endSpanDrag = spanDrag.end
+  const cancelSpanDrag = spanDrag.cancel
+  const spanTrim = useMemo(
+    () =>
+      createMotionSpanTrimCommands({
+        state: { trimRef: spanTrimRef, animationFrameRef: spanTrimAnimationFrameRef },
+        deps: { durationInFrames, visibleFrameRange, pause, selectItems },
+      }),
+    [durationInFrames, pause, selectItems, visibleFrameRange],
   )
-
-  const deleteLayers = useCallback(
-    (itemIds: string[], trackIds: string[]) => {
-      const expandedItemIds = expandMotionLayerItemIds(itemIds)
-      removeItems(expandedItemIds)
-      const expandedItemIdSet = new Set(expandedItemIds)
-      const removedTrackIds = new Set([
-        ...trackIds,
-        ...items.filter((item) => expandedItemIdSet.has(item.id)).map((item) => item.trackId),
-      ])
-      setTracks(tracks.filter((track) => !removedTrackIds.has(track.id)))
-      selectItems([])
-    },
-    [expandMotionLayerItemIds, items, selectItems, tracks],
-  )
-
-  const beginSpanDrag = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>, itemIds: string[]) => {
-      if (event.button !== 0) return
-      event.preventDefault()
-      event.stopPropagation()
-      const lane = event.currentTarget.parentElement
-      const laneWidth = lane?.getBoundingClientRect().width ?? 0
-      if (laneWidth <= 0) return
-      const itemIdSet = new Set(expandMotionLayerItemIds(itemIds))
-      const dragItems = items
-        .filter((item) => itemIdSet.has(item.id))
-        .map((item) => ({
-          id: item.id,
-          from: item.from,
-          durationInFrames: item.durationInFrames,
-        }))
-      if (dragItems.length === 0) return
-      pause()
-      if (itemIds.length === 1) {
-        selectLayer(itemIds[0]!, {
-          toggle: event.metaKey || event.ctrlKey,
-          range: event.shiftKey,
-        })
-      } else {
-        selectItems(itemIds)
-      }
-      const next: SpanDragState = {
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        laneWidth,
-        deltaFrames: 0,
-        items: dragItems,
-      }
-      const itemIdSetForVisuals = new Set(itemIds)
-      const visuals = new Set<HTMLElement>([event.currentTarget])
-      for (const row of motionScrollAreaRef.current?.querySelectorAll<HTMLElement>(
-        '[data-motion-layer-item-id]',
-      ) ?? []) {
-        if (!itemIdSetForVisuals.has(row.dataset.motionLayerItemId ?? '')) continue
-        for (const visual of row.querySelectorAll<HTMLElement>('[data-motion-span-drag-visual]')) {
-          visuals.add(visual)
-        }
-      }
-      spanDragVisualsRef.current = [...visuals]
-      for (const visual of spanDragVisualsRef.current) visual.style.willChange = 'transform'
-      spanDragRef.current = next
-      event.currentTarget.setPointerCapture?.(event.pointerId)
-    },
-    [expandMotionLayerItemIds, items, pause, selectItems, selectLayer],
-  )
-
-  const moveSpanDrag = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      const drag = spanDragRef.current
-      if (!drag || drag.pointerId !== event.pointerId) return
-      const rawDelta = Math.round(
-        ((event.clientX - drag.startX) / drag.laneWidth) * visibleFrameRange,
-      )
-      const minDelta = -Math.min(...drag.items.map((item) => item.from))
-      const maxDelta = Math.min(...drag.items.map((item) => durationInFrames - item.from - 1))
-      const deltaFrames = Math.max(minDelta, Math.min(maxDelta, rawDelta))
-      if (deltaFrames === drag.deltaFrames) return
-      const next = { ...drag, deltaFrames }
-      spanDragRef.current = next
-      if (spanDragAnimationFrameRef.current !== null) return
-      spanDragAnimationFrameRef.current = requestAnimationFrame(() => {
-        spanDragAnimationFrameRef.current = null
-        const latestDrag = spanDragRef.current
-        if (!latestDrag) return
-        setSpanDragVisualOffset(
-          spanDragVisualsRef.current,
-          (latestDrag.deltaFrames / visibleFrameRange) * latestDrag.laneWidth,
-        )
-      })
-    },
-    [durationInFrames, visibleFrameRange],
-  )
-
-  const endSpanDrag = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    const drag = spanDragRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    event.preventDefault()
-    event.stopPropagation()
-    if (spanDragAnimationFrameRef.current !== null) {
-      cancelAnimationFrame(spanDragAnimationFrameRef.current)
-      spanDragAnimationFrameRef.current = null
-    }
-    clearSpanDragVisuals(spanDragVisualsRef.current)
-    spanDragVisualsRef.current = []
-    spanDragRef.current = null
-    if (drag.deltaFrames !== 0) {
-      moveItems(drag.items.map((item) => ({ id: item.id, from: item.from + drag.deltaFrames })))
-    }
-  }, [])
-
-  const cancelSpanDrag = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    const drag = spanDragRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    event.preventDefault()
-    event.stopPropagation()
-    if (spanDragAnimationFrameRef.current !== null) {
-      cancelAnimationFrame(spanDragAnimationFrameRef.current)
-      spanDragAnimationFrameRef.current = null
-    }
-    clearSpanDragVisuals(spanDragVisualsRef.current)
-    spanDragVisualsRef.current = []
-    spanDragRef.current = null
-  }, [])
-
-  const beginSpanTrim = useCallback(
-    (event: React.PointerEvent<HTMLSpanElement>, item: TimelineItem, handle: 'start' | 'end') => {
-      if (event.button !== 0) return
-      event.preventDefault()
-      event.stopPropagation()
-      const lane = event.currentTarget.closest<HTMLElement>('[data-motion-timeline-lane]')
-      const laneWidth = lane?.getBoundingClientRect().width ?? 0
-      const segment = event.currentTarget.closest<HTMLButtonElement>(
-        '[data-testid^="motion-layer-span-"]',
-      )
-      if (laneWidth <= 0 || !segment) return
-      const row = segment.closest<HTMLElement>('[data-motion-layer-item-id]')
-      const timelineVisuals = Array.from(
-        row?.querySelectorAll<HTMLElement>('[data-motion-span-drag-visual]') ?? [],
-      ).filter((visual) => visual !== segment)
-      const segmentRect = segment.getBoundingClientRect()
-      pause()
-      selectItems([item.id])
-      const next: SpanTrimState = {
-        pointerId: event.pointerId,
-        itemId: item.id,
-        handle,
-        startX: event.clientX,
-        laneWidth,
-        deltaFrames: 0,
-        from: item.from,
-        durationInFrames: item.durationInFrames,
-        segment,
-        segmentWidthPx: segmentRect.width,
-        segmentInlineWidth: segment.style.width,
-        segmentInlineTransform: segment.style.transform,
-        segmentInlineWillChange: segment.style.willChange,
-        timelineVisuals,
-      }
-      segment.style.willChange = 'transform, width'
-      if (handle === 'start') {
-        for (const visual of timelineVisuals) visual.style.willChange = 'transform'
-      }
-      spanTrimRef.current = next
-      event.currentTarget.setPointerCapture?.(event.pointerId)
-    },
-    [pause, selectItems],
-  )
-
-  const moveSpanTrim = useCallback(
-    (event: React.PointerEvent<HTMLSpanElement>) => {
-      const trim = spanTrimRef.current
-      if (!trim || trim.pointerId !== event.pointerId) return
-      event.preventDefault()
-      event.stopPropagation()
-      const rawDelta = Math.round(
-        ((event.clientX - trim.startX) / trim.laneWidth) * visibleFrameRange,
-      )
-      const minDelta = trim.handle === 'start' ? -trim.from : -(trim.durationInFrames - 1)
-      const maxDelta =
-        trim.handle === 'start'
-          ? trim.durationInFrames - 1
-          : durationInFrames - (trim.from + trim.durationInFrames)
-      const deltaFrames = Math.max(minDelta, Math.min(maxDelta, rawDelta))
-      if (deltaFrames === trim.deltaFrames) return
-      const next = { ...trim, deltaFrames }
-      spanTrimRef.current = next
-      if (spanTrimAnimationFrameRef.current !== null) return
-      spanTrimAnimationFrameRef.current = requestAnimationFrame(() => {
-        spanTrimAnimationFrameRef.current = null
-        const latestTrim = spanTrimRef.current
-        if (latestTrim) applySpanTrimVisuals(latestTrim, visibleFrameRange)
-      })
-    },
-    [durationInFrames, visibleFrameRange],
-  )
-
-  const finishSpanTrim = useCallback(
-    (event: React.PointerEvent<HTMLSpanElement>, commit: boolean) => {
-      const trim = spanTrimRef.current
-      if (!trim || trim.pointerId !== event.pointerId) return
-      event.preventDefault()
-      event.stopPropagation()
-      if (spanTrimAnimationFrameRef.current !== null) {
-        cancelAnimationFrame(spanTrimAnimationFrameRef.current)
-        spanTrimAnimationFrameRef.current = null
-      }
-      clearSpanTrimVisuals(trim)
-      spanTrimRef.current = null
-      if (!commit || trim.deltaFrames === 0) return
-      if (trim.handle === 'start') {
-        trimItemStart(trim.itemId, trim.deltaFrames, { forceLinked: true })
-      } else {
-        trimItemEnd(trim.itemId, trim.deltaFrames, { forceLinked: true })
-      }
-    },
+  const beginSpanTrim = spanTrim.begin
+  const moveSpanTrim = spanTrim.move
+  const endSpanTrim = spanTrim.end
+  const cancelSpanTrim = spanTrim.cancel
+  const rowReorder = useMemo(
+    () =>
+      createMotionRowReorderCommands({
+        state: {
+          dragRef: rowReorderDragRef,
+          animationFrameRef: rowReorderAnimationFrameRef,
+          pendingClientYRef: pendingRowReorderClientYRef,
+        },
+        deps: { setDrag: setRowReorderDrag },
+      }),
     [],
   )
-
-  const endSpanTrim = useCallback(
-    (event: React.PointerEvent<HTMLSpanElement>) => finishSpanTrim(event, true),
-    [finishSpanTrim],
-  )
-  const cancelSpanTrim = useCallback(
-    (event: React.PointerEvent<HTMLSpanElement>) => finishSpanTrim(event, false),
-    [finishSpanTrim],
-  )
-
-  const beginRowReorder = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>, track: TimelineTrack) => {
-      if (event.button !== 0) return
-      event.preventDefault()
-      event.stopPropagation()
-      const parentTrackId = track.parentTrackId ?? null
-      const root = event.currentTarget.closest('[data-testid="compositing-timeline"]')
-      const siblingRows = Array.from(
-        root?.querySelectorAll<HTMLElement>('[data-motion-row-track-id]') ?? [],
-      ).filter((row) => (row.dataset.motionParentTrackId || null) === parentTrackId)
-      const siblingCenters = siblingRows.map((row) => {
-        const rect = row.getBoundingClientRect()
-        return {
-          trackId: row.dataset.motionRowTrackId!,
-          centerY: rect.top + rect.height / 2,
-          row,
-        }
-      })
-      const originIndex = siblingCenters.findIndex((candidate) => candidate.trackId === track.id)
-      if (originIndex < 0) return
-      const sourceRow = siblingCenters[originIndex]?.row
-      if (!sourceRow) return
-      const dropIndicator = document.createElement('div')
-      dropIndicator.className = 'pointer-events-none absolute inset-x-0 z-40 h-0.5 bg-primary'
-      sourceRow.style.willChange = 'transform'
-      const next: RowReorderDragState = {
-        pointerId: event.pointerId,
-        sourceTrackId: track.id,
-        parentTrackId,
-        startY: event.clientY,
-        deltaY: 0,
-        originIndex,
-        targetIndex: originIndex,
-        sourceRow,
-        dropCandidates: siblingCenters.filter((candidate) => candidate.trackId !== track.id),
-        dropIndicator,
-      }
-      rowReorderDragRef.current = next
-      setRowReorderDrag(next)
-      event.currentTarget.setPointerCapture?.(event.pointerId)
-    },
-    [],
-  )
-
-  const applyRowReorderPreview = useCallback((clientY: number) => {
-    const drag = rowReorderDragRef.current
-    if (!drag) return
-    const targetIndex = drag.dropCandidates.reduce(
-      (index, candidate) => index + (clientY > candidate.centerY ? 1 : 0),
-      0,
-    )
-    const dropAfterTarget = targetIndex >= drag.dropCandidates.length
-    const dropTarget = drag.dropCandidates[targetIndex] ?? drag.dropCandidates.at(-1) ?? null
-    const next = {
-      ...drag,
-      deltaY: clientY - drag.startY,
-      targetIndex,
-    }
-    rowReorderDragRef.current = next
-    drag.sourceRow.style.transform = `translate3d(0, ${next.deltaY}px, 0)`
-    if (dropTarget) {
-      dropTarget.row.appendChild(drag.dropIndicator)
-      drag.dropIndicator.style.top = dropAfterTarget ? '' : '0'
-      drag.dropIndicator.style.bottom = dropAfterTarget ? '0' : ''
-    } else {
-      drag.dropIndicator.remove()
-    }
-  }, [])
-
-  const moveRowReorder = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      const drag = rowReorderDragRef.current
-      if (!drag || drag.pointerId !== event.pointerId) return
-      event.preventDefault()
-      event.stopPropagation()
-      pendingRowReorderClientYRef.current = event.clientY
-      if (rowReorderAnimationFrameRef.current !== null) return
-      rowReorderAnimationFrameRef.current = window.requestAnimationFrame(() => {
-        rowReorderAnimationFrameRef.current = null
-        const clientY = pendingRowReorderClientYRef.current
-        pendingRowReorderClientYRef.current = null
-        if (clientY !== null) applyRowReorderPreview(clientY)
-      })
-    },
-    [applyRowReorderPreview],
-  )
-
-  const clearRowReorderPreview = useCallback((drag: RowReorderDragState) => {
-    if (rowReorderAnimationFrameRef.current !== null) {
-      window.cancelAnimationFrame(rowReorderAnimationFrameRef.current)
-      rowReorderAnimationFrameRef.current = null
-    }
-    pendingRowReorderClientYRef.current = null
-    drag.sourceRow.style.transform = ''
-    drag.sourceRow.style.willChange = ''
-    drag.dropIndicator.remove()
-  }, [])
-
-  const finishRowReorder = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      const activeDrag = rowReorderDragRef.current
-      if (!activeDrag || activeDrag.pointerId !== event.pointerId) return
-      event.preventDefault()
-      event.stopPropagation()
-      applyRowReorderPreview(event.clientY)
-      const drag = rowReorderDragRef.current
-      if (!drag) return
-      clearRowReorderPreview(drag)
-      rowReorderDragRef.current = null
-      setRowReorderDrag(null)
-      if (drag.targetIndex === drag.originIndex) return
-
-      const latestTracks = useItemsStore.getState().tracks
-      const siblings = latestTracks
-        .filter((track) => (track.parentTrackId ?? null) === drag.parentTrackId)
-        .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
-      const sourceIndex = siblings.findIndex((track) => track.id === drag.sourceTrackId)
-      if (sourceIndex < 0) return
-      const [source] = siblings.splice(sourceIndex, 1)
-      if (!source) return
-      siblings.splice(Math.max(0, Math.min(drag.targetIndex, siblings.length)), 0, source)
-      const orderByTrackId = new Map(siblings.map((track, index) => [track.id, index]))
-      setTracks(
-        latestTracks.map((track) => {
-          const order = orderByTrackId.get(track.id)
-          return order === undefined ? track : { ...track, order }
-        }),
-      )
-    },
-    [applyRowReorderPreview, clearRowReorderPreview],
-  )
-
-  const cancelRowReorder = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      const drag = rowReorderDragRef.current
-      if (!drag || drag.pointerId !== event.pointerId) return
-      clearRowReorderPreview(drag)
-      rowReorderDragRef.current = null
-      setRowReorderDrag(null)
-    },
-    [clearRowReorderPreview],
-  )
-
+  const beginRowReorder = rowReorder.begin
+  const moveRowReorder = rowReorder.move
+  const finishRowReorder = rowReorder.end
+  const cancelRowReorder = rowReorder.cancel
   const isRowReordering = rowReorderDrag !== null
   useEffect(() => {
     if (!isRowReordering) return
@@ -5175,13 +3891,7 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     }
   }, [isRowReordering])
 
-  useEffect(
-    () => () => {
-      const drag = rowReorderDragRef.current
-      if (drag) clearRowReorderPreview(drag)
-    },
-    [clearRowReorderPreview],
-  )
+  useEffect(() => () => rowReorder.dispose(), [rowReorder])
 
   const addGeneratedLayer = useCallback(
     (kind: GeneratedLayerKind) => {
@@ -5435,8 +4145,9 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
       const pointerId = playheadScrubPointerIdRef.current
       const clientX = playheadScrubClientXRef.current
       const surface = playheadScrubSurfaceRef.current
-      let viewport = playheadScrubViewportRef.current
-      if (pointerId === null || clientX === null || !surface || !viewport) return
+      const activeViewport = playheadScrubViewportRef.current
+      if (pointerId === null || clientX === null || !surface || !activeViewport) return
+      let viewport: MotionTimeViewport = activeViewport
 
       const rect = surface.getBoundingClientRect()
       const visibleRange = Math.max(1, viewport.endFrame - viewport.startFrame)
@@ -5512,84 +4223,12 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     ],
   )
 
-  const handleMotionTimelineWheel = useCallback(
-    (event: WheelEvent) => {
-      const isZoomGesture = event.ctrlKey || event.metaKey
-      const isVerticalScrollGesture = event.altKey && !isZoomGesture
-      const panGesture = getMotionTimelinePanGesture(event, wheelMotionPanAxisRef.current)
-      if (!isZoomGesture && !isVerticalScrollGesture && panGesture === null) return
-      const scrollArea = motionScrollAreaRef.current
-      if (!scrollArea) return
-      const rect = scrollArea.getBoundingClientRect()
-      const timelineLeft = rect.left + LAYER_COLUMN_WIDTH
-      const isTimelinePane = event.clientX >= timelineLeft
-      // The shared layer scroller must not receive ordinary wheel input from
-      // either pane. Consume during capture before nested property editors or
-      // native overflow scrolling can react to the same gesture.
-      event.preventDefault()
-      event.stopPropagation()
-
-      if (isVerticalScrollGesture) {
-        wheelMotionPanAxisRef.current = null
-        // Motion reserves Alt/Option+wheel (or the scrollbar) for deliberate
-        // vertical layer/property navigation while ordinary wheel owns time.
-        scrollArea.scrollTop += event.deltaY || event.deltaX
-        return
-      }
-
-      // Like Edit's non-scrollable track-header viewport, ordinary wheel over
-      // the layer column is safely consumed without creating a second pan.
-      if (!isTimelinePane) return
-
-      const measuredTimelineWidth = scrollArea.clientWidth - LAYER_COLUMN_WIDTH
-      const timelineWidth = Math.max(
-        1,
-        measuredTimelineWidth > 0 ? measuredTimelineWidth : rect.right - timelineLeft,
-      )
-      if (panGesture !== null) {
-        wheelMotionPanAxisRef.current = panGesture.axis
-        // Match Edit's timeline navigation ownership: a mouse wheel's deltaY
-        // and a trackpad's dominant deltaX both move only along the time axis.
-        // Lock that physical axis for the gesture so cross-axis noise cannot
-        // make the navigator thumb oscillate between deltas.
-        queueMotionViewportUpdate((current) =>
-          panMotionTimeViewport(current, panGesture.delta, timelineWidth, durationInFrames),
-        )
-        return
-      }
-
-      wheelMotionPanAxisRef.current = null
-      if (event.deltaY === 0) return
-      const pivotRatio = Math.max(0, Math.min(1, (event.clientX - timelineLeft) / timelineWidth))
-      const zoomFactor = event.deltaY > 0 ? 1.25 : 0.8
-      const minVisibleFrames = Math.min(
-        durationInFrames,
-        Math.max(
-          1,
-          Math.ceil(
-            Math.max(1, timelineWidth - KEYFRAME_EDGE_INSET * 2) /
-              KEYFRAME_DIAMOND_RENDERED_WIDTH_PX,
-          ),
-        ),
-      )
-      queueMotionViewportUpdate((current) =>
-        zoomMotionTimeViewport(current, pivotRatio, zoomFactor, durationInFrames, minVisibleFrames),
-      )
-    },
-    [durationInFrames, queueMotionViewportUpdate],
-  )
 
   useEffect(() => {
     const navigationRoot = motionViewportPreviewRootRef.current
     if (!navigationRoot) return
-    navigationRoot.addEventListener('wheel', handleMotionTimelineWheel, {
-      capture: true,
-      passive: false,
-    })
-    return () => {
-      navigationRoot.removeEventListener('wheel', handleMotionTimelineWheel, { capture: true })
-    }
-  }, [handleMotionTimelineWheel])
+    return viewportController.attach(navigationRoot)
+  }, [viewportController])
 
   useEffect(() => {
     const scrollArea = motionScrollAreaRef.current
@@ -6954,7 +5593,7 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
             contentFrameMax={durationInFrames}
             minVisibleFrames={Math.min(10, durationInFrames)}
             onViewportChange={commitMotionTimeViewport}
-            onViewportPreviewStart={prepareNavigatorMotionTimeViewportPreview}
+            onViewportPreviewStart={viewportController.prepareNavigatorPreview}
             onViewportPreview={previewMotionTimeViewport}
           />
           <div className="pointer-events-none absolute inset-x-2 bottom-1 top-[5px] overflow-hidden rounded-sm">

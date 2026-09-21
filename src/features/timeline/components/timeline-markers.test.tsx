@@ -7,7 +7,7 @@ import {
   resetTimelineSkimmerScrubForTest,
   timelineSkimmerScrubSignal,
 } from '@/shared/timeline/main-timeline-scrub'
-import { useTimelineStore } from '../stores/timeline-store'
+import { setTimelineState } from '../test-helpers'
 import { TimelineMarkers } from './timeline-markers'
 
 vi.mock('../contexts/timeline-zoom-context', () => ({
@@ -26,7 +26,7 @@ describe('TimelineMarkers ruler scrub cancellation', () => {
       previewItemId: null,
       isPlaying: false,
     })
-    useTimelineStore.setState({ fps: 30, inPoint: null, outPoint: null, markers: [] })
+    setTimelineState({ fps: 30, inPoint: null, outPoint: null, markers: [] })
     mainTimelineScrubActiveRef.current = false
     resetTimelineSkimmerScrubForTest()
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
@@ -85,6 +85,65 @@ describe('TimelineMarkers ruler scrub cancellation', () => {
     expect(cancelAnimationFrameSpy).toHaveBeenCalledWith(1)
     expect(usePlaybackStore.getState().previewFrame).toBeNull()
     await waitFor(() => expect(document.body.style.cursor).toBe(''))
+  })
+
+  it('shares one viewport geometry read across each active scrub frame', () => {
+    const frameCallbacks: FrameRequestCallback[] = []
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frameCallbacks.push(callback)
+      return frameCallbacks.length
+    })
+    const { container } = render(
+      <div className="timeline-container">
+        <TimelineMarkers duration={10} width={1000} />
+      </div>,
+    )
+    const scrollContainer = container.querySelector('.timeline-container') as HTMLDivElement
+    Object.defineProperties(scrollContainer, {
+      clientWidth: { configurable: true, value: 300 },
+      scrollWidth: { configurable: true, value: 1000 },
+      scrollLeft: { configurable: true, value: 200, writable: true },
+    })
+    const viewportRect = {
+      x: 100,
+      y: 0,
+      left: 100,
+      top: 0,
+      right: 400,
+      bottom: 200,
+      width: 300,
+      height: 200,
+      toJSON: () => ({}),
+    } as DOMRect
+    const readViewportRect = vi.fn(() => viewportRect)
+    scrollContainer.getBoundingClientRect = readViewportRect
+
+    const ruler = container.querySelector('[style*="cursor: ew-resize"]') as HTMLDivElement
+    const readRulerRect = vi.fn(
+      () =>
+        ({
+          ...viewportRect,
+          x: -100,
+          left: -100,
+          right: 900,
+          width: 1000,
+        }) as DOMRect,
+    )
+    ruler.getBoundingClientRect = readRulerRect
+
+    // viewport x 150 + scrollLeft 200 = timeline x 350 = frame 105.
+    fireEvent.mouseDown(ruler, { button: 0, clientX: 250 })
+    expect(frameCallbacks).toHaveLength(1)
+    readViewportRect.mockClear()
+    readRulerRect.mockClear()
+
+    act(() => frameCallbacks[0]?.(performance.now()))
+
+    expect(readViewportRect).toHaveBeenCalledOnce()
+    expect(readRulerRect).not.toHaveBeenCalled()
+    expect(usePlaybackStore.getState().currentFrame).toBe(105)
+
+    fireEvent.mouseUp(document, { clientX: 250 })
   })
 
   it('keeps a stationary same-frame click on the committed frame pixel', () => {
@@ -220,7 +279,7 @@ describe('TimelineMarkers ruler scrub cancellation', () => {
   })
 
   it('keeps the IO strip in its own lane above the viewport ruler canvas', () => {
-    useTimelineStore.setState({ inPoint: 15, outPoint: 45 })
+    setTimelineState({ inPoint: 15, outPoint: 45 })
 
     const { container } = render(
       <div className="timeline-container">

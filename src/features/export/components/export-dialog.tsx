@@ -77,11 +77,11 @@ import {
   type ClientCodec,
   type ClientVideoContainer,
   type ClientAudioContainer,
-} from '../utils/client-renderer'
+} from '../deps/renderer'
 import { ExportPreviewPlayer } from './export-preview-player'
 import { useBrokenMediaIds, useMediaMetadataById } from '../deps/media-library'
 import { assessSmartCopyEligibility } from '../utils/smart-copy'
-import { resolveVideoBitrate } from '../utils/video-bitrate'
+import { resolveVideoBitrate } from '../deps/renderer'
 
 export interface ExportDialogProps {
   open: boolean

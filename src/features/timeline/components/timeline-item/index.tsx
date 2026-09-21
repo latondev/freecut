@@ -1,7 +1,8 @@
 import { useRef, useEffect, useMemo, memo, useCallback, useState } from 'react'
 import type { TimelineItem as TimelineItemType } from '@/types/timeline'
 import { useShallow } from 'zustand/react/shallow'
-import { useTimelineStore } from '../../stores/timeline-store'
+import { useTimelineSettingsStore } from '../../stores/timeline-settings-store'
+import { addEffects, updateItem } from '../../stores/timeline-actions'
 import { useItemsStore } from '../../stores/items-store'
 import { selectReplaceableCaptionClipIds } from '../../stores/items-store-indexes'
 import { useKeyframesStore } from '../../stores/keyframes-store'
@@ -29,7 +30,6 @@ import { cn } from '@/shared/ui/cn'
 import { ClipContent } from './clip-content'
 import { ClipIndicators } from './clip-indicators'
 import { TrimHandles } from './trim-handles'
-import { type ActiveEdgeState } from './trim-constants'
 import { StretchHandles } from './stretch-handles'
 import { AudioFadeHandles } from './audio-fade-handles'
 import { VideoFadeHandles } from './video-fade-handles'
@@ -61,6 +61,7 @@ import { useToolOperationOverlay } from './use-tool-operation-overlay'
 import { useLinkedSyncPreview } from './use-linked-sync-preview'
 import { useClipReadoutLabels } from './use-clip-readout-labels'
 import { useTimelineItemPointerHandlers } from './use-timeline-item-pointer-handlers'
+import { resolveTrimVisualState } from './timeline-item-view-model'
 import { ClipFloatingLayer } from './clip-floating-layer'
 const EMPTY_SEGMENT_OVERLAYS = [] as const
 const EMPTY_LINKED_ITEMS: TimelineItemType[] = []
@@ -69,6 +70,15 @@ const EMPTY_LINKED_ITEMS: TimelineItemType[] = []
 const TRACK_PUSH_MIN_PX = 6
 const TRACK_PUSH_MAX_PX = 14
 const TRACK_PUSH_ZOOM_THRESHOLD = 120
+const ITEM_COLOR_CLASSES: Partial<Record<TimelineItemType['type'], string>> = {
+  video: 'bg-timeline-video border-timeline-video',
+  audio: 'bg-timeline-audio border-timeline-audio',
+  image: 'bg-timeline-image/30 border-timeline-image',
+  text: 'bg-timeline-text/30 border-timeline-text',
+  shape: 'bg-timeline-shape/30 border-timeline-shape',
+  adjustment: 'bg-purple-500/30 border-purple-400',
+  composition: 'bg-violet-600/40 border-violet-400',
+}
 const SPEED_BADGE_EPSILON = 0.005
 const TRANSITION_DROP_HIT_MIN_WIDTH_PX = 72
 const TRANSITION_DROP_HIT_MAX_WIDTH_PX = 240
@@ -371,9 +381,8 @@ export const TimelineItem = memo(function TimelineItem({
   })
 
   // Get FPS for frame-to-time conversion
-  const fps = useTimelineStore((s) => s.fps)
-  const addEffects = useTimelineStore((s) => s.addEffects)
-  const updateTimelineItem = useTimelineStore((s) => s.updateItem)
+  const fps = useTimelineSettingsStore((s) => s.fps)
+  const updateTimelineItem = updateItem
   // O(1) via index instead of O(n) getLinkedItems scan.
   const linkedItemsForSync = useItemsStore(
     useShallow(
@@ -542,57 +551,33 @@ export const TimelineItem = memo(function TimelineItem({
     previewBaseItem,
   })
 
-  // Active edge state for halo rendering (trim, roll, slip, slide, stretch)
-  const activeEdges: ActiveEdgeState | null =
-    isTrimming && trimHandle
-      ? {
-          start: trimHandle === 'start',
-          end: trimHandle === 'end',
-          constrainedEdge: trimConstrained ? (isRollingEdit ? 'both' : trimHandle) : null,
-        }
-      : rollingEditHandle
-        ? {
-            start: rollingEditHandle === 'end',
-            end: rollingEditHandle === 'start',
-            constrainedEdge: rollingEditConstrained ? 'both' : null,
-          }
-        : isSlipSlideActive
-          ? {
-              start: true,
-              end: true,
-              constrainedEdge: slipSlideConstrained ? (slipSlideConstraintEdge ?? 'both') : null,
-            }
-          : isLinkedSlipCompanion || isLinkedSlideCompanion
-            ? { start: true, end: true, constrainedEdge: null }
-            : isStretching
-              ? {
-                  start: stretchHandle === 'start',
-                  end: stretchHandle === 'end',
-                  constrainedEdge: stretchConstrained ? stretchHandle : null,
-                }
-              : null
+  // Active edge state for halo rendering (trim, roll, slip, slide, stretch),
+  // plus handle cursor classes and ripple tones for the trim overlay.
+  const { activeEdges, startCursorClass, endCursorClass, startTone, endTone } =
+    resolveTrimVisualState({
+      isTrimming,
+      trimHandle,
+      trimConstrained,
+      isRollingEdit,
+      rollingEditHandle,
+      rollingEditConstrained,
+      isSlipSlideActive,
+      slipSlideConstrained,
+      slipSlideConstraintEdge,
+      isLinkedSlipCompanion,
+      isLinkedSlideCompanion,
+      isStretching,
+      stretchHandle,
+      stretchConstrained,
+      smartTrimIntent,
+      isRippleEdit,
+    })
 
   // Get color based on item type - memoized
-  const itemColorClasses = useMemo(() => {
-    switch (item.type) {
-      case 'video':
-        return 'bg-timeline-video border-timeline-video'
-      case 'audio':
-        return 'bg-timeline-audio border-timeline-audio'
-      case 'image':
-        return 'bg-timeline-image/30 border-timeline-image'
-      case 'text':
-        return 'bg-timeline-text/30 border-timeline-text'
-      case 'shape':
-        return 'bg-timeline-shape/30 border-timeline-shape'
-      case 'adjustment':
-        return 'bg-purple-500/30 border-purple-400'
-      case 'composition':
-        return 'bg-violet-600/40 border-violet-400'
-      default:
-        return 'bg-timeline-video border-timeline-video'
-    }
-  }, [item.type])
+  const itemColorClasses = useMemo(
+    () => ITEM_COLOR_CLASSES[item.type] ?? ITEM_COLOR_CLASSES.video,
+    [item.type],
+  )
 
   const { handleClick, handleDoubleClick, handleMouseDown, handleSmartTrimStart } =
     useTimelineItemPointerHandlers({
@@ -728,26 +713,27 @@ export const TimelineItem = memo(function TimelineItem({
   // Selection alone must not promote a narrow clip back to the rich shell: a
   // large marquee would otherwise restore every fade control and its math at
   // once. Active gestures still keep their controls alive while zoom changes.
-  const hasActiveClipInteraction =
-    isBeingDragged ||
-    isPartOfDrag ||
-    isTrimming ||
-    isStretching ||
-    isSlipSlideActive ||
-    isTrackPushActive ||
-    isEffectDropTarget ||
-    videoFadeEdit !== null ||
-    audioFadeEdit !== null ||
-    audioFadeCurveEdit !== null ||
-    audioVolumeEdit !== null ||
-    transitionDropGhost !== null ||
-    draggedTransition !== null ||
-    pointerHint !== null ||
-    hoveredEdge !== null ||
-    smartTrimIntent !== null ||
-    smartBodyIntent !== null ||
-    rollHoverEdge !== null ||
-    activeEdges !== null
+  const hasActiveClipInteraction = [
+    isBeingDragged,
+    isPartOfDrag,
+    isTrimming,
+    isStretching,
+    isSlipSlideActive,
+    isTrackPushActive,
+    isEffectDropTarget,
+    videoFadeEdit !== null,
+    audioFadeEdit !== null,
+    audioFadeCurveEdit !== null,
+    audioVolumeEdit !== null,
+    transitionDropGhost !== null,
+    draggedTransition !== null,
+    pointerHint !== null,
+    hoveredEdge !== null,
+    smartTrimIntent !== null,
+    smartBodyIntent !== null,
+    rollHoverEdge !== null,
+    activeEdges !== null,
+  ].some(Boolean)
   const skipFadeComputation = isCompactWidth && !hasActiveClipInteraction
   const clipFadeDurationFrames = Math.max(1, Math.round(visualWidthFrames))
   const {
@@ -1184,32 +1170,10 @@ export const TimelineItem = memo(function TimelineItem({
               smartTrimIntent={smartTrimIntent}
               rollHoverEdge={rollHoverEdge}
               activeEdges={activeEdges}
-              startCursorClass={
-                smartTrimIntent === 'ripple-start'
-                  ? 'cursor-ripple-left'
-                  : smartTrimIntent === 'roll-start'
-                    ? 'cursor-trim-center'
-                    : 'cursor-trim-left'
-              }
-              endCursorClass={
-                smartTrimIntent === 'ripple-end'
-                  ? 'cursor-ripple-right'
-                  : smartTrimIntent === 'roll-end'
-                    ? 'cursor-trim-center'
-                    : 'cursor-trim-right'
-              }
-              startTone={
-                smartTrimIntent === 'ripple-start' ||
-                (isTrimming && trimHandle === 'start' && isRippleEdit)
-                  ? 'ripple'
-                  : 'default'
-              }
-              endTone={
-                smartTrimIntent === 'ripple-end' ||
-                (isTrimming && trimHandle === 'end' && isRippleEdit)
-                  ? 'ripple'
-                  : 'default'
-              }
+              startCursorClass={startCursorClass}
+              endCursorClass={endCursorClass}
+              startTone={startTone}
+              endTone={endTone}
               hasJoinableLeft={hasJoinableLeft}
               hasJoinableRight={hasJoinableRight}
               onTrimStart={handleSmartTrimStart}

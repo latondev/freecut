@@ -5,7 +5,7 @@ import { createLogger, createOperationId } from '@/shared/logging/logger'
 import { i18n } from '@/i18n'
 import type { ImperativePanelHandle } from 'react-resizable-panels'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
-import { ErrorBoundary } from '@/app/error-boundary'
+import { ErrorBoundary } from '@/components/error-boundary'
 import { Toolbar } from './toolbar'
 import { MediaSidebar } from './media-sidebar'
 import { PropertiesSidebar } from './properties-sidebar'
@@ -32,7 +32,12 @@ import {
   useTransitionBreakageNotifications,
 } from '@/features/editor/deps/timeline-hooks'
 import { initTransitionChainSubscription } from '@/features/editor/deps/timeline-subscriptions'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import {
+  loadTimeline,
+  saveTimeline,
+  toggleSnap,
+  useTimelineSettingsStore,
+} from '@/features/editor/deps/timeline-store'
 import { importBundleExportDialog } from '@/features/editor/deps/project-bundle'
 import { useMediaLibraryStore } from '@/features/editor/deps/media-library'
 import { useSettingsStore } from '@/features/editor/deps/settings'
@@ -368,7 +373,7 @@ const AutoSaveController = memo(function AutoSaveController({
 }: {
   onSave: () => Promise<void>
 }) {
-  const isDirty = useTimelineStore((s: { isDirty: boolean }) => s.isDirty)
+  const isDirty = useTimelineSettingsStore((s) => s.isDirty)
   useAutoSave({ isDirty, onSave })
   return null
 })
@@ -490,7 +495,6 @@ export const LoadedEditor = memo(function LoadedEditor({
     })
 
     // Load timeline from IndexedDB - single source of truth for all timeline state
-    const { loadTimeline } = useTimelineStore.getState()
     let cancelled = false
 
     void (async () => {
@@ -569,9 +573,9 @@ export const LoadedEditor = memo(function LoadedEditor({
   }, [workspace, editorLayout])
 
   useEffect(() => {
-    const timelineState = useTimelineStore.getState()
-    if (timelineState.snapEnabled !== snapEnabledPreference) {
-      timelineState.toggleSnap()
+    const { snapEnabled } = useTimelineSettingsStore.getState()
+    if (snapEnabled !== snapEnabledPreference) {
+      toggleSnap()
     }
   }, [snapEnabledPreference])
 
@@ -591,7 +595,6 @@ export const LoadedEditor = memo(function LoadedEditor({
     }
 
     isSavingRef.current = true
-    const { saveTimeline } = useTimelineStore.getState()
 
     try {
       await saveTimeline(projectId)

@@ -20,7 +20,7 @@ import {
   buildTaperedOutline,
   getTaperedOutlineFillPath,
 } from '@/shared/graphics/shapes/taper-outline'
-import { useItemGizmoPreview, useTimelineStore } from '@/runtime/composition-runtime/deps/stores'
+import { useItemGizmoPreview, useKeyframesStore } from '@/runtime/composition-runtime/deps/stores'
 import type { ShapeItem } from '@/types/timeline'
 import { useCompositionSpace } from '../contexts/composition-space-context'
 import { useItemVisualTransform } from '../contexts/item-visual-transform-context'
@@ -28,6 +28,43 @@ import { useSequenceContext } from '@/runtime/composition-runtime/deps/player'
 import { useItemKeyframesFromContext } from '../contexts/keyframes-context'
 import { KeyframesContext } from '../contexts/keyframes-context-core'
 import { resolveAnimatedShapeItem } from '@/runtime/composition-runtime/deps/keyframes'
+
+/**
+ * Resolves one shape property with live-preview priority: gizmo preview
+ * values win, then keyframe-resolved values, then the fallback. Key pairings
+ * below are moved verbatim from the previous inline expressions.
+ */
+function resolveShapeProp<
+  TPreview extends object,
+  TResolved extends object,
+  TPreviewKey extends keyof TPreview,
+  TResolvedKey extends keyof TResolved,
+>(
+  preview: TPreview | undefined | null,
+  previewKey: TPreviewKey,
+  resolved: TResolved,
+  resolvedKey: TResolvedKey,
+  fallback: NonNullable<TPreview[TPreviewKey] | TResolved[TResolvedKey]>,
+): NonNullable<TPreview[TPreviewKey] | TResolved[TResolvedKey]> {
+  const previewValue = preview?.[previewKey]
+  const resolvedValue = resolved[resolvedKey]
+  return (previewValue ?? resolvedValue ?? fallback) as NonNullable<
+    TPreview[TPreviewKey] | TResolved[TResolvedKey]
+  >
+}
+
+/** Preview-over-resolved lookup without a fallback (result stays optional). */
+function resolveShapePropValue<
+  TPreview extends object,
+  TResolved extends object,
+  TKey extends keyof TPreview & keyof TResolved,
+>(
+  preview: TPreview | undefined | null,
+  resolved: TResolved,
+  key: TKey,
+): TPreview[TKey] | TResolved[TKey] | undefined {
+  return preview?.[key] ?? resolved[key]
+}
 
 /**
  * Shape content with live property preview support.
@@ -45,8 +82,8 @@ export const ShapeContent: React.FC<{ item: ShapeItem & { _sequenceFrameOffset?:
   const sequenceContext = useSequenceContext()
   const keyframesContext = useContext(KeyframesContext)
   const contextKeyframes = useItemKeyframesFromContext(item.id)
-  const storeKeyframes = useTimelineStore(
-    useCallback((s) => s.keyframes.find((entry) => entry.itemId === item.id), [item.id]),
+  const storeKeyframes = useKeyframesStore(
+    useCallback((s) => s.keyframesByItemId[item.id], [item.id]),
   )
   const sequenceFrameOffset =
     item._sequenceFrameOffset ??
@@ -77,40 +114,137 @@ export const ShapeContent: React.FC<{ item: ShapeItem & { _sequenceFrameOffset?:
 
   // Use preview values if available, otherwise use item's stored values
   const shapePropsPreview = itemPreview?.properties
-  const fillColor = shapePropsPreview?.fillColor ?? resolvedItem.fillColor ?? '#3b82f6'
-  const fillType = shapePropsPreview?.fillType ?? resolvedItem.fillType ?? 'solid'
-  const gradientStartColor =
-    shapePropsPreview?.gradientStartColor ?? resolvedItem.gradientStartColor
-  const gradientEndColor = shapePropsPreview?.gradientEndColor ?? resolvedItem.gradientEndColor
-  const gradientAngle = shapePropsPreview?.gradientAngle ?? resolvedItem.gradientAngle
-  const strokeColor = shapePropsPreview?.strokeColor ?? resolvedItem.strokeColor
+  const fillColor = resolveShapeProp(
+    shapePropsPreview,
+    'fillColor',
+    resolvedItem,
+    'fillColor',
+    '#3b82f6',
+  )
+  const fillType = resolveShapeProp(
+    shapePropsPreview,
+    'fillType',
+    resolvedItem,
+    'fillType',
+    'solid',
+  )
+  const gradientStartColor = resolveShapePropValue(
+    shapePropsPreview,
+    resolvedItem,
+    'gradientStartColor',
+  )
+  const gradientEndColor = resolveShapePropValue(shapePropsPreview, resolvedItem, 'gradientEndColor')
+  const gradientAngle = resolveShapePropValue(shapePropsPreview, resolvedItem, 'gradientAngle')
+  const strokeColor = resolveShapePropValue(shapePropsPreview, resolvedItem, 'strokeColor')
   const strokeWidth =
-    (shapePropsPreview?.strokeWidth ?? resolvedItem.strokeWidth ?? 0) * renderScale
+    resolveShapeProp(shapePropsPreview, 'strokeWidth', resolvedItem, 'strokeWidth', 0) * renderScale
   const cornerRadius =
-    (shapePropsPreview?.cornerRadius ?? resolvedItem.cornerRadius ?? 0) * renderScale
-  const direction = shapePropsPreview?.direction ?? resolvedItem.direction ?? 'up'
-  const points = shapePropsPreview?.points ?? resolvedItem.points ?? 5
-  const innerRadius = shapePropsPreview?.innerRadius ?? resolvedItem.innerRadius ?? 0.5
-  const shapeType = shapePropsPreview?.shapeType ?? resolvedItem.shapeType
-  const pathClosed = shapePropsPreview?.pathClosed ?? resolvedItem.pathClosed ?? true
+    resolveShapeProp(shapePropsPreview, 'cornerRadius', resolvedItem, 'cornerRadius', 0) *
+    renderScale
+  const direction = resolveShapeProp(
+    shapePropsPreview,
+    'direction',
+    resolvedItem,
+    'direction',
+    'up',
+  )
+  const points = resolveShapeProp(shapePropsPreview, 'points', resolvedItem, 'points', 5)
+  const innerRadius = resolveShapeProp(
+    shapePropsPreview,
+    'innerRadius',
+    resolvedItem,
+    'innerRadius',
+    0.5,
+  )
+  const shapeType = resolveShapePropValue(shapePropsPreview, resolvedItem, 'shapeType')
+  const pathClosed = resolveShapeProp(
+    shapePropsPreview,
+    'pathClosed',
+    resolvedItem,
+    'pathClosed',
+    true,
+  )
   const fillEnabled =
     shapeType === 'path' && !pathClosed
       ? false
-      : (shapePropsPreview?.fillEnabled ?? resolvedItem.fillEnabled ?? true)
-  const strokeEnabled =
-    shapePropsPreview?.strokeEnabled ??
-    resolvedItem.strokeEnabled ??
-    (strokeWidth > 0 && strokeColor !== undefined)
-  const strokeLineCap = shapePropsPreview?.strokeLineCap ?? resolvedItem.strokeLineCap ?? 'butt'
-  const strokeLineJoin = shapePropsPreview?.strokeLineJoin ?? resolvedItem.strokeLineJoin ?? 'miter'
-  const strokeMiterLimit = shapePropsPreview?.strokeMiterLimit ?? resolvedItem.strokeMiterLimit ?? 4
-  const trimPathStart = shapePropsPreview?.trimPathStart ?? resolvedItem.trimPathStart ?? 0
-  const trimPathEnd = shapePropsPreview?.trimPathEnd ?? resolvedItem.trimPathEnd ?? 100
-  const trimPathOffset = shapePropsPreview?.trimPathOffset ?? resolvedItem.trimPathOffset ?? 0
-  const taperStartWidth = shapePropsPreview?.taperStartWidth ?? resolvedItem.taperStartWidth ?? 100
-  const taperEndWidth = shapePropsPreview?.taperEndWidth ?? resolvedItem.taperEndWidth ?? 100
-  const taperStartLength = shapePropsPreview?.taperStartLength ?? resolvedItem.taperStartLength ?? 0
-  const taperEndLength = shapePropsPreview?.taperEndLength ?? resolvedItem.taperEndLength ?? 0
+      : resolveShapeProp(shapePropsPreview, 'fillEnabled', resolvedItem, 'fillEnabled', true)
+  const strokeEnabled = resolveShapeProp(
+    shapePropsPreview,
+    'strokeEnabled',
+    resolvedItem,
+    'strokeEnabled',
+    strokeWidth > 0 && strokeColor !== undefined,
+  )
+  const strokeLineCap = resolveShapeProp(
+    shapePropsPreview,
+    'strokeLineCap',
+    resolvedItem,
+    'strokeLineCap',
+    'butt',
+  )
+  const strokeLineJoin = resolveShapeProp(
+    shapePropsPreview,
+    'strokeLineJoin',
+    resolvedItem,
+    'strokeLineJoin',
+    'miter',
+  )
+  const strokeMiterLimit = resolveShapeProp(
+    shapePropsPreview,
+    'strokeMiterLimit',
+    resolvedItem,
+    'strokeMiterLimit',
+    4,
+  )
+  const trimPathStart = resolveShapeProp(
+    shapePropsPreview,
+    'trimPathStart',
+    resolvedItem,
+    'trimPathStart',
+    0,
+  )
+  const trimPathEnd = resolveShapeProp(
+    shapePropsPreview,
+    'trimPathEnd',
+    resolvedItem,
+    'trimPathEnd',
+    100,
+  )
+  const trimPathOffset = resolveShapeProp(
+    shapePropsPreview,
+    'trimPathOffset',
+    resolvedItem,
+    'trimPathOffset',
+    0,
+  )
+  const taperStartWidth = resolveShapeProp(
+    shapePropsPreview,
+    'taperStartWidth',
+    resolvedItem,
+    'taperStartWidth',
+    100,
+  )
+  const taperEndWidth = resolveShapeProp(
+    shapePropsPreview,
+    'taperEndWidth',
+    resolvedItem,
+    'taperEndWidth',
+    100,
+  )
+  const taperStartLength = resolveShapeProp(
+    shapePropsPreview,
+    'taperStartLength',
+    resolvedItem,
+    'taperStartLength',
+    0,
+  )
+  const taperEndLength = resolveShapeProp(
+    shapePropsPreview,
+    'taperEndLength',
+    resolvedItem,
+    'taperEndLength',
+    0,
+  )
   const linearGradient = resolveShapeLinearGradient({
     fillType,
     fillColor,

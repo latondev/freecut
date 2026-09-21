@@ -1,10 +1,10 @@
 import { useMemo, useRef, useEffect, useLayoutEffect, useState, useCallback, memo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useShallow } from 'zustand/react/shallow'
 
 // Stores and selectors
-import { useTimelineStore } from '../stores/timeline-store'
+import { setScrollPosition } from '../stores/timeline-actions'
 import { useItemsStore } from '../stores/items-store'
+import { selectItemIds } from '../stores/items-store-indexes'
 import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 import { useTimelineViewportStore } from '../stores/timeline-viewport-store'
 import { registerZoomTo100, useZoomStore } from '../stores/zoom-store'
@@ -72,7 +72,6 @@ import { applyTimelineLiveGeometry } from '../utils/timeline-live-geometry'
 import { resolveTimelineMarqueeItems } from '../utils/timeline-marquee-geometry'
 import { setTimelineDensityMarqueePreview } from '../utils/timeline-density-marquee-preview'
 import { notifyTimelineLiveScroll } from '@/shared/timeline/live-scroll-sync'
-import { getPlaybackFollowScrollLeft } from '../utils/playback-follow-scroll'
 import { TimelineSettledContentZoomProvider } from './timeline-settled-content-zoom-provider'
 import { getTimelineZoomInteractionShieldBounds } from '../utils/timeline-zoom-interaction-shield'
 
@@ -754,7 +753,7 @@ export const TimelineContent = memo(function TimelineContent({
   useWaveformPrefetch()
 
   // Use granular selectors - Zustand v5 best practice
-  const fps = useTimelineStore((s) => s.fps)
+  const fps = useTimelineSettingsStore((s) => s.fps)
 
   const videoTracks = useMemo(
     () => tracks.filter((track) => getTrackKind(track) === 'video'),
@@ -962,39 +961,6 @@ export const TimelineContent = memo(function TimelineContent({
     })
   }, [syncViewportFromContainer])
 
-  // DaVinci-style page following: let the playhead travel naturally across the
-  // viewport, then move the native timeline (and therefore the navigator thumb)
-  // only when playback reaches an edge. This stays imperative so playback does
-  // not re-render the timeline tree on every frame.
-  useEffect(() => {
-    return usePlaybackStore.subscribe((state, previousState) => {
-      if (!state.isPlaying || state.currentFrame === previousState.currentFrame) {
-        return
-      }
-
-      const container = containerRef.current
-      if (!container) return
-
-      const cachedViewportWidth = viewportDimsRef.current?.width ?? 0
-      const viewportWidth = cachedViewportWidth > 0 ? cachedViewportWidth : container.clientWidth
-      const maxScrollLeft = Math.max(0, timelineWidthRef.current - viewportWidth)
-      const nextScrollLeft = getPlaybackFollowScrollLeft({
-        playheadX: frameToPixelsRef.current(state.currentFrame),
-        scrollLeft: scrollLeftRef.current,
-        viewportWidth,
-        maxScrollLeft,
-        playbackDirection: state.playbackRate < 0 ? -1 : 1,
-      })
-      if (nextScrollLeft === null) return
-
-      velocityXRef.current = 0
-      container.scrollLeft = nextScrollLeft
-      scrollLeftRef.current = nextScrollLeft
-      syncViewportFromContainer(nextScrollLeft, true)
-      notifyTimelineLiveScroll(container)
-    })
-  }, [syncViewportFromContainer])
-
   // Merge external scrollRef with internal containerRef
   const mergedRef = useCallback(
     (node: HTMLDivElement | null) => {
@@ -1089,10 +1055,9 @@ export const TimelineContent = memo(function TimelineContent({
 
   // Persist scroll position after scrolling settles. Viewport culling already
   // uses the dedicated viewport store on RAF; publishing this persistence-only
-  // value during the gesture wakes every subscriber to the legacy facade.
+  // value during the gesture wakes every subscriber to the timeline settings store.
   const scrollUpdateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const SCROLL_PERSIST_DEBOUNCE_MS = 150
-  const setScrollPosition = useTimelineStore((s) => s.setScrollPosition)
 
   useEffect(() => {
     const container = containerRef.current
@@ -1123,7 +1088,7 @@ export const TimelineContent = memo(function TimelineContent({
         viewportSyncRafRef.current = null
       }
     }
-  }, [setScrollPosition, scheduleViewportSync])
+  }, [scheduleViewportSync])
 
   // Restore scroll position from store on initial mount
   const initialScrollRestored = useRef(false)
@@ -1132,7 +1097,7 @@ export const TimelineContent = memo(function TimelineContent({
     const container = containerRef.current
     if (!container) return
 
-    const savedScrollPosition = useTimelineStore.getState().scrollPosition
+    const savedScrollPosition = useTimelineSettingsStore.getState().scrollPosition
     if (savedScrollPosition > 0) {
       container.scrollLeft = savedScrollPosition
       scrollLeftRef.current = savedScrollPosition
@@ -1201,17 +1166,17 @@ export const TimelineContent = memo(function TimelineContent({
     allTracksScrollRef,
   ])
 
-  // Marquee selection - create items array for getBoundingRect lookups
-  // Use derived selector for item IDs only (doesn't re-render when positions change)
-  // useShallow prevents infinite loops from array reference changes
-  const itemIds = useItemsStore(useShallow((s) => s.items.map((item) => item.id)))
+  // Marquee selection - create items array for getBoundingRect lookups.
+  // selectItemIds memoizes the id array per items revision so the marquee layer
+  // doesn't re-allocate (or re-render) on unrelated item property updates.
+  const itemIds = useItemsStore(selectItemIds)
 
   const handleMarqueeSelectionChange = useCallback(
     (ids: string[]) => {
       const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled
       selectItems(
         linkedSelectionEnabled
-          ? expandSelectionWithLinkedItems(useTimelineStore.getState().items, ids)
+          ? expandSelectionWithLinkedItems(useItemsStore.getState().items, ids)
           : ids,
       )
     },
@@ -1335,8 +1300,8 @@ export const TimelineContent = memo(function TimelineContent({
   // Build snap targets for razor shift-snap (item edges, grid, playhead, markers)
   // Called on-demand during mouse move — reads stores directly to avoid subscriptions
   const buildRazorSnapTargets = useCallback((): RazorSnapTarget[] => {
-    const items = useTimelineStore.getState().items
-    const tracks = useTimelineStore.getState().tracks
+    const items = useItemsStore.getState().items
+    const tracks = useItemsStore.getState().tracks
     const transitions = useTransitionsStore.getState().transitions
     const visibleTrackIds = getVisibleTrackIds(tracks)
 
@@ -1494,8 +1459,11 @@ export const TimelineContent = memo(function TimelineContent({
       const scrollContainer = containerRef.current
       if (!scrollContainer) return
 
-      const rect = scrollContainer.getBoundingClientRect()
-      const x = e.clientX - rect.left + scrollContainer.scrollLeft
+      // Prefer the ResizeObserver-maintained box cache; a live rect read on every
+      // hover move can force a layout flush after gesture transform writes.
+      const containerLeft =
+        viewportDimsRef.current?.left ?? scrollContainer.getBoundingClientRect().left
+      const x = e.clientX - containerLeft + scrollContainer.scrollLeft
 
       // In razor mode with Shift held, snap to nearby targets
       const isRazor = useSelectionStore.getState().activeTool === 'razor'
@@ -1728,7 +1696,7 @@ export const TimelineContent = memo(function TimelineContent({
         getPlayheadZoomAnchor({
           currentFrame: currentFrameRef.current,
           currentZoomLevel: currentZoom,
-          fps: useTimelineStore.getState().fps,
+          fps: useTimelineSettingsStore.getState().fps,
           maxDurationSeconds: actualDurationRef.current,
           scrollLeft: baseScrollLeft,
         }),
@@ -1791,7 +1759,7 @@ export const TimelineContent = memo(function TimelineContent({
       if (!container) return
       clearQueuedZoomApply()
 
-      const currentFps = useTimelineStore.getState().fps
+      const currentFps = useTimelineSettingsStore.getState().fps
 
       // At zoom 1, pixelsPerSecond = 100
       const targetPixelX = (centerFrame / currentFps) * 100

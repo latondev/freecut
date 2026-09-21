@@ -18,14 +18,13 @@ import {
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { useHotkeys } from 'react-hotkeys-hook'
-import { Maximize2, Minimize2, X } from 'lucide-react'
+import { KeyframeGraphPanelHeader } from './keyframe-graph-panel-header'
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
 import { cn } from '@/shared/ui/cn'
-import { Button } from '@/components/ui/button'
 import { MotionBakeConfirmationDialog } from '@/shared/ui/motion-bake-confirmation-dialog'
 import { hasEnabledProceduralMotion } from '@/shared/timeline/procedural-motion'
-import { ErrorBoundary } from '@/app/error-boundary'
+import { ErrorBoundary } from '@/components/error-boundary'
 import {
   getAnimatablePropertyBaseValue,
   getTransitionBlockedRanges,
@@ -97,6 +96,14 @@ import {
 } from '../stores/actions/text-motion-actions'
 import { HOTKEY_OPTIONS } from '@/config/hotkeys'
 import { useResolvedHotkeys } from '@/features/timeline/deps/settings'
+import {
+  findStoredVectorKeyframe,
+  getEditorVectorKeyframeId,
+  getStoredVectorKeyframeId,
+  getVectorPropertyProxy,
+  toVectorScalePercent,
+  type VectorPropertyProxy,
+} from '@/features/timeline/deps/keyframes-contract'
 import { getDirectPropertyLinks, isTransformAnimatableProperty } from '@/types/keyframe'
 import { buildEffectPropertyResetPlan } from '@/features/timeline/utils/effect-property-reset'
 import { VectorSpeedGraph } from './vector-speed-graph'
@@ -155,7 +162,7 @@ interface KeyframeGraphPanelProps {
   timelineScrollContainerRef?: RefObject<HTMLDivElement | null>
 }
 
-type KeyframeEditorMode = 'graph' | 'dopesheet' | 'split'
+export type KeyframeEditorMode = 'graph' | 'dopesheet' | 'split'
 const KEYFRAME_EDITOR_MODE_STORAGE_KEY = 'timeline:keyframeEditorMode'
 const MOTION_INLINE_PROPERTY_GROUP_IDS = ['transform'] as const
 const EASING_OPTIONS: Array<{
@@ -194,38 +201,13 @@ function supportsVectorTransform(item: TimelineItem | null): item is TimelineIte
   return Boolean(item && item.type !== 'audio' && item.type !== 'adjustment')
 }
 
-function toScalePercent(value: number, baseValue: number): number {
-  return Math.abs(baseValue) <= Number.EPSILON ? 100 : (value / baseValue) * 100
-}
-
-function getVectorProxy(property: AnimatableProperty): {
-  property: VectorAnimatableProperty
-  axis: 'x' | 'y'
-} | null {
-  if (property === 'x') return { property: 'position', axis: 'x' }
-  if (property === 'y') return { property: 'position', axis: 'y' }
-  if (property === 'width') return { property: 'scale', axis: 'x' }
-  if (property === 'height') return { property: 'scale', axis: 'y' }
-  if (property === 'anchorX') return { property: 'anchor', axis: 'x' }
-  if (property === 'anchorY') return { property: 'anchor', axis: 'y' }
-  return null
-}
-
 function getEditableVectorProxy(
   property: AnimatableProperty,
   itemKeyframes: ItemKeyframes | null | undefined,
-): ReturnType<typeof getVectorProxy> {
-  const proxy = getVectorProxy(property)
+): VectorPropertyProxy | null {
+  const proxy = getVectorPropertyProxy(property)
   if (!proxy || isVectorPropertySeparated(itemKeyframes, proxy.property)) return null
   return proxy
-}
-
-function getStoredVectorKeyframeId(keyframeId: string, axis: 'x' | 'y'): string {
-  return axis === 'y' && keyframeId.endsWith(':y') ? keyframeId.slice(0, -2) : keyframeId
-}
-
-function getEditorVectorKeyframeId(keyframeId: string, axis: 'x' | 'y'): string {
-  return axis === 'y' ? `${keyframeId}:y` : keyframeId
 }
 
 const EASINGS_WITH_EDITABLE_BEZIER = new Set<EasingType>([
@@ -237,16 +219,6 @@ const EASINGS_WITH_EDITABLE_BEZIER = new Set<EasingType>([
 
 function getBezierEditorEasing(easing: EasingType | undefined): EasingType {
   return easing && EASINGS_WITH_EDITABLE_BEZIER.has(easing) ? easing : 'cubic-bezier'
-}
-
-function findStoredVectorKeyframe(
-  itemKeyframes: ItemKeyframes | undefined,
-  property: VectorAnimatableProperty,
-  keyframeId: string,
-): VectorKeyframe | undefined {
-  return itemKeyframes?.vectorProperties
-    ?.find((candidate) => candidate.property === property)
-    ?.keyframes.find((keyframe) => keyframe.id === keyframeId)
 }
 
 function buildLegacyVectorPromotionAtFrame(params: {
@@ -432,7 +404,7 @@ const VECTOR_COMPOUND_PRIMARY: Record<VectorAnimatableProperty, 'x' | 'width' | 
 function isPastePropertySupported(
   availableProperties: AnimatableProperty[],
   property: AnimatableProperty,
-  vector: ReturnType<typeof getVectorProxy>,
+  vector: VectorPropertyProxy | null,
 ): boolean {
   if (availableProperties.includes(property)) return true
   if (!vector) return false
@@ -553,8 +525,8 @@ function pasteVectorKeyframePayload(params: {
     params.payload.vectorProperty === 'position'
       ? { x: resolved.x, y: resolved.y }
       : {
-          x: toScalePercent(resolved.width, params.baseTransform.width),
-          y: toScalePercent(resolved.height, params.baseTransform.height),
+          x: toVectorScalePercent(resolved.width, params.baseTransform.width),
+          y: toVectorScalePercent(resolved.height, params.baseTransform.height),
         }
   const keyframeId = timelineActions.upsertVectorKeyframe(
     params.item.id,
@@ -737,12 +709,12 @@ function buildVectorControlRows(params: {
       secondaryProxyProperty: 'height',
       label: params.t('editor.textProperties.scale', { defaultValue: 'Scale' }),
       value: {
-        x: toScalePercent(params.resolved.width, params.base.width),
-        y: toScalePercent(params.resolved.height, params.base.height),
+        x: toVectorScalePercent(params.resolved.width, params.base.width),
+        y: toVectorScalePercent(params.resolved.height, params.base.height),
       },
       preExpressionValue: {
-        x: toScalePercent(params.preExpression.width, params.base.width),
-        y: toScalePercent(params.preExpression.height, params.base.height),
+        x: toVectorScalePercent(params.preExpression.width, params.base.width),
+        y: toVectorScalePercent(params.preExpression.height, params.base.height),
       },
       unit: '%',
       keyframes: scaleLane.keyframes,
@@ -2899,8 +2871,8 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
           ? { x: resolved.x, y: resolved.y }
           : proxy.property === 'scale'
             ? {
-                x: toScalePercent(resolved.width, vectorBaseTransform.width),
-                y: toScalePercent(resolved.height, vectorBaseTransform.height),
+                x: toVectorScalePercent(resolved.width, vectorBaseTransform.width),
+                y: toVectorScalePercent(resolved.height, vectorBaseTransform.height),
               }
             : { x: resolved.anchorX, y: resolved.anchorY }
       timelineActions.upsertVectorKeyframe(selectedItemForEditor.id, proxy.property, {
@@ -3418,132 +3390,17 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
     >
       {placement === 'bottom' && resizeHandle}
 
-      {surface !== 'edit' && (
-        <div className="h-8 flex items-center justify-between px-3 bg-secondary/30 border-b border-border">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-muted-foreground">
-              {surface === 'motion'
-                ? t('editor.compose.motionCurves')
-                : t('timeline.keyframeEditor.title')}
-              {selectedItemForEditor && (
-                <span className="ml-2 text-foreground">
-                  - {selectedItemForEditor.label || selectedItemForEditor.type}
-                  <span className="ml-1 text-muted-foreground">
-                    ({selectedItemForEditor.id.slice(0, 8)})
-                  </span>
-                </span>
-              )}
-            </span>
-          </div>
-
-          <div
-            className={cn(
-              'flex items-center gap-0.5',
-              surface === 'default' && 'rounded-md border border-border/60 bg-background/50 p-0.5',
-            )}
-            role={surface === 'default' ? 'tablist' : undefined}
-            aria-label={
-              surface === 'motion'
-                ? t('editor.compose.motionCurves')
-                : t('timeline.keyframeEditor.title')
-            }
-          >
-            {surface === 'default' && (
-              <>
-                <Button
-                  variant={effectiveEditorMode === 'dopesheet' ? 'secondary' : 'ghost'}
-                  size="sm"
-                  className="h-6 px-2 text-[11px]"
-                  role="tab"
-                  aria-selected={effectiveEditorMode === 'dopesheet'}
-                  title={t('timeline.keyframeEditor.legend.sheetMode')}
-                  aria-label={t('timeline.keyframeEditor.legend.sheetMode')}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setEditorMode('dopesheet')
-                  }}
-                >
-                  {t('timeline.keyframeEditor.sheet')}
-                </Button>
-                <Button
-                  variant={effectiveEditorMode === 'graph' ? 'secondary' : 'ghost'}
-                  size="sm"
-                  className="h-6 px-2 text-[11px]"
-                  role="tab"
-                  aria-selected={effectiveEditorMode === 'graph'}
-                  title={t('timeline.keyframeEditor.legend.graphMode')}
-                  aria-label={t('timeline.keyframeEditor.legend.graphMode')}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setEditorMode('graph')
-                  }}
-                >
-                  {t('timeline.keyframeEditor.graph')}
-                </Button>
-                {splitView && (
-                  <Button
-                    variant={effectiveEditorMode === 'split' ? 'secondary' : 'ghost'}
-                    size="sm"
-                    className="h-6 px-2 text-[11px]"
-                    role="tab"
-                    aria-selected={effectiveEditorMode === 'split'}
-                    title={t('timeline.keyframeEditor.split')}
-                    aria-label={t('timeline.keyframeEditor.split')}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setEditorMode('split')
-                    }}
-                  >
-                    {t('timeline.keyframeEditor.split')}
-                  </Button>
-                )}
-              </>
-            )}
-            {onFocusModeChange && (
-              <Button
-                variant={isFocusMode ? 'secondary' : 'ghost'}
-                size="icon"
-                className="ml-0.5 h-6 w-6 p-0"
-                title={t(
-                  isFocusMode
-                    ? 'timeline.keyframeEditor.exitFocusMode'
-                    : 'timeline.keyframeEditor.enterFocusMode',
-                )}
-                aria-label={t(
-                  isFocusMode
-                    ? 'timeline.keyframeEditor.exitFocusMode'
-                    : 'timeline.keyframeEditor.enterFocusMode',
-                )}
-                aria-pressed={isFocusMode}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onFocusModeChange(!isFocusMode)
-                }}
-              >
-                {isFocusMode ? (
-                  <Minimize2 className="h-3 w-3" />
-                ) : (
-                  <Maximize2 className="h-3 w-3" />
-                )}
-              </Button>
-            )}
-            {showCloseButton && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5 p-0"
-                aria-label={t('common.close')}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onClose()
-                }}
-              >
-                <X className="w-3 h-3" />
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
+      <KeyframeGraphPanelHeader
+        surface={surface}
+        selectedItemForEditor={selectedItemForEditor}
+        effectiveEditorMode={effectiveEditorMode}
+        splitView={splitView}
+        setEditorMode={setEditorMode}
+        isFocusMode={isFocusMode}
+        onFocusModeChange={onFocusModeChange}
+        showCloseButton={showCloseButton}
+        onClose={onClose}
+      />
 
       {/* Keyframe editor content */}
       {isOpen && (

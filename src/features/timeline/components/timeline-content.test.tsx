@@ -9,7 +9,7 @@ import { useSelectionStore } from '@/shared/state/selection'
 import type { TimelineTrack, VideoItem } from '@/types/timeline'
 
 import { _resetViewportThrottle, useTimelineViewportStore } from '../stores/timeline-viewport-store'
-import { useTimelineStore } from '../stores/timeline-store'
+import { setTimelineState } from '../test-helpers'
 import { useItemsStore } from '../stores/items-store'
 import { _resetZoomStoreForTest, useZoomStore } from '../stores/zoom-store'
 import { TIMELINE_RULER_HEIGHT, ZOOM_MAX, ZOOM_MIN } from '../constants'
@@ -174,7 +174,7 @@ function resetStores() {
 
   resetPlaybackPreviewState()
 
-  useTimelineStore.setState({
+  setTimelineState({
     fps: 30,
     items: [VIDEO_ITEM],
     tracks: [VIDEO_TRACK],
@@ -233,38 +233,6 @@ describe('TimelineContent playback selection behavior', () => {
     await waitFor(() => {
       expect(useSelectionStore.getState().selectedItemIds).toEqual([VIDEO_ITEM.id])
     })
-  })
-
-  it('pages the navigator viewport when a playing playhead reaches the edge', () => {
-    const { container } = render(<TimelineContent duration={30} tracks={[VIDEO_TRACK]} />)
-    const scrollContainer = container.querySelector('[data-timeline-scroll-container]')
-    if (!(scrollContainer instanceof HTMLDivElement)) {
-      throw new Error('Expected timeline scroll container')
-    }
-
-    Object.defineProperty(scrollContainer, 'clientWidth', { configurable: true, value: 400 })
-    const scrollWidthRead = vi.fn(() => 3000)
-    Object.defineProperty(scrollContainer, 'scrollWidth', {
-      configurable: true,
-      get: scrollWidthRead,
-    })
-    const liveScroll = vi.fn()
-    scrollContainer.addEventListener(TIMELINE_LIVE_SCROLL_EVENT, liveScroll)
-
-    act(() => {
-      usePlaybackStore.getState().setCurrentFrame(150)
-    })
-    expect(scrollContainer.scrollLeft).toBe(0)
-
-    act(() => {
-      usePlaybackStore.getState().play()
-      usePlaybackStore.getState().setCurrentFrame(151)
-    })
-
-    expect(scrollContainer.scrollLeft).toBeCloseTo((151 / 30) * 100 - 400 * 0.2)
-    expect(useTimelineViewportStore.getState().scrollLeft).toBeCloseTo(scrollContainer.scrollLeft)
-    expect(liveScroll).toHaveBeenCalledOnce()
-    expect(scrollWidthRead).not.toHaveBeenCalled()
   })
 
   it('does not re-render the full timeline tree for live or settled gesture zoom', () => {
@@ -755,7 +723,7 @@ describe('TimelineContent playback selection behavior', () => {
       { ...VIDEO_TRACK, id: 'track-video-3', name: 'V3', order: 2 },
     ]
 
-    useTimelineStore.setState({
+    setTimelineState({
       tracks: videoTracks,
       items: [],
     })
@@ -868,7 +836,7 @@ describe('TimelineContent playback selection behavior', () => {
       },
     ]
 
-    useTimelineStore.setState({
+    setTimelineState({
       tracks,
       items: [],
     })
