@@ -14,14 +14,11 @@ import { useGizmoStore } from '../stores/gizmo-store'
 import { useCornerPinStore } from '../stores/corner-pin-store'
 import { useMaskEditorStore } from '../stores/mask-editor-store'
 import {
-  activePreviewPreseek,
   backgroundPreseek as workerBackgroundPreseek,
   backgroundBatchPreseek as workerBackgroundBatchPreseek,
   setActivePreviewRenderTarget,
-  replaceActivePreviewSourceTargets,
   settleActivePreviewRenderTarget,
   subscribeActivePreviewReady,
-  isActivePreviewFrameDecodeReady,
 } from '../utils/decoder-prewarm'
 import { getDirectionalPrewarmOffsets } from '../utils/fast-scrub-prewarm'
 import { resolveProxyUrl } from '../utils/media-resolver'
@@ -54,7 +51,6 @@ import {
   selectBoundarySourcePrewarmSources,
   shouldDropStalePausedPreviewRender,
   shouldRejectBlankTransportHandoff,
-  shouldRecoverFailedActivePreseekSchedule,
   shouldRestoreCommittedPreviewSnapshot,
   shouldUseRenderedPlaybackOverlay,
 } from '../utils/render-pump-frame-plan'
@@ -65,7 +61,6 @@ import {
   collectPlaybackStartVariableSpeedPrewarmItemIds,
   collectVisibleTrackVideoSourceTimesBySrc,
   getVideoItemSourceTimeSeconds,
-  resolveActivePreviewLookaheadTimestamps,
   resolvePreviewPreseekSource,
   resolvePausedVariableSpeedPrewarmPlan,
   shouldRunJumpPreseek,
@@ -89,6 +84,7 @@ import {
   resolveScrubPrewarmIdleDelayMs,
   shouldUseCompositionScrubPrewarm,
 } from '../utils/render-pump-prewarm-plan'
+import { createActiveScrubPreseekScheduler } from '../utils/active-scrub-preseek-scheduler'
 import type { CommittedPreviewSnapshotState } from '../utils/preview-display-canvas'
 import { createPreviewPresentationGate } from '../utils/preview-presentation-gate'
 import type { TransitionPreviewSessionTrace } from './use-preview-transition-session-controller'
@@ -567,9 +563,31 @@ export function usePreviewRenderPump({
     let playbackPrewarmInFlight = false
     let lastScrubTargetAtMs = 0
     let scrubPrewarmIdleDelayMs = 40
-    let lastActivePreviewTargetAtMs = 0
-    let lastActivePreviewSourceTimes = new Map<string, number>()
-    let activeScrubPreseekScheduleVersion = 0
+    // The held-scrub decode lane keeps its own schedule version and source
+    // targets; the router only decides when to ask it for a window.
+    const activeScrubPreseek = createActiveScrubPreseekScheduler({
+      fps,
+      useProxy,
+      collectSourceTimes: (frame) =>
+        collectVisibleTrackVideoSourceTimesBySrc(combinedTracks, frame, fps, {
+          requireExplicitSourceFps: false,
+          resolveComposition: resolvePreseekComposition,
+          resolveItemSrc: resolvePreseekItemSrc,
+        }),
+      getPlaybackState: () => usePlaybackStore.getState(),
+      isEffectDisposed: () => effectDisposed,
+      isMounted: () => scrubMountedRef.current,
+      isRenderInFlight: () => scrubRenderInFlightRef.current,
+      clearOffscreenRenderedFrameIf: (frame) => {
+        if (scrubOffscreenRenderedFrameRef.current === frame) {
+          scrubOffscreenRenderedFrameRef.current = null
+        }
+      },
+      requestFrame: (frame) => {
+        scrubRequestedFrameRef.current = frame
+      },
+      pumpRenderLoop: () => void pumpRenderLoop(),
+    })
     const cancelScrubPrewarmIdleRestart = () => {
       if (scrubPrewarmIdleTimeoutId === null) return
       clearTimeout(scrubPrewarmIdleTimeoutId)
@@ -1447,166 +1465,6 @@ export function usePreviewRenderPump({
       runBatchPreseek(bySource)
     }
 
-    const scheduleActiveScrubPreseek = (
-      targetFrame: number,
-      direction: -1 | 0 | 1,
-      nowMs: number,
-      retryFailedTarget: boolean,
-    ) => {
-      const scheduleVersion = ++activeScrubPreseekScheduleVersion
-      const bySource = collectVisibleTrackVideoSourceTimesBySrc(combinedTracks, targetFrame, fps, {
-        // Match renderVideoItem's sourceFps ?? compositionFps fallback. Older
-        // compound items may not persist sourceFps; excluding them here leaves
-        // held scrubs with no worker target and briefly exposes a cleared
-        // nested canvas.
-        requireExplicitSourceFps: false,
-        resolveComposition: resolvePreseekComposition,
-        resolveItemSrc: resolvePreseekItemSrc,
-      })
-      if (bySource.size === 0) {
-        // There is no worker-backed source to gate this frame. Drop any source
-        // targets left by the previous hover so images/text and the normal
-        // renderer path cannot be held behind an unrelated cancelled decode.
-        setActivePreviewRenderTarget(null)
-        replaceActivePreviewSourceTargets(bySource)
-        return
-      }
-
-      recordPreviewPreseekPlan(targetFrame, bySource)
-      const elapsedMs =
-        lastActivePreviewTargetAtMs === 0
-          ? Number.POSITIVE_INFINITY
-          : nowMs - lastActivePreviewTargetAtMs
-      lastActivePreviewTargetAtMs = nowMs
-      const nextSourceTimes = new Map<string, number>()
-      let usedDedicatedLane = false
-      let recoveredFailedSchedule = false
-      const requiredPreseekPromises: Array<Promise<ImageBitmap | null>> = []
-      const recoverFailedSchedule = () => {
-        const playbackState = usePlaybackStore.getState()
-        const currentTarget = playbackState.previewFrame ?? playbackState.currentFrame
-        if (
-          !shouldRecoverFailedActivePreseekSchedule({
-            effectDisposed,
-            recoveredFailedSchedule,
-            scheduleVersion,
-            activeScheduleVersion: activeScrubPreseekScheduleVersion,
-            mounted: scrubMountedRef.current,
-            isPlaying: playbackState.isPlaying,
-            currentTarget,
-            targetFrame,
-          })
-        ) {
-          return
-        }
-
-        recoveredFailedSchedule = true
-        // A latest-target worker failure/cancellation has no ready
-        // notification. Leaving the active gate pinned would make every retry
-        // abort forever until the pointer requested a different frame. Unpin
-        // this exact schedule and retry through the normal DOM/MediaBunny
-        // renderer while preserving the visible front buffer.
-        setActivePreviewRenderTarget(null)
-        if (scrubOffscreenRenderedFrameRef.current === targetFrame) {
-          scrubOffscreenRenderedFrameRef.current = null
-        }
-        if (!retryFailedTarget) return
-        scrubRequestedFrameRef.current = targetFrame
-        if (!scrubRenderInFlightRef.current) {
-          void pumpRenderLoop()
-        }
-      }
-      const observeRequiredPreseek = (promise: Promise<ImageBitmap | null>) => {
-        requiredPreseekPromises.push(promise)
-        void promise.then((bitmap) => {
-          if (!bitmap) recoverFailedSchedule()
-        })
-      }
-
-      for (const [src, timestamps] of bySource) {
-        const exactTimestamp = timestamps[0]
-        if (exactTimestamp === undefined) continue
-        nextSourceTimes.set(src, exactTimestamp)
-        if (useProxy) {
-          scheduleScrubProxyFallback(src, exactTimestamp)
-        }
-
-        if (!usedDedicatedLane) {
-          usedDedicatedLane = true
-          observeRequiredPreseek(
-            activePreviewPreseek({
-              src,
-              timestamp: exactTimestamp,
-              lookaheadTimestamps: resolveActivePreviewLookaheadTimestamps({
-                sourceTime: exactTimestamp,
-                previousSourceTime: lastActivePreviewSourceTimes.get(src) ?? null,
-                elapsedMs,
-                sourceFps: fps,
-                fallbackDirection: direction,
-              }),
-            }),
-          )
-          if (timestamps.length > 1) {
-            for (const timestamp of timestamps.slice(1)) {
-              observeRequiredPreseek(workerBackgroundPreseek(src, timestamp))
-            }
-          }
-          continue
-        }
-
-        // Stacked secondary sources retain the existing bounded pool. The
-        // top active source always owns the isolated latency-critical lane.
-        for (const timestamp of timestamps) {
-          observeRequiredPreseek(workerBackgroundPreseek(src, timestamp))
-        }
-      }
-
-      replaceActivePreviewSourceTargets(bySource)
-      lastActivePreviewSourceTimes = nextSourceTimes
-      void Promise.allSettled(requiredPreseekPromises).then(() => {
-        if (
-          !effectDisposed &&
-          scheduleVersion === activeScrubPreseekScheduleVersion &&
-          !isActivePreviewFrameDecodeReady(targetFrame)
-        ) {
-          // The bounded background queue can resolve an older same-source
-          // request with the newer bitmap that replaced it. Re-check the exact
-          // registered target set after all work settles instead of treating a
-          // non-null promise value as proof that every compound source arrived.
-          recoverFailedSchedule()
-        }
-      })
-    }
-
-    const primeActivePreviewDecoderAtFrame = (targetFrame: number) => {
-      const bySource = collectVisibleTrackVideoSourceTimesBySrc(combinedTracks, targetFrame, fps, {
-        requireExplicitSourceFps: false,
-        resolveComposition: resolvePreseekComposition,
-        resolveItemSrc: resolvePreseekItemSrc,
-      })
-      const primarySource = bySource.entries().next().value as [string, number[]] | undefined
-      if (!primarySource) return
-
-      const [src, timestamps] = primarySource
-      const exactTimestamp = timestamps[0]
-      if (exactTimestamp === undefined) return
-
-      // The worker itself can be warm while its media extractor is still
-      // cold. Prime the latency-critical lane while the preview is paused so
-      // the first held drag does not pay source registration + demux startup.
-      void activePreviewPreseek({
-        src,
-        timestamp: exactTimestamp,
-        lookaheadTimestamps: resolveActivePreviewLookaheadTimestamps({
-          sourceTime: exactTimestamp,
-          previousSourceTime: null,
-          elapsedMs: Number.POSITIVE_INFINITY,
-          sourceFps: fps,
-          fallbackDirection: 0,
-        }),
-      })
-    }
-
     const handlePlaybackLifecycleUpdate = (
       state: PlaybackStoreSnapshot,
       prev: PlaybackStoreSnapshot,
@@ -1761,7 +1619,7 @@ export function usePreviewRenderPump({
         presentation.captureCommittedSnapshot(pausedFrame)
 
         schedulePausedPlaybackLookahead(pausedFrame, 'post_pause')
-        primeActivePreviewDecoderAtFrame(pausedFrame)
+        activeScrubPreseek.primeDecoderAtFrame(pausedFrame)
 
         if (pausedFrame !== state.currentFrame) {
           const latestPlayback = usePlaybackStore.getState()
@@ -2295,7 +2153,7 @@ export function usePreviewRenderPump({
             scrubDirectionRef.current,
           )
         }
-        scheduleActiveScrubPreseek(
+        activeScrubPreseek.schedule(
           activePreviewPresentationTarget,
           scrubDirectionRef.current,
           nowMs,
@@ -2746,7 +2604,7 @@ export function usePreviewRenderPump({
       scrubRequestedFrameRef.current = initialFrame
       void pumpRenderLoop()
       if (!playbackState.isPlaying && playbackState.previewFrame === null) {
-        primeActivePreviewDecoderAtFrame(initialFrame)
+        activeScrubPreseek.primeDecoderAtFrame(initialFrame)
         schedulePausedPlaybackLookahead(initialFrame, 'initial_load', true)
       }
       // Start rAF pump if already playing
