@@ -1,7 +1,6 @@
 export {
   useCompositionsStore,
   type SubComposition,
-  getActiveCompositionId,
   getActiveExportSequenceId,
   getExportableSequence,
   listExportableSequences,

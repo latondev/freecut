@@ -28,7 +28,7 @@ const log = createLogger('lottie-provider')
 let wasmConfigured = false
 
 /** Point dotlottie at the bundled WASM (idempotent). Call before any DotLottie. */
-export function ensureLottieWasm(): void {
+function ensureLottieWasm(): void {
   if (wasmConfigured) return
   DotLottie.setWasmUrl(wasmUrl)
   wasmConfigured = true

@@ -114,7 +114,7 @@ const BEZIER_PRESETS = [
 export type BezierPresetName = (typeof BEZIER_PRESETS)[number]['value']
 export type BezierPresetValue = BezierPresetName | 'custom'
 
-export function areBezierPointsEqual(a: BezierControlPoints, b: BezierControlPoints): boolean {
+function areBezierPointsEqual(a: BezierControlPoints, b: BezierControlPoints): boolean {
   return a.x1 === b.x1 && a.y1 === b.y1 && a.x2 === b.x2 && a.y2 === b.y2
 }
 

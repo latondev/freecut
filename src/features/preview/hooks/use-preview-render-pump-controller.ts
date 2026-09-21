@@ -180,7 +180,7 @@ type PreviewPerfState = {
   scrubUpdates: number
 }
 
-export function resolvePlaybackDomVideoElement(
+function resolvePlaybackDomVideoElement(
   itemId: string,
   getPinnedTransitionElementForItem: (itemId: string) => HTMLVideoElement | null,
   getRegisteredElementForItem: (itemId: string) => HTMLVideoElement | null,
