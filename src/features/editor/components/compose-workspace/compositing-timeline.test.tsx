@@ -2685,6 +2685,17 @@ describe('CompositingTimeline', { timeout: 15_000 }, () => {
     expect(useItemsStore.getState().itemById[shape.id]?.label).toBe('Renamed rectangle')
   })
 
+  it('deletes a layer and its track from the row context menu', async () => {
+    render(<CompositingTimeline />)
+    fireEvent.contextMenu(screen.getByRole('button', { name: /1hero rectangle/i }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+
+    const itemsState = useItemsStore.getState()
+    expect(itemsState.itemById[shape.id]).toBeUndefined()
+    expect(itemsState.items.some((item) => item.id === shape.id)).toBe(false)
+    expect(itemsState.tracks.some((candidate) => candidate.id === track.id)).toBe(false)
+  })
+
   it('preserves a multi-selection when grouping from a selected layer context menu', async () => {
     const secondTrack = makeTimelineTrack({
       id: 'layer-track-2',
