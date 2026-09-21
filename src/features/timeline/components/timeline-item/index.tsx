@@ -1,7 +1,8 @@
 import { useRef, useEffect, useMemo, memo, useCallback, useState } from 'react'
 import type { TimelineItem as TimelineItemType } from '@/types/timeline'
 import { useShallow } from 'zustand/react/shallow'
-import { useTimelineStore } from '../../stores/timeline-store'
+import { useTimelineSettingsStore } from '../../stores/timeline-settings-store'
+import { addEffects, updateItem } from '../../stores/timeline-actions'
 import { useItemsStore } from '../../stores/items-store'
 import { selectReplaceableCaptionClipIds } from '../../stores/items-store-indexes'
 import { useKeyframesStore } from '../../stores/keyframes-store'
@@ -380,9 +381,8 @@ export const TimelineItem = memo(function TimelineItem({
   })
 
   // Get FPS for frame-to-time conversion
-  const fps = useTimelineStore((s) => s.fps)
-  const addEffects = useTimelineStore((s) => s.addEffects)
-  const updateTimelineItem = useTimelineStore((s) => s.updateItem)
+  const fps = useTimelineSettingsStore((s) => s.fps)
+  const updateTimelineItem = updateItem
   // O(1) via index instead of O(n) getLinkedItems scan.
   const linkedItemsForSync = useItemsStore(
     useShallow(

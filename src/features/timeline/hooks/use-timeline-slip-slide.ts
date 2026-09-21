@@ -5,7 +5,7 @@ import type { Transition } from '@/types/transition'
 import { commitPreviewFrameToCurrentFrame } from '@/shared/state/playback'
 import { useEditorStore } from '@/shared/state/editor'
 import { DRAG_THRESHOLD_PIXELS } from '../constants'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useItemsStore } from '../stores/items-store'
 import { useTransitionsStore } from '../stores/transitions-store'
 import { useSelectionStore } from '@/shared/state/selection'
 import { useDragInteractionPreamble } from './use-drag-interaction-preamble'
@@ -657,7 +657,7 @@ export function useTimelineSlipSlide(
   const slideGestureContextRef = useRef<SlideGestureContext | null>(null)
 
   const getItemFromStore = useCallback(() => {
-    return useTimelineStore.getState().items.find((i) => i.id === item.id) ?? item
+    return useItemsStore.getState().items.find((i) => i.id === item.id) ?? item
   }, [item])
   const clampSlideDeltaRef = useRef<
     (delta: number, leftNeighborId: string | null, rightNeighborId: string | null) => number
@@ -668,7 +668,7 @@ export function useTimelineSlipSlide(
    * Only adjacent neighbors get trimmed during slide.
    */
   const findNeighbors = useCallback(() => {
-    const allItems = useTimelineStore.getState().items
+    const allItems = useItemsStore.getState().items
     const currentItem = getItemFromStore()
     const transitions = useTransitionsStore.getState().transitions
     return findEditNeighborsWithTransitions(currentItem, allItems, transitions)
@@ -680,7 +680,7 @@ export function useTimelineSlipSlide(
       leftNeighbor: TimelineItem | null,
       rightNeighbor: TimelineItem | null,
     ): SlideGestureContext => {
-      const allItems = useTimelineStore.getState().items
+      const allItems = useItemsStore.getState().items
       const transitions = useTransitionsStore.getState().transitions
       const itemsById = new Map(allItems.map((candidate) => [candidate.id, candidate]))
       const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled
@@ -826,7 +826,7 @@ export function useTimelineSlipSlide(
         // Compute the effective slide range (tightest across all tracks),
         // incorporating transition constraints so the initial limit box matches
         // the bounds used during dragging.
-        const allItems = useTimelineStore.getState().items
+        const allItems = useItemsStore.getState().items
         const transitions = useTransitionsStore.getState().transitions
         const sourceMinDelta = clampSlideDeltaRef.current(
           -1_000_000_000,
@@ -875,7 +875,7 @@ export function useTimelineSlipSlide(
       // Seed linked companion previews with zero-delta so their overlays appear immediately
       const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled
       if (linkedSelectionEnabled) {
-        const allItems = useTimelineStore.getState().items
+        const allItems = useItemsStore.getState().items
         const companions = getSynchronizedLinkedItems(allItems, currentItem.id).filter(
           (c) => c.id !== currentItem.id,
         )
@@ -921,7 +921,7 @@ export function useTimelineSlipSlide(
         clamped = -currentItem.from
       }
 
-      const allItems = useTimelineStore.getState().items
+      const allItems = useItemsStore.getState().items
       const slideItemIds = new Set(
         [item.id, leftNeighborId, rightNeighborId].filter(Boolean) as string[],
       )
@@ -1271,7 +1271,7 @@ export function useTimelineSlipSlide(
 
       if (mode === 'slip') {
         const currentItem = getItemFromStore()
-        const allItems = useTimelineStore.getState().items
+        const allItems = useItemsStore.getState().items
         const transitions = useTransitionsStore.getState().transitions
         const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled
         const slipResult = resolveSlipDelta({
@@ -1301,7 +1301,7 @@ export function useTimelineSlipSlide(
         const slideContext = slideGestureContextRef.current
         const { leftNeighborId, rightNeighborId } = stateRef.current
         const storeItem = slideContext?.currentItem ?? getItemFromStore()
-        const allItems = slideContext?.allItems ?? useTimelineStore.getState().items
+        const allItems = slideContext?.allItems ?? useItemsStore.getState().items
         const transitions = useTransitionsStore.getState().transitions
         const keyframesByItemId = useKeyframesStore.getState().keyframesByItemId
 

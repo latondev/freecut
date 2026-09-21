@@ -183,7 +183,7 @@ import {
   commitTextMotionEdit,
   trimCompositionToActiveRegion,
   updateTextMotionLive,
-  useTimelineStore,
+  useMarkersStore,
 } from '@/features/editor/deps/timeline-store'
 import {
   clearMediaDragData,
@@ -213,14 +213,18 @@ import {
 import {
   buildMotionVectorSeparationProperties,
   canCombineMotionVectorRowWithoutBake,
-  getMotionVectorProxy,
-  getStoredMotionVectorKeyframeId,
   isMotionVectorRowSeparated,
   MOTION_VECTOR_ROW_DEFINITIONS,
   motionVectorSeparationNeedsBake,
   shouldUseMotionVectorRow,
   toMotionVectorProxyKeyframes,
 } from './motion-vector-rows'
+import {
+  findStoredVectorKeyframe,
+  getStoredVectorKeyframeId,
+  getVectorPropertyProxy,
+  toVectorScalePercent,
+} from '@/features/editor/deps/keyframes-contract'
 import { MotionIoLane, MOTION_IO_LANE_HEIGHT } from './motion-io-lane'
 import { MotionActiveRegionOverlay, MotionCompEndRulerDim } from './motion-region-overlay'
 import { getVisibleMotionPathProperties } from './motion-path-property-visibility'
@@ -1647,10 +1651,6 @@ function withoutPropertyExpressions(itemKeyframes: ItemKeyframes | undefined) {
   }
 }
 
-function toMotionScalePercent(value: number, baseValue: number): number {
-  return Math.abs(baseValue) <= Number.EPSILON ? 100 : (value / baseValue) * 100
-}
-
 function getMotionVectorValue(
   property: VectorAnimatableProperty,
   transform: ReturnType<typeof resolveTransform>,
@@ -1659,8 +1659,8 @@ function getMotionVectorValue(
   if (property === 'position') return { x: transform.x, y: transform.y }
   if (property === 'scale') {
     return {
-      x: toMotionScalePercent(transform.width, baseTransform.width),
-      y: toMotionScalePercent(transform.height, baseTransform.height),
+      x: toVectorScalePercent(transform.width, baseTransform.width),
+      y: toVectorScalePercent(transform.height, baseTransform.height),
     }
   }
   return { x: transform.anchorX, y: transform.anchorY }
@@ -1842,16 +1842,6 @@ function useMotionPositionValueSource(
   return useMemo(() => createMotionPositionValueSource(() => contextRef.current), [])
 }
 
-function findMotionVectorKeyframe(
-  itemKeyframes: ItemKeyframes | undefined,
-  property: VectorAnimatableProperty,
-  keyframeId: string,
-): VectorKeyframe | undefined {
-  return itemKeyframes?.vectorProperties
-    ?.find((candidate) => candidate.property === property)
-    ?.keyframes.find((keyframe) => keyframe.id === keyframeId)
-}
-
 interface ResolvedMotionVectorReference {
   reference: KeyframeRef
   proxy: { property: VectorAnimatableProperty; axis: 'x' | 'y' }
@@ -1862,12 +1852,12 @@ function resolveMotionVectorReference(
   itemKeyframes: ItemKeyframes | undefined,
   reference: KeyframeRef,
 ): ResolvedMotionVectorReference | null {
-  const proxy = getMotionVectorProxy(reference.property)
+  const proxy = getVectorPropertyProxy(reference.property)
   if (!proxy) return null
-  const keyframe = findMotionVectorKeyframe(
+  const keyframe = findStoredVectorKeyframe(
     itemKeyframes,
     proxy.property,
-    getStoredMotionVectorKeyframeId(reference.keyframeId, proxy.axis),
+    getStoredVectorKeyframeId(reference.keyframeId, proxy.axis),
   )
   return keyframe ? { reference, proxy, keyframe } : null
 }
@@ -2228,12 +2218,12 @@ const MotionDopesheetContent = memo(function MotionDopesheetContent({
     for (let index = selectedKeyframes.length - 1; index >= 0; index -= 1) {
       const reference = selectedKeyframes[index]!
       if (reference.itemId !== item.id) continue
-      const proxy = getMotionVectorProxy(reference.property)
+      const proxy = getVectorPropertyProxy(reference.property)
       if (!proxy || values.has(proxy.property)) continue
-      const keyframe = findMotionVectorKeyframe(
+      const keyframe = findStoredVectorKeyframe(
         itemKeyframes,
         proxy.property,
-        getStoredMotionVectorKeyframeId(reference.keyframeId, proxy.axis),
+        getStoredVectorKeyframeId(reference.keyframeId, proxy.axis),
       )
       if (keyframe) values.set(proxy.property, keyframe.value)
     }
@@ -3104,7 +3094,7 @@ const MotionDopesheetContent = memo(function MotionDopesheetContent({
           onAddKeyframe={(property, frame) => {
             const absoluteFrame = clampAbsoluteFrame(frame)
             const propertyRelativeFrame = absoluteFrame - item.from
-            const vectorProxy = getMotionVectorProxy(property)
+            const vectorProxy = getVectorPropertyProxy(property)
             if (
               vectorProxy &&
               motionVectorRows.some((row) => row.property === vectorProxy.property)
@@ -3356,7 +3346,7 @@ function isMotionPropertyVisible(
   proceduralPropertyIds: ReadonlySet<AnimatableProperty>,
 ): boolean {
   const hasKeys = (keyframesByProperty[property]?.length ?? 0) > 0
-  const vectorProperty = getMotionVectorProxy(property)?.property
+  const vectorProperty = getVectorPropertyProxy(property)?.property
   const hasLink = getDirectPropertyLinks(itemKeyframes).some(
     (link) => link.targetProperty === property || link.targetProperty === vectorProperty,
   )
@@ -3781,7 +3771,7 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
   // Keep this a boolean selector so an I/O drag does not invalidate the whole
   // timeline on every frame. A full-comp range stays visible/editable after a
   // trim, but cannot be trimmed again.
-  const canTrimToActiveRegion = useTimelineStore(
+  const canTrimToActiveRegion = useMarkersStore(
     useCallback(
       (state) => {
         const currentComposition = activeCompositionId
@@ -4128,7 +4118,7 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     // Fit the active region when one is marked, else the comp itself — never the
     // content overhang past the comp end, which does not render. Read in/out at
     // click time so an IO drag doesn't re-render this whole timeline per frame.
-    const { inPoint, outPoint } = useTimelineStore.getState()
+    const { inPoint, outPoint } = useMarkersStore.getState()
     const fittedViewport =
       inPoint !== null && outPoint !== null && outPoint > inPoint
         ? { startFrame: inPoint, endFrame: outPoint }

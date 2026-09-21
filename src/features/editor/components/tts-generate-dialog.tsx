@@ -31,7 +31,11 @@ import {
   importMediaLibraryService,
   useMediaLibraryStore,
 } from '@/features/editor/deps/media-library'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import {
+  addItem,
+  useItemsStore,
+  useTimelineSettingsStore,
+} from '@/features/editor/deps/timeline-store'
 import {
   findCompatibleTrackForItemType,
   findNearestAvailableSpace,
@@ -81,7 +85,8 @@ function insertAndLinkAudioAtTextItem(
   blobUrl: string,
   sourceItemId: string,
 ): { inserted: boolean; audioItemId: string | null } {
-  const { tracks, items, fps, addItem } = useTimelineStore.getState()
+  const { tracks, items } = useItemsStore.getState()
+  const { fps } = useTimelineSettingsStore.getState()
   const sourceItem = items.find((i) => i.id === sourceItemId)
   if (!sourceItem) return { inserted: false, audioItemId: null }
 
@@ -124,7 +129,7 @@ function insertAndLinkAudioAtTextItem(
 
   addItem(audioItem)
 
-  const added = useTimelineStore.getState().items.some((i) => i.id === audioItemId)
+  const added = useItemsStore.getState().items.some((i) => i.id === audioItemId)
   if (!added) return { inserted: false, audioItemId: null }
 
   // Link the text item and audio item (linkItems also updates selection)

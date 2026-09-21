@@ -3,7 +3,8 @@ import { flushSync } from 'react-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { useEditorStore } from '@/shared/state/editor'
 import { useSelectionStore } from '@/shared/state/selection'
-import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { useItemsStore } from '@/features/editor/deps/timeline-store'
+import { setTimelineState } from '@/features/editor/deps/timeline-test-helpers-contract'
 import { useGizmoStore } from '@/features/editor/deps/preview'
 import type {
   AudioItem,
@@ -158,11 +159,11 @@ function resetStores(items: TimelineItem[], selectedItemIds: string[]) {
     dragState: null,
   })
 
-  useTimelineStore.setState({
+  setTimelineState({
     fps: 30,
     items,
     keyframes: [],
-  } as Partial<ReturnType<typeof useTimelineStore.getState>>)
+  })
 }
 
 describe('ClipPanel inspector tabs', () => {

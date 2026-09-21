@@ -8,7 +8,7 @@ import {
 } from 'react'
 import type { TimelineItem as TimelineItemType } from '@/types/timeline'
 import type { Transition } from '@/types/transition'
-import { useTimelineStore } from '../../stores/timeline-store'
+import { useItemsStore } from '../../stores/items-store'
 import { useTransitionsStore } from '../../stores/transitions-store'
 import { useRollHoverStore } from '../../stores/roll-hover-store'
 import {
@@ -136,7 +136,7 @@ export function useSmartTrimHover({
       const itemWidth = rect.width
 
       if (activeToolRef.current === 'trim-edit' || activeToolRef.current === 'select') {
-        const items = useTimelineStore.getState().items
+        const items = useItemsStore.getState().items
         const transitions = useTransitionsStore.getState().transitions
         const { hasLeftNeighbor, hasRightNeighbor, hasStartBridge, hasEndBridge } =
           getTrimNeighborInfo(items, transitions)

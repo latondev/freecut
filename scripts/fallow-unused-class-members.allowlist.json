@@ -1,7 +1,7 @@
 {
   "unusedClassMembers": [
     {
-      "path": "src/features/export/utils/canvas-pool.ts",
+      "path": "src/runtime/renderer/canvas-pool.ts",
       "reason": "Audited as a live typed-call surface after the unused-class-members cleanup pass.",
       "members": [
         {
@@ -12,7 +12,7 @@
       ]
     },
     {
-      "path": "src/features/export/utils/canvas-video-extractor.ts",
+      "path": "src/runtime/renderer/canvas-video-extractor.ts",
       "reason": "Audited as a live extractor API reached through shared wrappers and preview/export renderers.",
       "members": [
         {
@@ -58,7 +58,7 @@
       ]
     },
     {
-      "path": "src/features/export/utils/shared-video-extractor.ts",
+      "path": "src/runtime/renderer/shared-video-extractor.ts",
       "reason": "SharedVideoExtractorPool is consumed through the client renderer's pool abstraction; dispose releases every extractor lane during renderer teardown.",
       "members": [
         {

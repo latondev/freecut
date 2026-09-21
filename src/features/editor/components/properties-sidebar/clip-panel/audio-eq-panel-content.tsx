@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/shared/ui/cn'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { updateItem } from '@/features/editor/deps/timeline-store'
 import { useGizmoStore } from '@/features/editor/deps/preview'
 import { type TimelineItem } from '@/types/timeline'
 import type { ResolvedAudioEqSettings } from '@/types/audio'
@@ -932,7 +932,6 @@ export function AudioEqPanelContent({
   const isDetachedLayout = layoutMode === 'detached'
   const isCompactLayout = layoutMode === 'compact'
   const eqEnabled = enabled !== false
-  const updateItem = useTimelineStore((s) => s.updateItem)
   const setPropertiesPreviewNew = useGizmoStore((s) => s.setPropertiesPreviewNew)
   const clearPreviewForItems = useGizmoStore((s) => s.clearPreviewForItems)
 
@@ -951,7 +950,7 @@ export function AudioEqPanelContent({
     (checked: boolean) => {
       itemIds.forEach((id) => updateItem(id, { audioEqEnabled: checked }))
     },
-    [itemIds, updateItem],
+    [itemIds],
   )
 
   const resolvedTrackEq = useMemo(
@@ -1511,7 +1510,7 @@ export function AudioEqPanelContent({
         queueMicrotask(() => clearClipEqPreview())
       }
     },
-    [clearClipEqPreview, isTrackMode, itemIds, onTrackEqChange, updateItem],
+    [clearClipEqPreview, isTrackMode, itemIds, onTrackEqChange],
   )
 
   const handleEqPresetChange = useCallback(
@@ -1533,7 +1532,7 @@ export function AudioEqPanelContent({
         queueMicrotask(() => clearClipEqPreview())
       }
     },
-    [clearClipEqPreview, isTrackMode, itemIds, onTrackEqChange, updateItem],
+    [clearClipEqPreview, isTrackMode, itemIds, onTrackEqChange],
   )
 
   const handleEqFieldChange = useCallback(

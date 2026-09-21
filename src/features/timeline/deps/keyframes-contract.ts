@@ -48,6 +48,14 @@ export {
 export { getNiceTickStep } from '@/features/keyframes/components/dopesheet-editor/dopesheet-helpers'
 export { useRafCoalescedValue } from '@/features/keyframes/components/use-raf-coalesced-value'
 export { getAnimatablePropertiesForItem } from '@/features/keyframes/utils/animatable-properties'
+export {
+  findStoredVectorKeyframe,
+  getEditorVectorKeyframeId,
+  getStoredVectorKeyframeId,
+  getVectorPropertyProxy,
+  toVectorScalePercent,
+  type VectorPropertyProxy,
+} from '@/features/keyframes/utils/vector-proxy'
 export { getAnimatablePropertyBaseValue } from '@/features/keyframes/utils/animatable-property-base-value'
 export {
   getProceduralBands,

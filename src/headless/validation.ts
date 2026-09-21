@@ -13,7 +13,7 @@ import type { Transition } from '@/types/transition'
 import {
   CANVAS_FALLBACK_PRESENTATIONS,
   resolveTransitionRenderPath,
-} from '@/features/export/utils/canvas-transitions'
+} from '@/runtime/renderer/canvas-transitions'
 import { getGpuTransition } from '@/infrastructure/gpu-transitions'
 
 export interface SourceRangeFinding {

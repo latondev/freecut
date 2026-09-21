@@ -267,10 +267,7 @@ export default defineConfig({
             return 'toast-vendor'
           }
           // State management
-          if (
-            normalizedId.includes('/node_modules/zustand/') ||
-            normalizedId.includes('/node_modules/zundo/')
-          ) {
+          if (normalizedId.includes('/node_modules/zustand/')) {
             return 'state-vendor'
           }
           // Media processing - loaded on demand

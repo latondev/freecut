@@ -2,7 +2,14 @@ import type React from 'react'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { TimelineItem, TimelineTrack } from '@/types/timeline'
 import type { DragState, UseTimelineDragReturn, SnapTarget } from '../types/drag'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useItemsStore } from '../stores/items-store'
+import {
+  duplicateItems,
+  duplicateItemsWithTrackChanges,
+  moveItem,
+  moveItems,
+  moveItemsWithTrackChanges,
+} from '../stores/timeline-actions'
 import { useEditorStore } from '@/shared/state/editor'
 import { useSelectionStore } from '@/shared/state/selection'
 import {
@@ -1088,13 +1095,8 @@ export function useTimelineDrag(
   // Track previous snap target to avoid unnecessary store updates
   const prevSnapTargetRef = useRef<{ frame: number; type: string } | null>(null)
 
-  // Get store actions with granular selectors
-  const moveItem = useTimelineStore((s) => s.moveItem)
-  const moveItems = useTimelineStore((s) => s.moveItems)
-  const moveItemsWithTrackChanges = useTimelineStore((s) => s.moveItemsWithTrackChanges)
-  const duplicateItems = useTimelineStore((s) => s.duplicateItems)
-  const duplicateItemsWithTrackChanges = useTimelineStore((s) => s.duplicateItemsWithTrackChanges)
-  const tracks = useTimelineStore((s) => s.tracks)
+  // Get store state with granular selectors
+  const tracks = useItemsStore((s) => s.tracks)
   // NOTE: Don't subscribe to items here! Every TimelineItem has this hook,
   // subscribing to items would cause ALL items to re-render when ANY item changes.
   // Instead, read items on-demand in callbacks using getState().
@@ -1163,7 +1165,7 @@ export function useTimelineDrag(
   const tracksRef = useRef(tracks)
 
   // Helper to get items on-demand (avoids subscription that would cause all items to re-render)
-  const getItems = useCallback(() => useTimelineStore.getState().items, [])
+  const getItems = useCallback(() => useItemsStore.getState().items, [])
   // Item/track lookup maps are stable for a given items-array + tracks-array
   // pair, so pointer moves can reuse them instead of rebuilding Maps per frame.
   const getDragItemIndexes = useCallback((items: TimelineItem[], tracks: TimelineTrack[]) => {
@@ -1190,16 +1192,7 @@ export function useTimelineDrag(
     duplicateItemsRef.current = duplicateItems
     duplicateItemsWithTrackChangesRef.current = duplicateItemsWithTrackChanges
     tracksRef.current = tracks
-  }, [
-    frameToPixels,
-    pixelsToFramePrecise,
-    moveItem,
-    moveItems,
-    moveItemsWithTrackChanges,
-    duplicateItems,
-    duplicateItemsWithTrackChanges,
-    tracks,
-  ])
+  }, [frameToPixels, pixelsToFramePrecise, tracks])
 
   /**
    * Cached row geometry for the current tracks array, with live pane scroll

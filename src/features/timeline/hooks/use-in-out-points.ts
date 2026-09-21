@@ -1,4 +1,5 @@
-import { useTimelineStore } from '../stores/timeline-store'
+import { useMarkersStore } from '../stores/markers-store'
+import { setInPoint, setOutPoint } from '../stores/timeline-actions'
 
 /**
  * Subscribes to the in/out render-range points and their setters.
@@ -6,9 +7,7 @@ import { useTimelineStore } from '../stores/timeline-store'
  * subscription shape stays identical everywhere.
  */
 export function useInOutPoints() {
-  const inPoint = useTimelineStore((s) => s.inPoint)
-  const outPoint = useTimelineStore((s) => s.outPoint)
-  const setInPoint = useTimelineStore((s) => s.setInPoint)
-  const setOutPoint = useTimelineStore((s) => s.setOutPoint)
+  const inPoint = useMarkersStore((s) => s.inPoint)
+  const outPoint = useMarkersStore((s) => s.outPoint)
   return { inPoint, outPoint, setInPoint, setOutPoint }
 }

@@ -9,9 +9,10 @@ import type { ItemKeyframes } from '@/types/keyframe'
 import { useGizmoStore, useThrottledFrame } from '@/features/editor/deps/preview'
 import { useMediaLibraryStore } from '@/features/editor/deps/media-library'
 import {
+  applyAutoKeyframeOperations,
+  updateItemsTransformMap,
   useItemsStore,
   useKeyframesStore,
-  useTimelineStore,
 } from '@/features/editor/deps/timeline-store'
 import { resolveTransform, getSourceDimensions } from '@/features/editor/deps/composition-runtime'
 import {
@@ -339,10 +340,6 @@ export const LayoutSection = memo(function LayoutSection({
     return height > 0 ? width / height : 1
   }, [width, height])
 
-  // Get batched keyframe action for auto-keyframing
-  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations)
-  const updateItemsTransformMap = useTimelineStore((s) => s.updateItemsTransformMap)
-
   // Helper: Build auto-keyframe operations for properties that are already animated.
   const getAutoKeyframeOperation = useCallback(
     (
@@ -388,7 +385,6 @@ export const LayoutSection = memo(function LayoutSection({
       onTransformChange,
       clearPreview,
       getAutoKeyframeOperation,
-      applyAutoKeyframeOperations,
     ],
   )
 
@@ -421,7 +417,6 @@ export const LayoutSection = memo(function LayoutSection({
       onTransformChange,
       clearPreview,
       getAutoKeyframeOperation,
-      applyAutoKeyframeOperations,
     ],
   )
 
@@ -481,8 +476,6 @@ export const LayoutSection = memo(function LayoutSection({
       height,
       currentAspectRatio,
       getAutoKeyframeOperation,
-      applyAutoKeyframeOperations,
-      updateItemsTransformMap,
     ],
   )
 
@@ -542,8 +535,6 @@ export const LayoutSection = memo(function LayoutSection({
       width,
       currentAspectRatio,
       getAutoKeyframeOperation,
-      applyAutoKeyframeOperations,
-      updateItemsTransformMap,
     ],
   )
 
@@ -576,7 +567,6 @@ export const LayoutSection = memo(function LayoutSection({
       onTransformChange,
       clearPreview,
       getAutoKeyframeOperation,
-      applyAutoKeyframeOperations,
     ],
   )
 
@@ -605,7 +595,6 @@ export const LayoutSection = memo(function LayoutSection({
       queueMicrotask(() => clearPreview())
     },
     [
-      applyAutoKeyframeOperations,
       clearPreview,
       getAutoKeyframeOperation,
       mediaTransformItemIds,
@@ -638,7 +627,6 @@ export const LayoutSection = memo(function LayoutSection({
       queueMicrotask(() => clearPreview())
     },
     [
-      applyAutoKeyframeOperations,
       clearPreview,
       getAutoKeyframeOperation,
       mediaTransformItemIds,

@@ -39,13 +39,13 @@ import { EDITOR_LAYOUT_CSS_VALUES } from '@/config/editor-layout'
 import { cn } from '@/shared/ui/cn'
 import { LanguageSwitcher } from '@/shared/ui/language-switcher'
 import { useDebugStore } from '@/features/editor/stores/debug-store'
-import { useItemsStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { useItemsStore, useTimelineSettingsStore } from '@/features/editor/deps/timeline-store'
 import { useMediaLibraryStore } from '@/features/editor/deps/media-library'
 
 const SAVE_ANIMATION_MIN_MS = 1800
 
 const SaveDirtyIndicator = memo(function SaveDirtyIndicator() {
-  const isDirty = useTimelineStore((state) => state.isDirty)
+  const isDirty = useTimelineSettingsStore((state) => state.isDirty)
   return isDirty ? (
     <span className="absolute -right-1 -top-1 h-2 w-2 animate-pulse rounded-full bg-orange-500" />
   ) : null
@@ -129,7 +129,7 @@ export const Toolbar = memo(function Toolbar({
   }
 
   const handleBackClick = () => {
-    if (useTimelineStore.getState().isDirty) {
+    if (useTimelineSettingsStore.getState().isDirty) {
       setShowUnsavedDialog(true)
     } else {
       navigate({ to: '/projects' })

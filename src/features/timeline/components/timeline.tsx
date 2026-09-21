@@ -10,7 +10,7 @@ import { useTimelineTracks } from '../hooks/use-timeline-tracks'
 import { useItemsStore } from '../stores/items-store'
 import { useSelectionStore } from '@/shared/state/selection'
 import { useEditorStore } from '@/shared/state/editor'
-import { useTimelineStore } from '../stores/timeline-store'
+import { closeAllGapsOnTrack, setTracks } from '../stores/timeline-actions'
 import { useSettingsStore } from '@/features/timeline/deps/settings'
 
 import { Button } from '@/components/ui/button'
@@ -164,7 +164,7 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
   )
 
   const trackSizePreset = useEditorStore((s) => s.trackSizePreset)
-  const setTimelineTracks = useTimelineStore((s) => s.setTracks)
+  const setTimelineTracks = setTracks
 
   useEffect(() => {
     const clearExternalDropPreviews = () => {
@@ -849,7 +849,7 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
                   onToggleSyncLock={() => toggleTrackSyncLock(track.id)}
                   onToggleDisabled={() => toggleTrackDisabled(track.id)}
                   onToggleSolo={() => toggleTrackSolo(track.id)}
-                  onCloseGaps={() => useTimelineStore.getState().closeAllGapsOnTrack(track.id)}
+                  onCloseGaps={() => closeAllGapsOnTrack(track.id)}
                   onAddVideoTrack={addVideoTrackToTop}
                   onAddAudioTrack={appendAudioTrackToSection}
                   onDeleteTrack={() => handleDeleteTrack(track.id)}

@@ -17,9 +17,12 @@ import { toast } from 'sonner'
 import { useMaskEditorStore } from '../stores/mask-editor-store'
 import { useGizmoStore } from '../stores/gizmo-store'
 import {
+  addItem,
+  commitMaskEdit,
+  setTracks,
   useItemsStore,
   useKeyframesStore,
-  useTimelineStore,
+  useTimelineSettingsStore,
   useTimelineViewportStore,
   useTransitionsStore,
 } from '@/features/preview/deps/timeline-store'
@@ -220,7 +223,6 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
     (s) => s.convertSelectedVertexRequestMode,
   )
   // Actions
-  const commitMaskEdit = useTimelineStore((s) => s.commitMaskEdit)
   const selectVertices = useMaskEditorStore((s) => s.selectVertices)
   const selectVertex = useMaskEditorStore((s) => s.selectVertex)
   const startVertexDrag = useMaskEditorStore((s) => s.startVertexDrag)
@@ -1065,8 +1067,8 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
       const centerX = ((bounds.minX + bounds.maxX) / 2 - 0.5) * canvasW
       const centerY = ((bounds.minY + bounds.maxY) / 2 - 0.5) * canvasH
 
-      const { tracks, fps, addItem, setTracks } = useTimelineStore.getState()
-      const items = useItemsStore.getState().items
+      const { tracks, items } = useItemsStore.getState()
+      const { fps } = useTimelineSettingsStore.getState()
       const { activeTrackId, selectItems, setActiveTrack } = useSelectionStore.getState()
       const currentFrame = usePlaybackStore.getState().currentFrame
       const durationInFrames = Math.max(1, Math.round(fps * DEFAULT_PATH_SHAPE_DURATION_SECONDS))
@@ -1465,7 +1467,6 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
     [
       buildMaskTransformPersistence,
       buildPathGeometryPersistence,
-      commitMaskEdit,
       editingItemId,
       itemTransform,
       scheduleEditCommitCleanup,
@@ -1889,7 +1890,6 @@ export const MaskEditorOverlay = memo(function MaskEditorOverlay({
     },
     [
       buildMaskTransformPersistence,
-      commitMaskEdit,
       commitVertices,
       endInteraction,
       getMarqueeBounds,

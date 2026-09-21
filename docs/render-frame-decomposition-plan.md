@@ -1,7 +1,7 @@
 # `renderFrame` Decomposition Plan
 
 A staged plan for decomposing `createCompositionRenderer`'s `renderFrame` method
-in `src/features/export/utils/client-render-engine.ts`. This is the **highest-risk**
+in `src/runtime/renderer/client-render-engine.ts`. This is the **highest-risk**
 remaining work on the repo's #2 churn×complexity hotspot, and it touches the
 export/preview render path where regressions are silent (wrong pixels, not crashes).
 
@@ -130,7 +130,7 @@ them one commit at a time.
 
 Automated checks are necessary but **not sufficient** here.
 
-- `npm run lint` (0/0) and `npm run test:run -- src/features/export/utils/
+- `npm run lint` (0/0) and `npm run test:run -- src/runtime/renderer/
   src/features/preview/components/video-preview.sync.test.tsx
   src/features/preview/components/inline-composition-preview.test.tsx` (all green).
 - **Manual, in `npm run dev`:**

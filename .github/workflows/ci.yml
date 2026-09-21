@@ -39,11 +39,21 @@ jobs:
       - name: Check deps contract seams
         run: vp run check:deps-contracts
 
-      - name: Check legacy lib import migration
-        run: vp run check:legacy-lib-imports
+      - name: Check layer boundaries
+        run: vp run check:layer-boundaries
 
       - name: Check deps wrapper health
         run: vp run check:deps-wrapper-health
+
+      # Both dead-code ratchets run against allowlists that are reviewed
+      # baselines, and must stay green on every PR. Invoked through node like
+      # the changed-health ratchet below, because they shell out to the pinned
+      # fallow version and must not depend on the task runner's environment.
+      - name: Check unused exports
+        run: node scripts/check-fallow-unused-exports.mjs
+
+      - name: Check unused class members
+        run: node scripts/check-fallow-unused-class-members.mjs
 
       - name: Generate feature-edge report
         run: node scripts/report-feature-edges.mjs --json > feature-edges-report.json
@@ -95,8 +105,13 @@ jobs:
 
       # Quality ratchet: fails only on dead code / complexity / duplication
       # INTRODUCED by the PR (gate new-only), never on inherited issues.
-      # Advisory for now (continue-on-error) — drop that line to enforce once
-      # the current develop-vs-main delta is cleaned up.
+      #
+      # Advisory (continue-on-error) because the develop delta is not clean yet.
+      # Measured 2026-09-21 against both origin/staging and origin/main (same
+      # commit, 271 changed files): dead_code_introduced=5,
+      # complexity_introduced=96, duplication_introduced=0, verdict=fail.
+      # Drop that line once those introduced findings are worked down and the
+      # gate passes; re-measure first, do not assume it cleared.
       - name: Fallow quality ratchet
         if: github.event_name == 'pull_request'
         continue-on-error: true

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useEffect, memo } from 'react'
 
-import { useTimelineStore } from '../stores/timeline-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 import { useInOutPoints } from '../hooks/use-in-out-points'
 import { useTimelineCommittedZoomContext } from '../contexts/timeline-zoom-context'
 import { usePlaybackStore } from '@/shared/state/playback'
@@ -21,7 +21,7 @@ const IO_LANE_HEIGHT = 12
  */
 export const TimelineInOutMarkers = memo(function TimelineInOutMarkers() {
   const { inPoint, outPoint, setInPoint, setOutPoint } = useInOutPoints()
-  const fps = useTimelineStore((s) => s.fps)
+  const fps = useTimelineSettingsStore((s) => s.fps)
   const { frameToPixels } = useTimelineCommittedZoomContext()
 
   const pixelsToFrameRef = useRef(pixelsToFrameNow)

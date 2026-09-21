@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/select'
 import type { TextItem, TextSpan, TimelineItem } from '@/types/timeline'
 import type { CanvasSettings } from '@/types/transform'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { updateItem } from '@/features/editor/deps/timeline-store'
 import { useGizmoStore, type ItemPropertiesPreview } from '@/features/editor/deps/preview'
 import { KeyframeToggle } from '@/features/editor/deps/keyframes'
 import { TextMotionSlotRows } from '../../text-motion/text-motion-slot-rows'
@@ -297,7 +297,6 @@ export function TextEffectsSection(props: TextSectionProps) {
 
 function TextSectionComposer({ items, canvas, slots }: TextSectionComposerProps) {
   const { t } = useTranslation()
-  const updateItem = useTimelineStore((s) => s.updateItem)
 
   // Gizmo store for live property preview
   const setPropertiesPreviewNew = useGizmoStore((s) => s.setPropertiesPreviewNew)
@@ -459,7 +458,7 @@ function TextSectionComposer({ items, canvas, slots }: TextSectionComposerProps)
         updateItem(item.id, updates)
       })
     },
-    [textItems, updateItem],
+    [textItems],
   )
 
   const setTextPropertiesPreview = useCallback(
@@ -522,7 +521,7 @@ function TextSectionComposer({ items, canvas, slots }: TextSectionComposerProps)
         })
       })
     },
-    [activeEditorSpans, firstTextItem, sharedValues?.text, textItems, updateItem],
+    [activeEditorSpans, firstTextItem, sharedValues?.text, textItems],
   )
 
   // Handlers
@@ -537,7 +536,7 @@ function TextSectionComposer({ items, canvas, slots }: TextSectionComposerProps)
         })
       })
     },
-    [textItems, updateItem],
+    [textItems],
   )
 
   const handleApplySpanLayout = useCallback(
@@ -584,7 +583,7 @@ function TextSectionComposer({ items, canvas, slots }: TextSectionComposerProps)
         })
       })
     },
-    [textItems, updateItem],
+    [textItems],
   )
 
   const handleSpanTextChange = useCallback(
@@ -1089,7 +1088,7 @@ function TextSectionComposer({ items, canvas, slots }: TextSectionComposerProps)
       })
       finalizePreviewChange()
     },
-    [canvas, finalizePreviewChange, textItems, updateItem],
+    [canvas, finalizePreviewChange, textItems],
   )
 
   const handleTextStyleScaleChange = useCallback(
@@ -1103,7 +1102,7 @@ function TextSectionComposer({ items, canvas, slots }: TextSectionComposerProps)
       })
       finalizePreviewChange()
     },
-    [canvas, finalizePreviewChange, textItems, updateItem],
+    [canvas, finalizePreviewChange, textItems],
   )
 
   if (textItems.length === 0 || !sharedValues) {

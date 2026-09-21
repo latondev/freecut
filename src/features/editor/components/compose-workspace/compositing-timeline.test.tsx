@@ -30,7 +30,7 @@ import {
   openComposition,
   trimItemEnd,
 } from '@/features/editor/deps/timeline-motion'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { setInPoint, setOutPoint, useMarkersStore } from '@/features/editor/deps/timeline-store'
 import { useMediaLibraryStore } from '@/features/editor/deps/media-library-contract'
 import { useGizmoStore } from '@/features/editor/deps/preview'
 import type {
@@ -824,8 +824,8 @@ describe('CompositingTimeline', { timeout: 15_000 }, () => {
     // Manual navigation can inspect that overhang, but drag auto-pan must stop
     // at the authored comp boundary.
     useItemsStore.getState().setItems([{ ...shape, durationInFrames: 240 }])
-    useTimelineStore.getState().setInPoint(30)
-    useTimelineStore.getState().setOutPoint(90)
+    setInPoint(30)
+    setOutPoint(90)
 
     const frameCallbacks: FrameRequestCallback[] = []
     const animationFrameSpy = vi
@@ -884,8 +884,8 @@ describe('CompositingTimeline', { timeout: 15_000 }, () => {
 
   it('clamps repeated left-edge auto-pan to composition frame zero', () => {
     useItemsStore.getState().setItems([{ ...shape, durationInFrames: 240 }])
-    useTimelineStore.getState().setInPoint(30)
-    useTimelineStore.getState().setOutPoint(90)
+    setInPoint(30)
+    setOutPoint(90)
 
     const frameCallbacks: FrameRequestCallback[] = []
     const animationFrameSpy = vi
@@ -1545,8 +1545,8 @@ describe('CompositingTimeline', { timeout: 15_000 }, () => {
 
   it('keeps Motion I/O live and identical through zoom and pan settle', () => {
     useItemsStore.getState().setItems([{ ...shape, durationInFrames: 240 }])
-    useTimelineStore.getState().setInPoint(30)
-    useTimelineStore.getState().setOutPoint(90)
+    setInPoint(30)
+    setOutPoint(90)
 
     const frameCallbacks: FrameRequestCallback[] = []
     let settleCallback: (() => void) | null = null
@@ -3608,8 +3608,8 @@ describe('CompositingTimeline', { timeout: 15_000 }, () => {
       durationInFrames: 240,
     })
     useItemsStore.getState().setItems([{ ...shape, durationInFrames: 240 }])
-    useTimelineStore.getState().setInPoint(12)
-    useTimelineStore.getState().setOutPoint(228)
+    setInPoint(12)
+    setOutPoint(228)
 
     render(<CompositingTimeline />)
 
@@ -3693,8 +3693,8 @@ describe('CompositingTimeline', { timeout: 15_000 }, () => {
     expect(Number(navigator().dataset.startFrame)).toBe(0)
     expect(Number(navigator().dataset.endFrame)).toBe(120)
 
-    useTimelineStore.getState().setInPoint(30)
-    useTimelineStore.getState().setOutPoint(90)
+    setInPoint(30)
+    setOutPoint(90)
     fireEvent.click(screen.getByRole('button', { name: 'Zoom To Fit' }))
 
     expect(Number(navigator().dataset.startFrame)).toBe(30)
@@ -3708,8 +3708,8 @@ describe('CompositingTimeline', { timeout: 15_000 }, () => {
     expect(trimButton()).toBeDisabled()
 
     act(() => {
-      useTimelineStore.getState().setInPoint(30)
-      useTimelineStore.getState().setOutPoint(90)
+      setInPoint(30)
+      setOutPoint(90)
     })
     expect(trimButton()).toBeEnabled()
 
@@ -3724,8 +3724,8 @@ describe('CompositingTimeline', { timeout: 15_000 }, () => {
     // The 120-frame comp becomes the 60-frame region, and the shape rebases onto it.
     expect(useCompositionsStore.getState().getComposition('comp-1')?.durationInFrames).toBe(60)
     expect(useItemsStore.getState().itemById[shape.id]?.from).toBe(0)
-    expect(useTimelineStore.getState().inPoint).toBe(0)
-    expect(useTimelineStore.getState().outPoint).toBe(60)
+    expect(useMarkersStore.getState().inPoint).toBe(0)
+    expect(useMarkersStore.getState().outPoint).toBe(60)
     expect(screen.getByTestId('motion-io-strip')).toHaveAttribute('data-from-frame', '0')
     expect(screen.getByTestId('motion-io-strip')).toHaveAttribute('data-to-frame', '60')
     expect(screen.getByTestId('motion-io-in-handle')).toBeInTheDocument()
@@ -3738,8 +3738,8 @@ describe('CompositingTimeline', { timeout: 15_000 }, () => {
   it('positions the Motion in/out lane against the visible time viewport', () => {
     // Duration is 120 frames and the viewport starts fitted, so 30–90 is the
     // middle half of the ruler.
-    useTimelineStore.getState().setInPoint(30)
-    useTimelineStore.getState().setOutPoint(90)
+    setInPoint(30)
+    setOutPoint(90)
 
     render(<CompositingTimeline />)
 
@@ -3749,8 +3749,8 @@ describe('CompositingTimeline', { timeout: 15_000 }, () => {
   })
 
   it('drags the Motion in point through the time viewport into the composition range', () => {
-    useTimelineStore.getState().setInPoint(30)
-    useTimelineStore.getState().setOutPoint(90)
+    setInPoint(30)
+    setOutPoint(90)
 
     render(<CompositingTimeline />)
 
@@ -3773,8 +3773,8 @@ describe('CompositingTimeline', { timeout: 15_000 }, () => {
     fireEvent.pointerUp(document, { pointerId: 1, clientX: 500 })
 
     // Half the lane width across a 0–120 viewport.
-    expect(useTimelineStore.getState().inPoint).toBe(60)
-    expect(useTimelineStore.getState().outPoint).toBe(90)
+    expect(useMarkersStore.getState().inPoint).toBe(60)
+    expect(useMarkersStore.getState().outPoint).toBe(90)
   })
 
   it('shift-clicking a layer lock toggles every layer and layer group', () => {

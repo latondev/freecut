@@ -22,8 +22,7 @@ import {
   resolveCornerPinForSize,
   withCornerPinReferenceSize,
 } from '@/features/preview/deps/composition-runtime'
-import { useItemsStore } from '@/features/preview/deps/timeline-store'
-import { useTimelineStore } from '@/features/preview/deps/timeline-store'
+import { updateItem, useItemsStore } from '@/features/preview/deps/timeline-store'
 import type { CoordinateParams, Transform } from '../types/gizmo'
 import { getEffectiveScale } from '../utils/coordinate-transform'
 
@@ -342,7 +341,7 @@ export const CornerPinOverlay = memo(function CornerPinOverlay({
       const itemId = editingItemIdRef.current
       if (finalPreview && itemId && handle) {
         const targetRect = cornerPinTargetRect(itemTransformRef.current)
-        useTimelineStore.getState().updateItem(itemId, {
+        updateItem(itemId, {
           cornerPin: withCornerPinReferenceSize(finalPreview, targetRect.width, targetRect.height),
         })
       }

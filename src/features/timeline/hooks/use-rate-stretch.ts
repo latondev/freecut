@@ -3,7 +3,9 @@ import type { TimelineItem } from '@/types/timeline'
 import { useEditorStore } from '@/shared/state/editor'
 import { commitPreviewFrameToCurrentFrame } from '@/shared/state/playback'
 import type { SnapTarget } from '../types/drag'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useItemsStore } from '../stores/items-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
+import { rateStretchItem } from '../stores/timeline-actions'
 import { useSelectionStore } from '@/shared/state/selection'
 import { pixelsToTimeNow } from '@/features/timeline/utils/zoom-conversions'
 import { useSnapCalculator } from './use-snap-calculator'
@@ -266,14 +268,13 @@ export function useRateStretch(
   trackLocked: boolean = false,
 ) {
   const pixelsToTime = pixelsToTimeNow
-  const fps = useTimelineStore((s) => s.fps)
-  const rateStretchItem = useTimelineStore((s) => s.rateStretchItem)
+  const fps = useTimelineSettingsStore((s) => s.fps)
   const setDragState = useSelectionStore((s) => s.setDragState)
   const setActiveSnapTarget = useSelectionStore((s) => s.setActiveSnapTarget)
 
   // Get fresh item from store to ensure we have latest values after previous operations
   const getItemFromStore = useCallback(() => {
-    return useTimelineStore.getState().items.find((i) => i.id === item.id) ?? item
+    return useItemsStore.getState().items.find((i) => i.id === item.id) ?? item
   }, [item])
 
   // Use snap calculator - pass item.id to exclude self from magnetic snaps
@@ -370,7 +371,7 @@ export function useRateStretch(
       }
       const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled
       const linkedPreviewUpdates = linkedSelectionEnabled
-        ? getSynchronizedLinkedItems(useTimelineStore.getState().items, item.id)
+        ? getSynchronizedLinkedItems(useItemsStore.getState().items, item.id)
             .filter((linkedItem) => linkedItem.id !== item.id)
             .map((linkedItem) =>
               applyRateStretchPreview(linkedItem, initialFrom, initialDuration, previewSpeed, fps),
@@ -460,7 +461,7 @@ export function useRateStretch(
       previewFrom = Math.round(initialFrom + (initialDuration - previewDuration))
     }
 
-    const allItems = useTimelineStore.getState().items
+    const allItems = useItemsStore.getState().items
     const linkedSelectionEnabled = useEditorStore.getState().linkedSelectionEnabled
     const synchronizedItems = linkedSelectionEnabled
       ? getSynchronizedLinkedItems(allItems, item.id)

@@ -24,7 +24,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { cn } from '@/shared/ui/cn'
 import { MotionBakeConfirmationDialog } from '@/shared/ui/motion-bake-confirmation-dialog'
 import { hasEnabledProceduralMotion } from '@/shared/timeline/procedural-motion'
-import { ErrorBoundary } from '@/app/error-boundary'
+import { ErrorBoundary } from '@/components/error-boundary'
 import {
   getAnimatablePropertyBaseValue,
   getTransitionBlockedRanges,
@@ -96,6 +96,14 @@ import {
 } from '../stores/actions/text-motion-actions'
 import { HOTKEY_OPTIONS } from '@/config/hotkeys'
 import { useResolvedHotkeys } from '@/features/timeline/deps/settings'
+import {
+  findStoredVectorKeyframe,
+  getEditorVectorKeyframeId,
+  getStoredVectorKeyframeId,
+  getVectorPropertyProxy,
+  toVectorScalePercent,
+  type VectorPropertyProxy,
+} from '@/features/timeline/deps/keyframes-contract'
 import { getDirectPropertyLinks, isTransformAnimatableProperty } from '@/types/keyframe'
 import { buildEffectPropertyResetPlan } from '@/features/timeline/utils/effect-property-reset'
 import { VectorSpeedGraph } from './vector-speed-graph'
@@ -193,38 +201,13 @@ function supportsVectorTransform(item: TimelineItem | null): item is TimelineIte
   return Boolean(item && item.type !== 'audio' && item.type !== 'adjustment')
 }
 
-function toScalePercent(value: number, baseValue: number): number {
-  return Math.abs(baseValue) <= Number.EPSILON ? 100 : (value / baseValue) * 100
-}
-
-function getVectorProxy(property: AnimatableProperty): {
-  property: VectorAnimatableProperty
-  axis: 'x' | 'y'
-} | null {
-  if (property === 'x') return { property: 'position', axis: 'x' }
-  if (property === 'y') return { property: 'position', axis: 'y' }
-  if (property === 'width') return { property: 'scale', axis: 'x' }
-  if (property === 'height') return { property: 'scale', axis: 'y' }
-  if (property === 'anchorX') return { property: 'anchor', axis: 'x' }
-  if (property === 'anchorY') return { property: 'anchor', axis: 'y' }
-  return null
-}
-
 function getEditableVectorProxy(
   property: AnimatableProperty,
   itemKeyframes: ItemKeyframes | null | undefined,
-): ReturnType<typeof getVectorProxy> {
-  const proxy = getVectorProxy(property)
+): VectorPropertyProxy | null {
+  const proxy = getVectorPropertyProxy(property)
   if (!proxy || isVectorPropertySeparated(itemKeyframes, proxy.property)) return null
   return proxy
-}
-
-function getStoredVectorKeyframeId(keyframeId: string, axis: 'x' | 'y'): string {
-  return axis === 'y' && keyframeId.endsWith(':y') ? keyframeId.slice(0, -2) : keyframeId
-}
-
-function getEditorVectorKeyframeId(keyframeId: string, axis: 'x' | 'y'): string {
-  return axis === 'y' ? `${keyframeId}:y` : keyframeId
 }
 
 const EASINGS_WITH_EDITABLE_BEZIER = new Set<EasingType>([
@@ -236,16 +219,6 @@ const EASINGS_WITH_EDITABLE_BEZIER = new Set<EasingType>([
 
 function getBezierEditorEasing(easing: EasingType | undefined): EasingType {
   return easing && EASINGS_WITH_EDITABLE_BEZIER.has(easing) ? easing : 'cubic-bezier'
-}
-
-function findStoredVectorKeyframe(
-  itemKeyframes: ItemKeyframes | undefined,
-  property: VectorAnimatableProperty,
-  keyframeId: string,
-): VectorKeyframe | undefined {
-  return itemKeyframes?.vectorProperties
-    ?.find((candidate) => candidate.property === property)
-    ?.keyframes.find((keyframe) => keyframe.id === keyframeId)
 }
 
 function buildLegacyVectorPromotionAtFrame(params: {
@@ -431,7 +404,7 @@ const VECTOR_COMPOUND_PRIMARY: Record<VectorAnimatableProperty, 'x' | 'width' | 
 function isPastePropertySupported(
   availableProperties: AnimatableProperty[],
   property: AnimatableProperty,
-  vector: ReturnType<typeof getVectorProxy>,
+  vector: VectorPropertyProxy | null,
 ): boolean {
   if (availableProperties.includes(property)) return true
   if (!vector) return false
@@ -552,8 +525,8 @@ function pasteVectorKeyframePayload(params: {
     params.payload.vectorProperty === 'position'
       ? { x: resolved.x, y: resolved.y }
       : {
-          x: toScalePercent(resolved.width, params.baseTransform.width),
-          y: toScalePercent(resolved.height, params.baseTransform.height),
+          x: toVectorScalePercent(resolved.width, params.baseTransform.width),
+          y: toVectorScalePercent(resolved.height, params.baseTransform.height),
         }
   const keyframeId = timelineActions.upsertVectorKeyframe(
     params.item.id,
@@ -736,12 +709,12 @@ function buildVectorControlRows(params: {
       secondaryProxyProperty: 'height',
       label: params.t('editor.textProperties.scale', { defaultValue: 'Scale' }),
       value: {
-        x: toScalePercent(params.resolved.width, params.base.width),
-        y: toScalePercent(params.resolved.height, params.base.height),
+        x: toVectorScalePercent(params.resolved.width, params.base.width),
+        y: toVectorScalePercent(params.resolved.height, params.base.height),
       },
       preExpressionValue: {
-        x: toScalePercent(params.preExpression.width, params.base.width),
-        y: toScalePercent(params.preExpression.height, params.base.height),
+        x: toVectorScalePercent(params.preExpression.width, params.base.width),
+        y: toVectorScalePercent(params.preExpression.height, params.base.height),
       },
       unit: '%',
       keyframes: scaleLane.keyframes,
@@ -2898,8 +2871,8 @@ export const KeyframeGraphPanel = memo(function KeyframeGraphPanel({
           ? { x: resolved.x, y: resolved.y }
           : proxy.property === 'scale'
             ? {
-                x: toScalePercent(resolved.width, vectorBaseTransform.width),
-                y: toScalePercent(resolved.height, vectorBaseTransform.height),
+                x: toVectorScalePercent(resolved.width, vectorBaseTransform.width),
+                y: toVectorScalePercent(resolved.height, vectorBaseTransform.height),
               }
             : { x: resolved.anchorX, y: resolved.anchorY }
       timelineActions.upsertVectorKeyframe(selectedItemForEditor.id, proxy.property, {

@@ -5,12 +5,13 @@ import type { TimelineItem } from '@/types/timeline'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { usePreviewBridgeStore } from '@/shared/state/preview-bridge'
 import {
+  updateEffect,
   useCompositionsStore,
   useItemsStore,
-  useTimelineStore,
   useTimelineSettingsStore,
   useTransitionsStore,
 } from '@/features/preview/deps/timeline-store'
+import { setTimelineState } from '@/features/preview/deps/timeline-test-helpers-contract'
 import { useMediaLibraryStore } from '@/features/preview/deps/media-library'
 import { useGizmoStore } from '../stores/gizmo-store'
 import { useMaskEditorStore } from '../stores/mask-editor-store'
@@ -563,7 +564,7 @@ function resetStores() {
   useItemsStore.getState().setTracks([])
   useItemsStore.getState().setItems([])
   useCompositionsStore.getState().setCompositions([])
-  useTimelineStore.setState({ keyframes: [] })
+  setTimelineState({ keyframes: [] })
   useTransitionsStore.getState().setTransitions([])
   useTimelineSettingsStore.setState({
     fps: 30,
@@ -2328,7 +2329,7 @@ describe('VideoPreview sync behavior', () => {
     renderer.renderFrame.mockClear()
 
     act(() => {
-      useTimelineStore.getState().updateEffect('item-previewed', 'effect-preview', {
+      updateEffect('item-previewed', 'effect-preview', {
         effect: {
           type: 'gpu-effect',
           gpuEffectType: 'gpu-sepia',
@@ -4111,7 +4112,7 @@ describe('VideoPreview sync behavior', () => {
         },
       } as unknown as ReturnType<typeof useItemsStore.getState>['items'][number],
     ])
-    useTimelineStore.setState({
+    setTimelineState({
       keyframes: [
         {
           itemId: 'text-1',
@@ -4170,7 +4171,7 @@ describe('VideoPreview sync behavior', () => {
         },
       } as unknown as ReturnType<typeof useItemsStore.getState>['items'][number],
     ])
-    useTimelineStore.setState({ keyframes: [] })
+    setTimelineState({ keyframes: [] })
 
     const { scrubCanvas } = await renderPreviewAfterInitialSeek()
 
@@ -4719,7 +4720,7 @@ describe('VideoPreview sync behavior', () => {
         transform: { x: 0, y: 0, width: 100, height: 60, rotation: 0, opacity: 1 },
       } as unknown as ReturnType<typeof useItemsStore.getState>['items'][number],
     ])
-    useTimelineStore.setState({
+    setTimelineState({
       keyframes: [
         {
           itemId: 'item-1',

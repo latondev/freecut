@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import type { ShapeItem, ShapeType, TimelineItem } from '@/types/timeline'
-import { useKeyframesStore, useTimelineStore } from '@/features/editor/deps/timeline-store'
+import { useKeyframesStore, updateItem } from '@/features/editor/deps/timeline-store'
 import { useGizmoStore, useMaskEditorStore } from '@/features/editor/deps/preview'
 import { hasPathVertexKeyframes } from '@/features/editor/deps/keyframes'
 import {
@@ -73,7 +73,6 @@ interface ShapeSectionProps {
  */
 export function ShapeSection({ items }: ShapeSectionProps) {
   const { t } = useTranslation()
-  const updateItem = useTimelineStore((s) => s.updateItem)
   const isEditing = useMaskEditorStore((s) => s.isEditing)
   const editingItemId = useMaskEditorStore((s) => s.editingItemId)
   const penMode = useMaskEditorStore((s) => s.penMode)
@@ -249,7 +248,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
         updateItem(item.id, updates)
       })
     },
-    [shapeItems, updateItem],
+    [shapeItems],
   )
 
   // Shape type change - also update label to match shape type
@@ -424,7 +423,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
       const updates = getSwappedShapeLinearGradientColors(item)
       if (updates) updateItem(item.id, updates)
     })
-  }, [shapeItems, updateItem])
+  }, [shapeItems])
 
   const handleStrokeEnabledChange = useCallback(
     (enabled: boolean) => {
@@ -473,7 +472,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
       }
       updateItem(singlePathShape.id, getPathClosureUpdates(singlePathShape, closed))
     },
-    [pathTopologyLocked, singlePathShape, updateItem],
+    [pathTopologyLocked, singlePathShape],
   )
 
   const handleReversePath = useCallback(() => {
@@ -485,7 +484,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
     updateItem(singlePathShape.id, {
       pathVertices: reversePathVertices(singlePathShape.pathVertices),
     })
-  }, [pathTopologyLocked, singlePathShape, updateItem])
+  }, [pathTopologyLocked, singlePathShape])
 
   const handleSetFirstVertex = useCallback(() => {
     if (!singlePathShape?.pathVertices || selectedVertexIndex === null) return
@@ -496,7 +495,7 @@ export function ShapeSection({ items }: ShapeSectionProps) {
     updateItem(singlePathShape.id, {
       pathVertices: rotateClosedPathStart(singlePathShape.pathVertices, selectedVertexIndex),
     })
-  }, [pathTopologyLocked, selectedVertexIndex, singlePathShape, updateItem])
+  }, [pathTopologyLocked, selectedVertexIndex, singlePathShape])
 
   // Corner radius handlers with live preview
   const handleCornerRadiusLiveChange = useCallback(

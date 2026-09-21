@@ -1,6 +1,6 @@
 import type { TimelineItem } from '@/types/timeline'
 import { useSelectionStore } from '@/shared/state/selection'
-import { useTimelineStore } from '../stores/timeline-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 import { pixelsToTimeNow } from '../utils/zoom-conversions'
 import { useSnapCalculator } from './use-snap-calculator'
 
@@ -23,7 +23,7 @@ export function useDragInteractionPreamble(
   timelineDuration: number,
 ): DragInteractionPreamble {
   const pixelsToTime = pixelsToTimeNow
-  const fps = useTimelineStore((s) => s.fps)
+  const fps = useTimelineSettingsStore((s) => s.fps)
   const setDragState = useSelectionStore((s) => s.setDragState)
   const setActiveSnapTarget = useSelectionStore((s) => s.setActiveSnapTarget)
   const snap = useSnapCalculator(timelineDuration, item.id)

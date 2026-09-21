@@ -16,7 +16,10 @@ import type { BlendMode } from '@/types/blend-modes'
 import { BLEND_MODE_GROUPS, BLEND_MODE_LABELS } from '@/types/blend-modes'
 import type { TransformProperties, CanvasSettings } from '@/types/transform'
 import { useGizmoStore, useThrottledFrame } from '@/features/editor/deps/preview'
-import { useTimelineStore } from '@/features/editor/deps/timeline-store'
+import {
+  applyAutoKeyframeOperations,
+  updateItem,
+} from '@/features/editor/deps/timeline-store'
 import { resolveTransform, getSourceDimensions } from '@/features/editor/deps/composition-runtime'
 import {
   getAutoKeyframeOperation,
@@ -54,9 +57,6 @@ export const FillSection = memo(function FillSection({
   const currentFrame = useThrottledFrame()
 
   const keyframesByItemId = useKeyframesByItemId(itemIds)
-
-  // Item update for non-transform properties (blend mode)
-  const updateItem = useTimelineStore((s) => s.updateItem)
 
   // Gizmo store for live preview
   const setTransformPreview = useGizmoStore((s) => s.setTransformPreview)
@@ -96,9 +96,6 @@ export const FillSection = memo(function FillSection({
   }, [items, canvas, keyframesByItemId, currentFrame])
 
   const opacity = opacityRaw === 'mixed' ? 'mixed' : Math.round(opacityRaw * 100)
-
-  // Get batched keyframe action for auto-keyframing
-  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations)
 
   // Helper: Check if opacity has keyframes and auto-keyframe on value change
   const autoKeyframeOpacity = useCallback(
@@ -150,7 +147,7 @@ export const FillSection = memo(function FillSection({
       })
       queueMicrotask(() => clearPreview())
     },
-    [itemIds, onTransformChange, clearPreview, autoKeyframeOpacity, applyAutoKeyframeOperations],
+    [itemIds, onTransformChange, clearPreview, autoKeyframeOpacity],
   )
 
   // Live preview for corner radius (during drag)
@@ -182,7 +179,6 @@ export const FillSection = memo(function FillSection({
       onTransformChange,
       clearPreview,
       autoKeyframeCornerRadius,
-      applyAutoKeyframeOperations,
     ],
   )
 
@@ -206,7 +202,7 @@ export const FillSection = memo(function FillSection({
         updateItem(item.id, { blendMode: value as BlendMode })
       }
     },
-    [items, updateItem],
+    [items],
   )
 
   // Reset opacity to 100%

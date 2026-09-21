@@ -5,7 +5,6 @@ import { commitPreviewFrameToCurrentFrame } from '@/shared/state/playback'
 import { useEditorStore } from '@/shared/state/editor'
 import { toast } from 'sonner'
 import type { SnapTarget } from '../types/drag'
-import { useTimelineStore } from '../stores/timeline-store'
 import { useItemsStore } from '../stores/items-store'
 import { useSelectionStore } from '@/shared/state/selection'
 import { useDragInteractionPreamble } from './use-drag-interaction-preamble'
@@ -981,7 +980,7 @@ export function useTimelineTrim(
 
   // Get fresh item from store to ensure we have latest values after previous trims
   const getItemFromStore = useCallback(() => {
-    return useTimelineStore.getState().items.find((i) => i.id === item.id) ?? item
+    return useItemsStore.getState().items.find((i) => i.id === item.id) ?? item
   }, [item])
 
   const [trimState, setTrimState] = useState<TrimState>({
@@ -1067,7 +1066,7 @@ export function useTimelineTrim(
         shiftKey: shiftKeyRef.current,
       }
       const { isRollingEdit, isRippleEdit } = resolveTrimEditModes(drag)
-      const allItems = useTimelineStore.getState().items
+      const allItems = useItemsStore.getState().items
       const transitions = useTransitionsStore.getState().transitions
       const keyframesByItemId = useKeyframesStore.getState().keyframesByItemId
       const tracks = useItemsStore.getState().tracks
@@ -1351,7 +1350,7 @@ export function useTimelineTrim(
       const { forcedMode, destroyTransitionAtHandle, wantsRolling, wantsRipple } =
         resolveTrimStartModes(e, options)
       const currentItem = getItemFromStore()
-      const allItems = useTimelineStore.getState().items
+      const allItems = useItemsStore.getState().items
       const transitions = useTransitionsStore.getState().transitions
       const neighborId = wantsRolling
         ? findRollingNeighborId(currentItem, handle, allItems, transitions)
