@@ -182,6 +182,7 @@ import {
   type MotionTimeViewportController,
 } from './motion-time-viewport-controller'
 import { createMotionLayerClipboardCommands } from './motion-layer-clipboard'
+import { createMotionLayerSelectionCommands } from './motion-layer-selection'
 import { getAnimatablePropertyBaseValue } from '@/features/editor/deps/keyframes'
 import {
   useGizmoStore,
@@ -4239,103 +4240,30 @@ const CompositingTimelineCore = memo(function CompositingTimelineCore({
     [tracks],
   )
 
-  const selectLayer = useCallback(
-    (itemId: string, modifiers: { toggle?: boolean; range?: boolean } = {}) => {
-      if (modifiers.range) {
-        const anchorId = selectionAnchorIdRef.current ?? selectedItemIds.at(-1) ?? null
-        const anchorIndex = anchorId ? visibleLayerIds.indexOf(anchorId) : -1
-        const itemIndex = visibleLayerIds.indexOf(itemId)
-        if (anchorIndex >= 0 && itemIndex >= 0) {
-          const rangeStart = Math.min(anchorIndex, itemIndex)
-          const rangeEnd = Math.max(anchorIndex, itemIndex)
-          selectItems(
-            Array.from(
-              new Set([...selectedItemIds, ...visibleLayerIds.slice(rangeStart, rangeEnd + 1)]),
-            ),
-          )
-          return
-        }
-      }
-
-      selectionAnchorIdRef.current = itemId
-      if (!modifiers.toggle) {
-        selectItems([itemId])
-        return
-      }
-      selectItems(
-        selectedItemIdSet.has(itemId)
-          ? selectedItemIds.filter((id) => id !== itemId)
-          : [...selectedItemIds, itemId],
-      )
-    },
-    [selectItems, selectedItemIdSet, selectedItemIds, visibleLayerIds],
+  // Selection and grouping are commands over the current selection and row
+  // order; the anchor ref survives re-renders so Shift ranges keep their origin.
+  const layerSelection = useMemo(
+    () =>
+      createMotionLayerSelectionCommands({
+        state: { anchorIdRef: selectionAnchorIdRef },
+        deps: {
+          selectedItemIds,
+          selectedItemIdSet,
+          visibleLayerIds,
+          layerEntries,
+          tracks,
+          layerRowHeight: LAYER_ROW_HEIGHT,
+          selectItems,
+          formatGroupName: (groupNumber) => t('editor.compose.groupName', { count: groupNumber }),
+        },
+      }),
+    [layerEntries, selectItems, selectedItemIdSet, selectedItemIds, t, tracks, visibleLayerIds],
   )
-
-  const prepareLayerContextMenu = useCallback(
-    (itemId: string) => {
-      if (selectedItemIdSet.has(itemId)) return
-      selectionAnchorIdRef.current = itemId
-      selectItems([itemId])
-    },
-    [selectItems, selectedItemIdSet],
-  )
-
-  const prepareGroupContextMenu = useCallback(
-    (itemIds: string[]) => {
-      if (itemIds.length > 0 && itemIds.every((itemId) => selectedItemIdSet.has(itemId))) return
-      selectItems(itemIds)
-    },
-    [selectItems, selectedItemIdSet],
-  )
-
-  const createGroupFromSelection = useCallback(() => {
-    const selectedTrackIds = Array.from(
-      new Set(
-        layerEntries
-          .filter((entry) => selectedItemIdSet.has(entry.item.id))
-          .map((entry) => entry.track?.id)
-          .filter((id): id is string => Boolean(id)),
-      ),
-    )
-    if (selectedTrackIds.length < 2) return
-    const selectedTracks = tracks.filter((track) => selectedTrackIds.includes(track.id))
-    const groupId = crypto.randomUUID()
-    const groupNumber = tracks.filter((track) => track.isGroup).length + 1
-    const group: TimelineTrack = {
-      id: groupId,
-      name: t('editor.compose.groupName', { count: groupNumber }),
-      kind: 'video',
-      height: LAYER_ROW_HEIGHT,
-      locked: false,
-      syncLock: true,
-      visible: true,
-      muted: false,
-      solo: false,
-      order: Math.min(...selectedTracks.map((track) => track.order)),
-      items: [],
-      isGroup: true,
-      isCollapsed: false,
-    }
-    setTracks([
-      ...tracks.map((track) =>
-        selectedTrackIds.includes(track.id) ? { ...track, parentTrackId: groupId } : track,
-      ),
-      group,
-    ])
-  }, [layerEntries, selectedItemIdSet, t, tracks])
-
-  const ungroupTracks = useCallback(
-    (groupId: string) => {
-      setTracks(
-        tracks
-          .filter((track) => track.id !== groupId)
-          .map((track) =>
-            track.parentTrackId === groupId ? { ...track, parentTrackId: undefined } : track,
-          ),
-      )
-    },
-    [tracks],
-  )
+  const selectLayer = layerSelection.selectLayer
+  const prepareLayerContextMenu = layerSelection.prepareLayerContextMenu
+  const prepareGroupContextMenu = layerSelection.prepareGroupContextMenu
+  const createGroupFromSelection = layerSelection.createGroupFromSelection
+  const ungroupTracks = layerSelection.ungroupTracks
 
   const beginRename = useCallback((target: RenameTarget, name: string) => {
     setRenameTarget(target)

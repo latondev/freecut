@@ -2696,6 +2696,29 @@ describe('CompositingTimeline', { timeout: 15_000 }, () => {
     expect(itemsState.tracks.some((candidate) => candidate.id === track.id)).toBe(false)
   })
 
+  it('selects the right-clicked layer when it is outside the current selection', async () => {
+    const secondTrack = makeTimelineTrack({
+      id: 'layer-track-2',
+      name: 'Circle',
+      kind: 'video',
+      order: 1,
+    })
+    const secondShape: ShapeItem = {
+      ...shape,
+      id: 'shape-2',
+      trackId: secondTrack.id,
+      label: 'Circle',
+    }
+    useItemsStore.getState().setTracks([track, secondTrack])
+    useItemsStore.getState().setItems([shape, secondShape])
+    useSelectionStore.getState().selectItems([shape.id])
+
+    render(<CompositingTimeline />)
+    fireEvent.contextMenu(screen.getByRole('button', { name: /2circle/i }))
+
+    expect(useSelectionStore.getState().selectedItemIds).toEqual([secondShape.id])
+  })
+
   it('copies a layer to the clipboard from the row context menu', async () => {
     render(<CompositingTimeline />)
     fireEvent.contextMenu(screen.getByRole('button', { name: /1hero rectangle/i }))
