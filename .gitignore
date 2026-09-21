@@ -100,5 +100,9 @@ ds-bundle/
 artifacts/
 .playwright-cli/
 
+# Scratch space for one-off analysis scripts and dumped artifacts. Never shipped;
+# ignored so `git add -A` cannot sweep them into a commit.
+.tmp/
+
 # Headless coverage feed for the Fallow changed-health gate
 .coverage/
