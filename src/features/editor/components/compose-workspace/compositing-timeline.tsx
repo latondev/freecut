@@ -94,10 +94,8 @@ import type { BlendMode } from '@/types/blend-modes'
 import { BLEND_MODE_GROUPS, BLEND_MODE_LABELS } from '@/types/blend-modes'
 import type { TimelineItem, TimelineTrack } from '@/types/timeline'
 import type { CanvasSettings, ResolvedTransform } from '@/types/transform'
-import type { TextMotionSlot } from '@/types/text-motion'
 import {
   getTextMotionTimelineBands,
-  type TextMotionTimelineBand,
 } from '@/shared/timeline/text-motion-timeline'
 import {
   addItemOnNewTrack,
@@ -191,6 +189,22 @@ import {
   type MotionSelectionRetimeDragState,
   createMotionSelectionRetimeCommands,
 } from './motion-selection-retime'
+import {
+  LAYER_COLUMN_WIDTH,
+  LAYER_ROW_HEIGHT,
+  RULER_DIVISIONS,
+  MOTION_INLINE_PROPERTY_GROUP_IDS,
+  useSettledMotionFrame,
+  type MotionViewportPreviewElement,
+  type MotionViewportPreviewGrid,
+  type MotionViewportPreviewState,
+  type MotionMiddlePanState,
+  type InlineCurveState,
+  type RenameTarget,
+} from './motion-timeline-primitives'
+import {
+  TextMotionTimelineLanes,
+} from './motion-timeline-lanes'
 import { getAnimatablePropertyBaseValue } from '@/features/editor/deps/keyframes'
 import {
   useGizmoStore,
@@ -205,10 +219,7 @@ import {
 import { worldToLocalTransform } from '@/shared/utils/transform-parenting'
 import { getLinkedAudioCompanion } from '@/shared/utils/linked-media'
 import {
-  beginTextMotionEdit,
-  commitTextMotionEdit,
   trimCompositionToActiveRegion,
-  updateTextMotionLive,
   useMarkersStore,
 } from '@/features/editor/deps/timeline-store'
 import {
@@ -253,14 +264,12 @@ import { MotionIoLane, MOTION_IO_LANE_HEIGHT } from './motion-io-lane'
 import { MotionActiveRegionOverlay, MotionCompEndRulerDim } from './motion-region-overlay'
 import { getVisibleMotionPathProperties } from './motion-path-property-visibility'
 
-const LAYER_COLUMN_WIDTH = 620
 const LAYER_PARENT_COLUMN_WIDTH = 148
 const LAYER_TIMING_COLUMN_WIDTH = 128
 const LAYER_MODE_COLUMN_WIDTH = 100
 const TIMELINE_CONTENT_LEFT = LAYER_COLUMN_WIDTH + 1
 // Tick labels on top, the in/out render-range lane along the bottom.
 const RULER_HEIGHT = 28 + MOTION_IO_LANE_HEIGHT
-const LAYER_ROW_HEIGHT = 34
 type GeneratedLayerKind = 'text' | 'solid' | 'gradient' | 'shape' | 'controller'
 type GeneratedLayerPlacement = Parameters<typeof createDefaultSolidColorItem>[0]
 
@@ -281,7 +290,6 @@ function createGeneratedLayerItem(
       return createDefaultControllerItem(placement)
   }
 }
-const RULER_DIVISIONS = 10
 const EMPTY_LAYER_IDS: string[] = []
 const NO_TRANSFORM_PARENT = '__none__'
 
@@ -330,63 +338,8 @@ const POSITION_VECTOR_ROW = MOTION_VECTOR_ROW_DEFINITIONS.find(
   (row) => row.property === 'position',
 )!
 const MAX_DIMENSION_BAKE_FRAMES = 10_000
-const PROCEDURAL_HATCH =
-  'repeating-linear-gradient(45deg, rgba(56,189,248,0.55) 0 2px, transparent 2px 5px)'
 
 
-interface MotionViewportPreviewElement {
-  element: HTMLElement
-  edgeInset: number
-  usableWidth: number
-  frame: number
-  frameSpan: number | null
-  clampToSurface: boolean
-  left: string
-  width: string
-  willChange: string
-}
-
-interface MotionViewportPreviewPlayhead {
-  element: HTMLElement
-  width: number
-  transform: string
-  hidden: boolean | 'until-found'
-}
-
-interface MotionViewportPreviewRulerLabel {
-  element: HTMLElement
-  index: number
-  text: string
-}
-
-interface MotionViewportPreviewGrid {
-  element: HTMLElement
-  edgeInset: number
-  usableWidth: number
-  frames: number[]
-  framesAttribute: string
-  cssText: string
-  willChange: string
-}
-
-interface MotionViewportPreviewNavigator {
-  element: HTMLElement
-  startFrame: string
-  endFrame: string
-  thumb: HTMLElement
-  thumbLeft: string
-  thumbWidth: string
-  trackWidth: number
-}
-
-interface MotionViewportPreviewState {
-  baseViewport: MotionTimeViewport
-  elements: MotionViewportPreviewElement[]
-  grids: MotionViewportPreviewGrid[]
-  playhead: MotionViewportPreviewPlayhead | null
-  rulerLabels: MotionViewportPreviewRulerLabel[]
-  navigator: MotionViewportPreviewNavigator | null
-}
 
 
 function resolveMotionInlinePixels(value: string, referenceWidth: number, fallback: number) {
@@ -395,177 +348,7 @@ function resolveMotionInlinePixels(value: string, referenceWidth: number, fallba
   return value.trim().endsWith('%') ? (parsed / 100) * referenceWidth : parsed
 }
 
-const TextMotionTimelineLanes = memo(function TextMotionTimelineLanes({
-  itemId,
-  bands,
-  timeViewport,
-}: {
-  itemId: string
-  bands: TextMotionTimelineBand[]
-  timeViewport: MotionTimeViewport
-}) {
-  const dragRef = useRef<{
-    pointerId: number
-    slot: TextMotionSlot
-    startX: number
-    startDurationFrames: number
-    currentDurationFrames: number
-    laneWidth: number
-    before: ReturnType<typeof beginTextMotionEdit> | null
-  } | null>(null)
-  const suppressClickRef = useRef(false)
-  const [previewDurationBySlot, setPreviewDurationBySlot] = useState<
-    Partial<Record<TextMotionSlot, number>>
-  >({})
-  const visibleFrameRange = Math.max(1, timeViewport.endFrame - timeViewport.startFrame)
 
-  const beginDurationDrag = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>, band: TextMotionTimelineBand) => {
-      if (event.button !== 0) return
-      event.preventDefault()
-      event.stopPropagation()
-      const laneWidth = event.currentTarget.parentElement?.getBoundingClientRect().width ?? 0
-      if (laneWidth <= 0) return
-      event.currentTarget.setPointerCapture?.(event.pointerId)
-      dragRef.current = {
-        pointerId: event.pointerId,
-        slot: band.slot,
-        startX: event.clientX,
-        startDurationFrames: band.durationFrames,
-        currentDurationFrames: band.durationFrames,
-        laneWidth,
-        before: null,
-      }
-    },
-    [],
-  )
-
-  const moveDurationDrag = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      const drag = dragRef.current
-      if (!drag || drag.pointerId !== event.pointerId) return
-      event.preventDefault()
-      event.stopPropagation()
-      const deltaFrames = ((event.clientX - drag.startX) / drag.laneWidth) * visibleFrameRange
-      if (!drag.before) {
-        if (Math.abs(event.clientX - drag.startX) < 3) return
-        drag.before = beginTextMotionEdit()
-      }
-      const directedDelta = drag.slot === 'out' ? -deltaFrames : deltaFrames
-      const durationFrames = Math.max(1, Math.round(drag.startDurationFrames + directedDelta))
-      if (durationFrames === drag.currentDurationFrames) return
-      drag.currentDurationFrames = durationFrames
-      // Keep the high-frequency preview local to these tiny band rows. A live
-      // item-store write invalidates the full expanded dopesheet on every tick.
-      setPreviewDurationBySlot((previous) => ({ ...previous, [drag.slot]: durationFrames }))
-    },
-    [visibleFrameRange],
-  )
-
-  const finishDurationDrag = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>, commit: boolean) => {
-      const drag = dragRef.current
-      if (!drag || drag.pointerId !== event.pointerId) return
-      event.preventDefault()
-      event.stopPropagation()
-      dragRef.current = null
-      suppressClickRef.current = commit && drag.before !== null
-      if (commit && drag.before) {
-        updateTextMotionLive([itemId], drag.slot, {
-          durationFrames: drag.currentDurationFrames,
-        })
-        commitTextMotionEdit(drag.before, { slot: drag.slot, itemIds: [itemId] })
-      }
-      setPreviewDurationBySlot((previous) => {
-        if (previous[drag.slot] === undefined) return previous
-        const next = { ...previous }
-        delete next[drag.slot]
-        return next
-      })
-    },
-    [itemId],
-  )
-
-  const endDurationDrag = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => finishDurationDrag(event, true),
-    [finishDurationDrag],
-  )
-  const cancelDurationDrag = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => finishDurationDrag(event, false),
-    [finishDurationDrag],
-  )
-
-  const openAnimationInspector = useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
-      event.stopPropagation()
-      if (suppressClickRef.current) {
-        suppressClickRef.current = false
-        return
-      }
-      useSelectionStore.getState().selectItems([itemId])
-      const editor = useEditorStore.getState()
-      editor.setRightSidebarOpen(true)
-      editor.setClipInspectorTab('audio')
-    },
-    [itemId],
-  )
-
-  return (
-    <div data-testid="motion-text-procedural-lanes">
-      {bands.map((band) => {
-        const previewDuration = previewDurationBySlot[band.slot] ?? band.durationFrames
-        const durationDelta = previewDuration - band.durationFrames
-        const previewFromFrame =
-          band.slot === 'out' ? band.fromFrame - durationDelta : band.fromFrame
-        const previewToFrame = band.slot === 'out' ? band.toFrame : band.toFrame + durationDelta
-        const left = ((previewFromFrame - timeViewport.startFrame) / visibleFrameRange) * 100
-        const width = ((previewToFrame - previewFromFrame) / visibleFrameRange) * 100
-        return (
-          <div key={band.slot} className="flex h-7 border-t border-border/45 bg-background/25">
-            <div
-              className="flex shrink-0 items-center border-r border-border pl-14 pr-2 text-[9px] text-sky-300/90"
-              style={{ width: LAYER_COLUMN_WIDTH }}
-            >
-              <span className="w-8 uppercase tracking-[0.08em]">{band.slot}</span>
-              <span className="truncate text-muted-foreground">{band.presetId}</span>
-              <span className="ml-auto pl-2 tabular-nums text-muted-foreground/70">
-                {previewDuration}f · {band.unitCount}u
-              </span>
-            </div>
-            <div className="relative h-7 min-w-0 flex-1 overflow-hidden">
-              <div data-motion-viewport-surface className="absolute inset-0 overflow-hidden">
-                <div
-                  data-testid={`motion-text-procedural-band-${band.slot}`}
-                  data-motion-span-drag-visual
-                  data-from-frame={previewFromFrame}
-                  data-to-frame={previewToFrame}
-                  className="absolute top-1/2 h-4 -translate-y-1/2 touch-none cursor-ew-resize rounded-sm border border-sky-300/45 bg-sky-400/10 transition-[border-color,background-color] hover:border-sky-200/80 hover:bg-sky-400/20 active:border-sky-100"
-                  style={{
-                    left: `${left}%`,
-                    width: `${Math.max(0.5, width)}%`,
-                    backgroundImage: PROCEDURAL_HATCH,
-                  }}
-                  title={`${band.presetId} · drag to change duration · ${previewDuration}f · ${band.unitCount} units`}
-                  onPointerDown={(event) => beginDurationDrag(event, band)}
-                  onPointerMove={moveDurationDrag}
-                  onPointerUp={endDurationDrag}
-                  onPointerCancel={cancelDurationDrag}
-                  onClick={openAnimationInspector}
-                />
-              </div>
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-})
-
-interface MotionMiddlePanState {
-  startClientY: number
-  startScrollTop: number
-}
-const MOTION_INLINE_PROPERTY_GROUP_IDS = ['crop', 'audio', 'effects'] as const
 const MOTION_GRAPH_INLINE_PROPERTY_GROUP_IDS = [
   'transform',
   ...MOTION_INLINE_PROPERTY_GROUP_IDS,
@@ -589,16 +372,7 @@ type MotionRow =
 
 
 
-interface InlineCurveState {
-  compositionId: string
-  itemId: string
-  property: AnimatableProperty
-}
 
-interface RenameTarget {
-  kind: 'layer' | 'group'
-  id: string
-}
 
 const MotionPlayheadOverlay = memo(function MotionPlayheadOverlay({
   timeViewport,
@@ -746,32 +520,6 @@ const MotionSelectionRetimeRange = memo(function MotionSelectionRetimeRange({
   )
 })
 
-/**
- * Property editors need the frame while paused/scrubbing, but feeding every
- * playback tick through React makes every expanded dopesheet rerender. During
- * playback the selector collapses to a stable sentinel; pausing publishes the
- * latest frame once so inputs and keyframe controls catch up immediately.
- */
-function useSettledMotionFrame(): number {
-  const [settledFrame, setSettledFrame] = useState(
-    () => usePlaybackStore.getState().previewFrame ?? usePlaybackStore.getState().currentFrame,
-  )
-  const settledFrameRef = useRef(settledFrame)
-
-  useEffect(
-    () =>
-      usePlaybackStore.subscribe((state) => {
-        if (state.isPlaying || state.previewFrame !== null) return
-        const nextFrame = state.currentFrame
-        if (nextFrame === settledFrameRef.current) return
-        settledFrameRef.current = nextFrame
-        setSettledFrame(nextFrame)
-      }),
-    [],
-  )
-
-  return settledFrame
-}
 
 const MotionCompactNavigator = memo(function MotionCompactNavigator({
   viewport,
