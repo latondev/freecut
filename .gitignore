@@ -99,3 +99,5 @@ ds-bundle/
 
 artifacts/
 .playwright-cli/
+# Added by code-review-graph
+.code-review-graph/
