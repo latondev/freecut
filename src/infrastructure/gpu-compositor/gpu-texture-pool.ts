@@ -46,10 +46,22 @@ export function resolveGpuTexturePoolBudgetBytes(deviceMemoryGb?: number): numbe
 }
 
 function getDefaultTexturePoolBudgetBytes(): number {
+  const isDesktop =
+    typeof window !== 'undefined' &&
+    Boolean(
+      (window as unknown as { electronAPI?: { isElectron?: boolean } }).electronAPI?.isElectron,
+    )
   const deviceMemoryGb =
     typeof navigator === 'undefined'
       ? undefined
       : (navigator as { deviceMemory?: number }).deviceMemory
+
+  // For Desktop App with dedicated GPU / >= 8GB RAM, allocate 768MB texture pool
+  // to eliminate texture allocation/deallocation thrashing during complex timeline playback.
+  if (isDesktop && (!deviceMemoryGb || deviceMemoryGb >= 8)) {
+    return 768_000_000
+  }
+
   return resolveGpuTexturePoolBudgetBytes(deviceMemoryGb)
 }
 

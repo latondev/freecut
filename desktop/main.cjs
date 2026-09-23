@@ -1,17 +1,78 @@
-const { app, BrowserWindow, Menu, shell, session } = require('electron');
+const { app, BrowserWindow, Menu, shell, session, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
 
-// Enable Chromium flags for high performance NLE video editing
-app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer');
+// 1. Single Instance Lock - Ensure only one instance of FreeCut runs
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+  process.exit(0);
+}
+
+// 2. Hardware Acceleration & Performance Flags for Video Editing
+app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer,VaapiVideoDecoder,WebCodecs');
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
 
 const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
 let mainWindow = null;
 let localServer = null;
+
+// Window State Management (Remember position & size)
+const stateFilePath = path.join(app.getPath('userData'), 'window-state.json');
+
+function loadWindowState() {
+  const defaultState = { width: 1440, height: 900, isMaximized: true };
+  try {
+    if (fs.existsSync(stateFilePath)) {
+      const parsed = JSON.parse(fs.readFileSync(stateFilePath, 'utf8'));
+      // Validate that the saved position is still within visible display bounds
+      if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+        const displays = screen.getAllDisplays();
+        const isVisible = displays.some((display) => {
+          const { x, y, width, height } = display.bounds;
+          return (
+            parsed.x >= x &&
+            parsed.x < x + width &&
+            parsed.y >= y &&
+            parsed.y < y + height
+          );
+        });
+        if (!isVisible) {
+          delete parsed.x;
+          delete parsed.y;
+        }
+      }
+      return { ...defaultState, ...parsed };
+    }
+  } catch (e) {
+    console.warn('[Desktop] Could not load window state, using defaults.');
+  }
+  return defaultState;
+}
+
+function saveWindowState(window) {
+  if (!window || window.isDestroyed()) return;
+  try {
+    const isMaximized = window.isMaximized();
+    const bounds = window.getNormalBounds();
+    const state = {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      isMaximized,
+    };
+    fs.writeFileSync(stateFilePath, JSON.stringify(state, null, 2), 'utf8');
+  } catch (e) {
+    // Ignore write failures during shutdown
+  }
+}
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -49,7 +110,7 @@ function startLocalServer(distDir) {
           filePath = path.join(filePath, 'index.html');
         }
 
-        // SPA fallback: redirect route paths (without extension or requesting HTML) to index.html
+        // SPA fallback: redirect route paths without file extension to index.html
         if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
           if (!ext || ext === '.html' || (req.headers.accept && req.headers.accept.includes('text/html'))) {
             filePath = path.join(distDir, 'index.html');
@@ -66,6 +127,12 @@ function startLocalServer(distDir) {
         const finalExt = path.extname(filePath).toLowerCase();
         const contentType = MIME_TYPES[finalExt] || 'application/octet-stream';
 
+        // Cache-control: Immutable long cache for hashed assets, no-cache for HTML
+        const isHashedAsset = decodedUrl.startsWith('/assets/') && finalExt !== '.html';
+        const cacheControl = isHashedAsset
+          ? 'public, max-age=31536000, immutable'
+          : 'no-cache, must-revalidate';
+
         const headers = {
           'Content-Type': contentType,
           'Cross-Origin-Opener-Policy': 'same-origin',
@@ -73,7 +140,7 @@ function startLocalServer(distDir) {
           'Access-Control-Allow-Origin': '*',
           'Document-Policy': 'js-profiling',
           'Accept-Ranges': 'bytes',
-          'Cache-Control': 'no-cache',
+          'Cache-Control': cacheControl,
         };
 
         const range = req.headers.range;
@@ -186,10 +253,13 @@ async function createWindow() {
   buildMenu();
 
   const iconPath = path.join(__dirname, '../public/icons/icon-512.png');
+  const windowState = loadWindowState();
 
   mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 900,
+    x: windowState.x,
+    y: windowState.y,
+    width: windowState.width,
+    height: windowState.height,
     minWidth: 1024,
     minHeight: 600,
     title: 'FreeCut - Video Editor',
@@ -207,8 +277,25 @@ async function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow.maximize();
+    if (windowState.isMaximized) {
+      mainWindow.maximize();
+    }
     mainWindow.show();
+  });
+
+  // Debounce save window state on move / resize
+  let resizeTimeout = null;
+  const debouncedSaveState = () => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+      saveWindowState(mainWindow);
+    }, 500);
+  };
+
+  mainWindow.on('resize', debouncedSaveState);
+  mainWindow.on('move', debouncedSaveState);
+  mainWindow.on('close', () => {
+    saveWindowState(mainWindow);
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -241,6 +328,14 @@ async function createWindow() {
     mainWindow = null;
   });
 }
+
+// When a second instance is launched, focus the existing window
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
 
 app.whenReady().then(async () => {
   // Ensure headers for any internal interceptor

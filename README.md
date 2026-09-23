@@ -279,3 +279,6 @@ Current development priorities, in order:
 ## License
 
 [MIT](LICENSE)
+
+## Resource:
+https://iconscout.com/free-lottie-animations

@@ -18,7 +18,21 @@ function getBaseRef() {
     return value;
   }
 
-  return process.env.FALLOW_AUDIT_BASE || DEFAULT_BASE_REF;
+  if (process.env.FALLOW_AUDIT_BASE) {
+    return process.env.FALLOW_AUDIT_BASE;
+  }
+
+  try {
+    const branchRes = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' });
+    const currentBranch = branchRes.stdout ? branchRes.stdout.trim() : '';
+    if (currentBranch === 'main') {
+      return 'origin/main';
+    }
+  } catch {
+    // ignore
+  }
+
+  return DEFAULT_BASE_REF;
 }
 
 function valueOrDefault(value, fallback) {

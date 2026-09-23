@@ -35,6 +35,8 @@
     "ignore": [
       "**/*.test.ts",
       "**/*.test.tsx",
+      "desktop/**",
+      "GUI/**",
       "scripts/check-fallow-*.mjs",
       "headless/test.mjs",
       "src/runtime/composition-runtime/components/item-content.tsx",
