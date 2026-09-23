@@ -20,7 +20,9 @@ import {
   Captions,
   Sticker,
   WandSparkles,
+  Zap,
 } from 'lucide-react'
+import { ActionPanel } from './action-panel'
 import { motion, useReducedMotion } from 'motion/react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/shared/ui/cn'
@@ -431,8 +433,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
     const { tracks, fps, addItemOnNewTrack } = useTimelineStore.getState()
     const { activeTrackId, selectItems, setActiveTrack } = useSelectionStore.getState()
     const currentProject = useProjectStore.getState().currentProject
-    const activeCompositionId =
-      useCompositionNavigationStore.getState().activeCompositionId
+    const activeCompositionId = useCompositionNavigationStore.getState().activeCompositionId
     const activeComposition = activeCompositionId
       ? useCompositionsStore.getState().getComposition(activeCompositionId)
       : undefined
@@ -543,6 +544,7 @@ export const MediaSidebar = memo(function MediaSidebar() {
     { id: 'lottie' as const, icon: Sticker, label: t('lottieBrowser.tabLabel') },
     { id: 'transcript' as const, icon: Captions, label: t('transcript.tabLabel') },
     { id: 'ai' as const, icon: WandSparkles, label: t('editor.mediaSidebar.ai') },
+    { id: 'action' as const, icon: Zap, label: 'Action' },
   ]
 
   const shouldSuppressGeneratedItemClick = useCallback(() => {
@@ -1166,6 +1168,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
                   <LazyAiPanel />
                 </Suspense>
               )}
+            </div>
+
+            {/* Action Tab */}
+            <div
+              className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'action' ? 'block' : 'hidden'}`}
+            >
+              {activeTab === 'action' && <ActionPanel />}
             </div>
           </>
         </div>

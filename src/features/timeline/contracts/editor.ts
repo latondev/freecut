@@ -7,6 +7,8 @@ export { useTimelineStore } from '../stores/timeline-store'
 export { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 export { useItemsStore } from '../stores/items-store'
 export { useKeyframesStore } from '../stores/keyframes-store'
+export { useZoomStore } from '../stores/zoom-store'
+export { getZoomToFitLevel } from '../utils/timeline-layout'
 export { useKeyframeSelectionStore } from '../stores/keyframe-selection-store'
 export { useCompositionsStore } from '../stores/compositions-store'
 export {
@@ -57,6 +59,7 @@ export { linkItems } from '../stores/actions/item-actions'
 export {
   addItemOnNewTrack,
   addItemsOnNewTracks,
+  closeAllGapsOnTrack,
   duplicateItemsWithTrackChanges,
   moveItems,
   removeItems,

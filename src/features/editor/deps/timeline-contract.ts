@@ -32,6 +32,7 @@ export {
   captureAnimationFromItem,
   getPresetCompatibility,
   captureSnapshot,
+  closeAllGapsOnTrack,
   createClassicTrack,
   createCompositeComposition,
   createDefaultAdjustmentItem,
@@ -56,6 +57,7 @@ export {
   getDroppedMediaDurationInFrames,
   getMaxTransitionDurationForHandles,
   getTrackKind,
+  getZoomToFitLevel,
   importBentoLayoutDialog,
   importFillerRemovalDialog,
   importFilmstripCache,
@@ -102,6 +104,7 @@ export {
   updateKeyframe,
   updateKeyframes,
   useTransitionBreakageNotifications,
+  useZoomStore,
   wouldCreateCompositionCycle,
   isTimelineTemplateDragData,
 } from '@/features/timeline/contracts/editor'
