@@ -61,7 +61,7 @@ function NewProject() {
       {/* Header */}
       <div className="panel-header border-b border-border">
         <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
-          <Link to="/">
+          <Link to="/projects">
             <FreeCutLogo variant="full" size="md" className="hover:opacity-80 transition-opacity" />
           </Link>
           <div className="flex items-center gap-3">

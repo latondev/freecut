@@ -323,7 +323,7 @@ async function createWindow() {
   });
 
   if (isDev) {
-    const devUrl = 'http://localhost:5173';
+    const devUrl = 'http://localhost:5173/projects';
     console.log(`[Desktop] Loading Vite Dev Server: ${devUrl}`);
     await mainWindow.loadURL(devUrl);
   } else {
@@ -335,7 +335,7 @@ async function createWindow() {
 
     const { server, port } = await startLocalServer(distDir);
     localServer = server;
-    const targetUrl = `http://127.0.0.1:${port}`;
+    const targetUrl = `http://127.0.0.1:${port}/projects`;
     console.log(`[Desktop] Serving FreeCut desktop runtime on: ${targetUrl}`);
     await mainWindow.loadURL(targetUrl);
   }
