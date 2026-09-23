@@ -8,7 +8,14 @@ import type { MediaLibraryNotification } from '../types'
 
 interface UseMediaLibraryDragDropParams {
   showNotification: (notification: MediaLibraryNotification) => void
-  importHandles: (handles: FileSystemFileHandle[]) => Promise<void>
+  importHandles: (
+    handles: FileSystemFileHandle[],
+    options?: {
+      folderPath?: string
+      entries?: Array<{ handle: FileSystemFileHandle; folderPath?: string }>
+    },
+  ) => Promise<unknown>
+  currentFolder?: string | null
 }
 
 /**
@@ -17,9 +24,29 @@ interface UseMediaLibraryDragDropParams {
  * ignores in-app media/composition drags, and routes valid file handles to the
  * import path. Extracted verbatim from `MediaLibrary`.
  */
+function shouldIgnoreInternalDrag(dataTransfer: DataTransfer): boolean {
+  try {
+    const jsonData = dataTransfer.getData('application/json')
+    if (jsonData) {
+      const data = JSON.parse(jsonData)
+      if (
+        data.type === 'media-item' ||
+        data.type === 'media-items' ||
+        data.type === 'composition'
+      ) {
+        return true
+      }
+    }
+  } catch {
+    // Not JSON data
+  }
+  return false
+}
+
 export function useMediaLibraryDragDrop({
   showNotification,
   importHandles,
+  currentFolder,
 }: UseMediaLibraryDragDropParams) {
   const { t } = useTranslation()
   const [isDragging, setIsDragging] = useState(false)
@@ -51,31 +78,20 @@ export function useMediaLibraryDragDrop({
   }, [])
 
   const handleDrop = useCallback(
+    // fallow-ignore-next-line complexity
     async (e: React.DragEvent) => {
       e.preventDefault()
       e.stopPropagation()
       dragCounterRef.current = 0
       setIsDragging(false)
 
-      // Ignore media items being dragged from the grid itself
-      try {
-        const jsonData = e.dataTransfer.getData('application/json')
-        if (jsonData) {
-          const data = JSON.parse(jsonData)
-          if (
-            data.type === 'media-item' ||
-            data.type === 'media-items' ||
-            data.type === 'composition'
-          ) {
-            return
-          }
-        }
-      } catch {
-        // Not JSON data, continue with file handling
+      if (shouldIgnoreInternalDrag(e.dataTransfer)) {
+        return
       }
 
       const { supported, entries, errors } = await extractValidMediaFileEntriesFromDataTransfer(
         e.dataTransfer,
+        currentFolder ?? undefined,
       )
       if (!supported) {
         showNotification({
@@ -92,10 +108,13 @@ export function useMediaLibraryDragDrop({
         })
       }
       if (entries.length > 0) {
-        await importHandles(entries.map((entry) => entry.handle))
+        await importHandles(
+          entries.map((entry) => entry.handle),
+          { folderPath: currentFolder ?? undefined, entries },
+        )
       }
     },
-    [showNotification, importHandles, t],
+    [showNotification, importHandles, currentFolder, t],
   )
 
   return { isDragging, handleDragEnter, handleDragOver, handleDragLeave, handleDrop }

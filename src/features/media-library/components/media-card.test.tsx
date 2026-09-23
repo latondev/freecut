@@ -240,7 +240,10 @@ vi.mock('../stores/media-library-store', () => {
     },
   )
 
-  return { useMediaLibraryStore }
+  return {
+    useMediaLibraryStore,
+    useMediaFolders: () => [],
+  }
 })
 
 vi.mock('@/shared/state/editor', () => {

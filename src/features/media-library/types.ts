@@ -71,6 +71,10 @@ export interface MediaLibraryState {
   viewMode: 'grid' | 'list'
   /** Grid item size (1 = largest / fewer columns, 5 = smallest / more columns) */
   mediaItemSize: number
+  /** Currently active folder path in the library view (null = root) */
+  currentFolder: string | null
+  /** User-created custom folder names in this project */
+  customFolders: string[]
 
   // Broken media tracking (lazy/proactive detection)
   brokenMediaIds: string[]
@@ -139,7 +143,10 @@ export interface MediaLibraryActions {
    * Defaults to copying into FreeCut's workspace-backed media store. Use
    * storageMode='link' to reference files directly on the user's disk.
    */
-  importMedia: (options?: { storageMode?: 'copy' | 'link' }) => Promise<MediaMetadata[]>
+  importMedia: (options?: {
+    storageMode?: 'copy' | 'link'
+    folderPath?: string
+  }) => Promise<MediaMetadata[]>
   /**
    * Import media from a direct URL into OPFS-backed storage.
    * Best for CORS-enabled direct media files (mp4, mp3, png, etc.).
@@ -161,7 +168,11 @@ export interface MediaLibraryActions {
    */
   importHandles: (
     handles: FileSystemFileHandle[],
-    options?: { storageMode?: 'copy' | 'link' },
+    options?: {
+      storageMode?: 'copy' | 'link'
+      folderPath?: string
+      entries?: Array<{ handle: FileSystemFileHandle; folderPath?: string }>
+    },
   ) => Promise<MediaMetadata[]>
   /**
    * Import media for direct placement flows.
@@ -176,6 +187,13 @@ export interface MediaLibraryActions {
    * automatically by the store's mediaItems subscription.
    */
   prependMediaItem: (media: MediaMetadata) => void
+
+  // Folders
+  setCurrentFolder: (folder: string | null) => void
+  createFolder: (folderName: string) => void
+  renameFolder: (oldName: string, newName: string) => Promise<void>
+  deleteFolder: (folderName: string, options?: { deleteMedia?: boolean }) => Promise<void>
+  moveMediaToFolder: (mediaIds: string[], targetFolder: string | null) => Promise<void>
 
   // Selection
   setSelection: (selection: MediaLibrarySelection) => void

@@ -585,7 +585,7 @@ class MediaLibraryService {
   private async importMediaFileToOpfs(
     file: File,
     projectId: string,
-    options?: { attribution?: MediaAttribution },
+    options?: { attribution?: MediaAttribution; folderPath?: string },
   ): Promise<MediaMetadata & { isDuplicate?: boolean; hasUnsupportedCodec?: boolean }> {
     const validationResult = await validateMediaFileContent(file)
     if (!validationResult.valid) {
@@ -619,6 +619,7 @@ class MediaLibraryService {
         id: mediaId,
         storageType: 'workspace',
         fileName: file.name,
+        folderPath: options?.folderPath || undefined,
         fileSize: file.size,
         mimeType: resolvedMimeType,
         duration: lottie.duration,
@@ -682,6 +683,7 @@ class MediaLibraryService {
       id: mediaId,
       storageType: 'workspace',
       fileName: file.name,
+      folderPath: options?.folderPath || undefined,
       fileSize: file.size,
       mimeType: resolvedMimeType,
       duration: 'duration' in metadata ? metadata.duration : 0,
@@ -902,7 +904,7 @@ class MediaLibraryService {
   async importMediaWithHandle(
     handle: FileSystemFileHandle,
     projectId: string,
-    options?: { storageMode?: 'copy' | 'link' },
+    options?: { storageMode?: 'copy' | 'link'; folderPath?: string },
   ): Promise<MediaMetadata & { isDuplicate?: boolean; hasUnsupportedCodec?: boolean }> {
     // Stage 1: Get file from handle (instant)
     const hasPermission = await ensureFileHandlePermission(handle)
@@ -913,7 +915,7 @@ class MediaLibraryService {
     const file = await handle.getFile()
 
     if (options?.storageMode === 'copy') {
-      return this.importMediaFileToOpfs(file, projectId)
+      return this.importMediaFileToOpfs(file, projectId, { folderPath: options?.folderPath })
     }
 
     // Stage 2: Validation
@@ -951,8 +953,15 @@ class MediaLibraryService {
         resolvedDuplicate = await updateMediaDB(workspaceDuplicate.id, {
           fileHandle: handle,
           fileName: file.name,
+          folderPath:
+            options?.folderPath !== undefined ? options.folderPath : workspaceDuplicate.folderPath,
           fileSize: file.size,
           fileLastModified: file.lastModified,
+          updatedAt: Date.now(),
+        })
+      } else if (options?.folderPath && resolvedDuplicate.folderPath !== options.folderPath) {
+        resolvedDuplicate = await updateMediaDB(workspaceDuplicate.id, {
+          folderPath: options.folderPath,
           updatedAt: Date.now(),
         })
       }
@@ -993,6 +1002,9 @@ class MediaLibraryService {
         fileSize: file.size,
         fileLastModified: file.lastModified,
         updatedAt: Date.now(),
+      }
+      if (options?.folderPath !== undefined) {
+        updates.folderPath = options.folderPath || undefined
       }
 
       if (existingMedia.storageType === 'handle' || !existingMedia.opfsPath) {
@@ -1046,6 +1058,7 @@ class MediaLibraryService {
         storageType: 'handle',
         fileHandle: handle,
         fileName: file.name,
+        folderPath: options?.folderPath || undefined,
         fileSize: file.size,
         fileLastModified: file.lastModified,
         mimeType: resolvedMimeType,
@@ -1115,6 +1128,7 @@ class MediaLibraryService {
       storageType: 'handle',
       fileHandle: handle,
       fileName: file.name,
+      folderPath: options?.folderPath || undefined,
       fileSize: file.size,
       fileLastModified: file.lastModified,
       mimeType: resolvedMimeType,
@@ -2146,6 +2160,16 @@ class MediaLibraryService {
     }
 
     return { cleaned: orphanedMetadata.length }
+  }
+
+  /**
+   * Update the folderPath of a media asset in the database.
+   */
+  async updateMediaFolder(mediaId: string, folderPath: string | null): Promise<MediaMetadata> {
+    return updateMediaDB(mediaId, {
+      folderPath: folderPath || undefined,
+      updatedAt: Date.now(),
+    })
   }
 }
 

@@ -119,6 +119,8 @@ const newStore: MediaLibraryStoreApi =
         sortBy: 'date',
         viewMode: 'grid',
         mediaItemSize: 1,
+        currentFolder: null,
+        customFolders: [],
 
         // Broken media tracking (lazy/proactive detection)
         brokenMediaIds: [],
@@ -180,6 +182,8 @@ const newStore: MediaLibraryStoreApi =
             selectedMediaIds: [],
             selectedCompositionIds: [],
             isLoading: !!projectId, // Set loading if switching to a project
+            currentFolder: null,
+            customFolders: [],
             proxyStatus: new Map(),
             proxyProgress: new Map(),
             interpolationStatus: new Map(),
@@ -223,9 +227,14 @@ const newStore: MediaLibraryStoreApi =
             const { mediaLibraryService } = await loadMediaLibraryService()
             const mediaItems = await mediaLibraryService.getMediaForProject(currentProjectId)
 
+            const existingFolders = Array.from(
+              new Set(mediaItems.map((m) => m.folderPath).filter((f): f is string => Boolean(f))),
+            )
+
             set({
               mediaItems,
               mediaById: buildMediaById(mediaItems),
+              customFolders: Array.from(new Set([...get().customFolders, ...existingFolders])),
               isLoading: false,
             })
 
@@ -318,6 +327,100 @@ const newStore: MediaLibraryStoreApi =
 
         prependMediaItem: (media) => {
           set((state) => ({ mediaItems: [media, ...state.mediaItems] }))
+        },
+
+        // Folder management
+        setCurrentFolder: (folder) => {
+          set({ currentFolder: folder })
+        },
+
+        createFolder: (folderName) => {
+          const trimmed = folderName.trim()
+          if (!trimmed) return
+          set((state) => ({
+            customFolders: Array.from(new Set([...state.customFolders, trimmed])),
+            currentFolder: trimmed,
+          }))
+        },
+
+        renameFolder: async (oldName, newName) => {
+          const trimmed = newName.trim()
+          if (!trimmed || trimmed === oldName) return
+
+          const { mediaLibraryService } = await loadMediaLibraryService()
+          const { mediaItems, customFolders, currentFolder } = get()
+
+          const itemsToUpdate = mediaItems.filter((item) => item.folderPath === oldName)
+          await Promise.all(
+            itemsToUpdate.map((item) => mediaLibraryService.updateMediaFolder(item.id, trimmed)),
+          )
+
+          const nextCustomFolders = customFolders.map((f) => (f === oldName ? trimmed : f))
+          if (!nextCustomFolders.includes(trimmed)) {
+            nextCustomFolders.push(trimmed)
+          }
+
+          set({
+            customFolders: Array.from(new Set(nextCustomFolders)),
+            currentFolder: currentFolder === oldName ? trimmed : currentFolder,
+            mediaItems: mediaItems.map((item) =>
+              item.folderPath === oldName
+                ? { ...item, folderPath: trimmed, updatedAt: Date.now() }
+                : item,
+            ),
+          })
+        },
+
+        deleteFolder: async (folderName, options) => {
+          const { mediaLibraryService } = await loadMediaLibraryService()
+          const { mediaItems, deleteMediaBatch } = get()
+
+          const itemsInFolder = mediaItems.filter((item) => item.folderPath === folderName)
+
+          if (options?.deleteMedia && itemsInFolder.length > 0) {
+            await deleteMediaBatch(itemsInFolder.map((item) => item.id))
+          } else if (itemsInFolder.length > 0) {
+            await Promise.all(
+              itemsInFolder.map((item) => mediaLibraryService.updateMediaFolder(item.id, null)),
+            )
+          }
+
+          set((state) => ({
+            customFolders: state.customFolders.filter((f) => f !== folderName),
+            currentFolder: state.currentFolder === folderName ? null : state.currentFolder,
+            mediaItems: options?.deleteMedia
+              ? state.mediaItems.filter((item) => item.folderPath !== folderName)
+              : state.mediaItems.map((item) =>
+                  item.folderPath === folderName
+                    ? { ...item, folderPath: undefined, updatedAt: Date.now() }
+                    : item,
+                ),
+          }))
+        },
+
+        moveMediaToFolder: async (mediaIds, targetFolder) => {
+          if (mediaIds.length === 0) return
+          const { mediaLibraryService } = await loadMediaLibraryService()
+          const idSet = new Set(mediaIds)
+
+          await Promise.all(
+            mediaIds.map((id) => mediaLibraryService.updateMediaFolder(id, targetFolder)),
+          )
+
+          set((state) => {
+            const nextFolders = [...state.customFolders]
+            if (targetFolder && !nextFolders.includes(targetFolder)) {
+              nextFolders.push(targetFolder)
+            }
+            return {
+              customFolders: Array.from(new Set(nextFolders)),
+              mediaItems: state.mediaItems.map((item) =>
+                idSet.has(item.id)
+                  ? { ...item, folderPath: targetFolder || undefined, updatedAt: Date.now() }
+                  : item,
+              ),
+            }
+          })
         },
 
         // Selection management
@@ -727,6 +830,7 @@ export const useFilteredMediaItems = () => {
   const searchQuery = useMediaLibraryStore((s) => s.searchQuery)
   const filterByType = useMediaLibraryStore((s) => s.filterByType)
   const sortBy = useMediaLibraryStore((s) => s.sortBy)
+  const currentFolder = useMediaLibraryStore((s) => s.currentFolder)
 
   // Filter by search query (matches filename and AI-generated captions)
   let filtered = mediaItems
@@ -737,6 +841,13 @@ export const useFilteredMediaItems = () => {
         item.fileName.toLowerCase().includes(query) ||
         item.aiCaptions?.some((c) => c.text.toLowerCase().includes(query)),
     )
+  } else {
+    // When not searching, filter by folder hierarchy
+    if (currentFolder !== null) {
+      filtered = filtered.filter((item) => item.folderPath === currentFolder)
+    } else {
+      filtered = filtered.filter((item) => !item.folderPath)
+    }
   }
 
   // Filter by type — getMediaType maps mime → kind (handles application/lottie+json,
@@ -760,4 +871,30 @@ export const useFilteredMediaItems = () => {
   })
 
   return sorted
+}
+
+export interface MediaFolderInfo {
+  name: string
+  count: number
+}
+
+export const useMediaFolders = (): MediaFolderInfo[] => {
+  const mediaItems = useMediaLibraryStore((s) => s.mediaItems)
+  const customFolders = useMediaLibraryStore((s) => s.customFolders)
+
+  const folderItemCounts = new Map<string, number>()
+  for (const item of mediaItems) {
+    if (item.folderPath) {
+      folderItemCounts.set(item.folderPath, (folderItemCounts.get(item.folderPath) ?? 0) + 1)
+    }
+  }
+
+  const allFolderNames = Array.from(new Set([...customFolders, ...folderItemCounts.keys()])).sort(
+    (a, b) => a.localeCompare(b),
+  )
+
+  return allFolderNames.map((name) => ({
+    name,
+    count: folderItemCounts.get(name) ?? 0,
+  }))
 }

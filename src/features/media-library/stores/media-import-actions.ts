@@ -25,6 +25,7 @@ interface ImportTask {
   handle: FileSystemFileHandle
   tempId: string
   file: File
+  folderPath?: string
 }
 
 interface CompletedImportTask extends ImportTask {
@@ -38,6 +39,7 @@ function buildOptimisticMediaItem(
   file: File,
   tempId: string,
   storageMode: ImportStorageMode,
+  folderPath?: string,
 ): MediaMetadata {
   const now = Date.now()
 
@@ -46,6 +48,7 @@ function buildOptimisticMediaItem(
     storageType: storageMode === 'link' ? 'handle' : 'workspace',
     fileHandle: storageMode === 'link' ? handle : undefined,
     fileName: file.name,
+    folderPath: folderPath || undefined,
     fileSize: file.size,
     fileLastModified: file.lastModified,
     mimeType: getMimeType(file),
@@ -298,12 +301,14 @@ export function createImportActions(
   const createOptimisticImportTasks = async (
     handles: FileSystemFileHandle[],
     storageMode: ImportStorageMode,
+    folderMap?: Map<FileSystemFileHandle, string | undefined>,
   ): Promise<ImportTask[]> => {
     const importTasks: ImportTask[] = []
 
     for (const handle of handles) {
       if (!handle) continue
       const tempId = crypto.randomUUID()
+      const folderPath = folderMap?.get(handle)
 
       let file: File
       try {
@@ -315,7 +320,7 @@ export function createImportActions(
         continue
       }
 
-      const tempItem = buildOptimisticMediaItem(handle, file, tempId, storageMode)
+      const tempItem = buildOptimisticMediaItem(handle, file, tempId, storageMode, folderPath)
 
       set((state) => ({
         mediaItems: [tempItem, ...state.mediaItems],
@@ -324,7 +329,7 @@ export function createImportActions(
       }))
       queueImportPreparationTask(tempId)
 
-      importTasks.push({ handle, tempId, file })
+      importTasks.push({ handle, tempId, file, folderPath })
     }
 
     return importTasks
@@ -352,6 +357,7 @@ export function createImportActions(
           markImportPreparationRunning(task.tempId)
           const metadata = await mediaLibraryService.importMediaWithHandle(task.handle, projectId, {
             storageMode,
+            folderPath: task.folderPath,
           })
           results[index] = {
             status: 'fulfilled',
@@ -368,12 +374,15 @@ export function createImportActions(
     return results
   }
 
+  // fallow-ignore-next-line complexity
   const importHandlesInternal = async (
     handles: FileSystemFileHandle[],
     options?: {
       includeDuplicatesInResults?: boolean
       waitForPreparation?: boolean
       storageMode?: ImportStorageMode
+      folderPath?: string
+      entries?: Array<{ handle: FileSystemFileHandle; folderPath?: string }>
     },
   ): Promise<MediaMetadata[]> => {
     const { currentProjectId } = get()
@@ -381,6 +390,17 @@ export function createImportActions(
     if (!currentProjectId) {
       set({ error: 'No project selected' })
       return []
+    }
+
+    const folderMap = new Map<FileSystemFileHandle, string | undefined>()
+    if (options?.entries) {
+      for (const entry of options.entries) {
+        folderMap.set(entry.handle, entry.folderPath)
+      }
+    } else if (options?.folderPath) {
+      for (const handle of handles) {
+        folderMap.set(handle, options.folderPath)
+      }
     }
 
     const opId = createOperationId()
@@ -393,7 +413,7 @@ export function createImportActions(
 
     const storageMode = options?.storageMode ?? 'copy'
     const serviceModulePromise = loadMediaLibraryService()
-    const importTasks = await createOptimisticImportTasks(handles, storageMode)
+    const importTasks = await createOptimisticImportTasks(handles, storageMode, folderMap)
     const importResults = await runImportTasks(
       importTasks,
       currentProjectId,
@@ -422,6 +442,7 @@ export function createImportActions(
   }
 
   return {
+    // fallow-ignore-next-line complexity
     importMedia: async (options) => {
       const { currentProjectId } = get()
 
@@ -456,7 +477,14 @@ export function createImportActions(
         // Create optimistic placeholders for all files immediately
         const serviceModulePromise = loadMediaLibraryService()
         const storageMode = options?.storageMode ?? 'copy'
-        const importTasks = await createOptimisticImportTasks(handles, storageMode)
+        const targetFolder = options?.folderPath ?? get().currentFolder ?? undefined
+        const folderMap = new Map<FileSystemFileHandle, string | undefined>()
+        if (targetFolder) {
+          for (const handle of handles) {
+            folderMap.set(handle, targetFolder)
+          }
+        }
+        const importTasks = await createOptimisticImportTasks(handles, storageMode, folderMap)
         const importResults = await runImportTasks(
           importTasks,
           currentProjectId,

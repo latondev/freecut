@@ -64,6 +64,11 @@ export interface MediaMetadata {
    * Used as part of source identity for shared proxy reuse.
    */
   fileLastModified?: number
+  /**
+   * Relative folder path within the project media library (e.g. 'voice', 'image', 'b-roll/interviews').
+   * Undefined or empty string denotes root level.
+   */
+  folderPath?: string
   fileName: string
   fileSize: number
   mimeType: string

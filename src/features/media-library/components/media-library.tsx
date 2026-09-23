@@ -23,6 +23,8 @@ import {
   Info,
   X,
   FolderOpen,
+  Folder,
+  FolderPlus,
   Link,
   Link2Off,
   ChevronDown,
@@ -80,12 +82,18 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { MarqueeOverlay } from '@/shared/marquee/marquee-overlay'
 import { cn } from '@/shared/ui/cn'
 import { GridMediaGrid, ListMediaGrid } from './media-grid'
+import { MediaFolderCard } from './media-folder-card'
+import { GRID_MIN_SIZE_PX, GRID_GAP_BY_SIZE } from './media-grid-constants'
 import { CompositionsSection } from './compositions-section'
 import { BackgroundTaskProgress } from './background-task-progress'
 import { MissingMediaDialog } from './missing-media-dialog'
 import { OrphanedClipsDialog } from './orphaned-clips-dialog'
 import { UnsupportedAudioCodecDialog } from './unsupported-audio-codec-dialog'
-import { useFilteredMediaItems, useMediaLibraryStore } from '../stores/media-library-store'
+import {
+  useFilteredMediaItems,
+  useMediaFolders,
+  useMediaLibraryStore,
+} from '../stores/media-library-store'
 import {
   useCompositionsStore,
   useCompositionNavigationStore,
@@ -98,6 +106,7 @@ import { importMediaLibraryService } from '../services/media-library-service-loa
 import { cancelMediaTranscriptionJob } from '../services/media-transcription-runner'
 import { importMediaAnalysisService } from '../services/media-analysis-service-loader'
 import { getSupportedMediaFormatLabels } from '../utils/media-file-picker'
+import { collectFilesFromDirectoryHandle } from '../utils/file-drop'
 import { getSharedProxyKey } from '../utils/proxy-key'
 import { getMediaType } from '../utils/validation'
 import { getProjectBrokenMediaIds } from '@/features/media-library/utils/broken-media'
@@ -245,9 +254,15 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
   const [showImportUrlDialog, setShowImportUrlDialog] = useState(false)
   const [importUrlValue, setImportUrlValue] = useState('')
   const [isImportUrlSubmitting, setIsImportUrlSubmitting] = useState(false)
+  const [showNewFolderDialog, setShowNewFolderDialog] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
   // Store selectors
   const currentProjectId = useMediaLibraryStore((s) => s.currentProjectId)
   const setCurrentProject = useMediaLibraryStore((s) => s.setCurrentProject)
+  const currentFolder = useMediaLibraryStore((s) => s.currentFolder)
+  const setCurrentFolder = useMediaLibraryStore((s) => s.setCurrentFolder)
+  const createFolder = useMediaLibraryStore((s) => s.createFolder)
+  const allFolders = useMediaFolders()
   const loadMediaItems = useMediaLibraryStore((s) => s.loadMediaItems)
   const importMedia = useMediaLibraryStore((s) => s.importMedia)
   const importMediaFromUrl = useMediaLibraryStore((s) => s.importMediaFromUrl)
@@ -437,9 +452,16 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
 
   // Import files from drag-drop handles - memoized to prevent MediaGrid re-renders
   const handleImportHandles = useCallback(
-    async (handles: FileSystemFileHandle[]) => {
+    async (
+      handles: FileSystemFileHandle[],
+      options?: {
+        storageMode?: 'copy' | 'link'
+        folderPath?: string
+        entries?: Array<{ handle: FileSystemFileHandle; folderPath?: string }>
+      },
+    ) => {
       try {
-        await importHandles(handles)
+        await importHandles(handles, options)
       } catch (error) {
         logger.error('Import failed:', error)
       }
@@ -447,9 +469,52 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
     [importHandles],
   )
 
+  const handleCreateFolder = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault()
+      const trimmed = newFolderName.trim()
+      if (trimmed) {
+        createFolder(trimmed)
+        setShowNewFolderDialog(false)
+        setNewFolderName('')
+      }
+    },
+    [createFolder, newFolderName],
+  )
+
+  const handleImportFolder = useCallback(async () => {
+    if (!('showDirectoryPicker' in window)) {
+      showNotification({
+        type: 'warning',
+        message:
+          'Directory picker is not supported in this browser. Please drag and drop the folder.',
+      })
+      return
+    }
+    try {
+      const dirHandle = await (
+        window as unknown as { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }
+      ).showDirectoryPicker()
+      const entries = await collectFilesFromDirectoryHandle(dirHandle, dirHandle.name)
+      if (entries.length > 0) {
+        await importHandles(
+          entries.map((e) => e.handle),
+          { entries, folderPath: dirHandle.name },
+        )
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return
+      logger.error('Failed to import directory:', error)
+    }
+  }, [importHandles, showNotification])
+
   // Panel-level drag/drop handling so the drop zone covers the full panel height.
   const { isDragging, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } =
-    useMediaLibraryDragDrop({ showNotification, importHandles: handleImportHandles })
+    useMediaLibraryDragDrop({
+      showNotification,
+      importHandles: handleImportHandles,
+      currentFolder,
+    })
 
   // Count of items currently generating proxies
   const currentProjectBrokenMediaIds = useMemo(
@@ -677,6 +742,11 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
                     <Link className="w-4 h-4 mr-2" />
                     {t('media.library.importLinkOriginal')}
                   </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => void handleImportFolder()}>
+                    <Folder className="w-4 h-4 mr-2 text-amber-500" />
+                    Import folder...
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -694,6 +764,24 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
                 <Link className="w-3.5 h-3.5" />
                 <span className={headerCompactLevel >= 2 ? 'hidden' : 'hidden @[360px]:inline'}>
                   {t('media.library.url')}
+                </span>
+              </button>
+            </HeaderActionTooltip>
+
+            {/* New folder action */}
+            <HeaderActionTooltip label="New Folder">
+              <button
+                onClick={() => setShowNewFolderDialog(true)}
+                disabled={!currentProjectId}
+                className="flex items-center gap-1.5 h-7 px-2.5 rounded-md shrink-0 border
+                  bg-secondary border-border text-muted-foreground
+                  hover:text-amber-400 hover:bg-amber-500/10 hover:border-amber-500/40
+                  disabled:opacity-40 disabled:cursor-not-allowed
+                  transition-colors duration-150"
+              >
+                <FolderPlus className="w-3.5 h-3.5" />
+                <span className={headerCompactLevel >= 3 ? 'hidden' : 'hidden @[380px]:inline'}>
+                  Folder
                 </span>
               </button>
             </HeaderActionTooltip>
@@ -816,6 +904,49 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
           </div>
         </TooltipProvider>
       </div>
+
+      {/* New Folder Dialog */}
+      <Dialog
+        open={showNewFolderDialog}
+        onOpenChange={(open) => {
+          setShowNewFolderDialog(open)
+          if (!open) setNewFolderName('')
+        }}
+      >
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>New Folder</DialogTitle>
+            <DialogDescription>Enter a folder name to organize your media files.</DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleCreateFolder} className="space-y-4">
+            <div className="space-y-2">
+              <Input
+                autoFocus
+                placeholder="e.g. voice, image, video"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+              />
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setShowNewFolderDialog(false)
+                  setNewFolderName('')
+                }}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button type="submit" disabled={newFolderName.trim().length === 0}>
+                Create Folder
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={showImportUrlDialog}
@@ -1181,6 +1312,27 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
         </div>
       )}
 
+      {/* Folder navigation banner — shown when inside a folder */}
+      {currentFolder !== null && (
+        <div className="px-3 py-1.5 border-b border-amber-500/30 bg-amber-500/10 flex items-center justify-between gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <button
+              onClick={() => setCurrentFolder(null)}
+              className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-200 transition-colors font-medium"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Media</span>
+            </button>
+            <span className="text-xs text-amber-500/60">/</span>
+            <FolderOpen className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="text-xs text-amber-200 font-semibold truncate">{currentFolder}</span>
+          </div>
+          <span className="text-[11px] text-amber-300/80 shrink-0 font-mono">
+            {filteredMediaItems.length} {filteredMediaItems.length === 1 ? 'item' : 'items'}
+          </span>
+        </div>
+      )}
+
       {/* Scrollable content: wrapper provides relative context for the drag overlay */}
       <div className="flex-1 relative min-h-0">
         {sceneBrowserOpen && (
@@ -1205,6 +1357,45 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
           {/* Compositions section — collapsible, auto-hidden when empty */}
           <CompositionsSection />
 
+          {/* Folders section — shown at root when not searching and folders exist */}
+          {currentFolder === null && !searchQuery && allFolders.length > 0 && (
+            <div className="mb-4">
+              <div className="flex items-center justify-between py-2 px-1">
+                <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide uppercase text-muted-foreground">
+                  <Folder className="w-3.5 h-3.5 text-amber-500 fill-amber-500/20" />
+                  <span>Folders</span>
+                  <span className="text-[10px] tabular-nums text-muted-foreground ml-1">
+                    {allFolders.length}
+                  </span>
+                </div>
+              </div>
+              <div
+                className={
+                  viewMode === 'grid'
+                    ? `grid ${GRID_GAP_BY_SIZE[mediaItemSize] ?? GRID_GAP_BY_SIZE[3]}`
+                    : 'space-y-1'
+                }
+                style={
+                  viewMode === 'grid'
+                    ? {
+                        gridTemplateColumns: `repeat(auto-fill, minmax(min(${GRID_MIN_SIZE_PX[mediaItemSize] ?? GRID_MIN_SIZE_PX[3]}px, 100%), 1fr))`,
+                      }
+                    : undefined
+                }
+              >
+                {allFolders.map((folder) => (
+                  <MediaFolderCard
+                    key={folder.name}
+                    name={folder.name}
+                    count={folder.count}
+                    layout={viewMode}
+                    onOpen={setCurrentFolder}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Media sections — grouped by type */}
           {mediaGroups.map((group) => (
             <MediaTypeGroupView
@@ -1228,8 +1419,28 @@ export const MediaLibrary = memo(function MediaLibrary({ onMediaSelect }: MediaL
           ))}
 
           {/* Loading / empty state when no groups to show */}
-          {mediaGroups.length === 0 && (
+          {mediaGroups.length === 0 && allFolders.length === 0 && (
             <EmptyMediaGrid onMediaSelect={onMediaSelect} itemSize={mediaItemSize} />
+          )}
+          {mediaGroups.length === 0 && allFolders.length > 0 && currentFolder === null && (
+            <div className="text-center py-8 border border-dashed border-border/50 rounded-lg p-4 mt-2">
+              <p className="text-xs text-muted-foreground">
+                Drop files here to add to root, or drag into any folder above.
+              </p>
+            </div>
+          )}
+          {mediaGroups.length === 0 && currentFolder !== null && (
+            <div className="text-center py-16 border border-dashed border-border/50 rounded-lg p-6 mt-4">
+              <FolderOpen className="w-10 h-10 mx-auto text-amber-500/40 mb-3" />
+              <p className="text-sm font-medium text-foreground mb-1">Folder is empty</p>
+              <p className="text-xs text-muted-foreground mb-3">
+                Drop files or click Import to add media to &quot;{currentFolder}&quot;
+              </p>
+              <Button size="sm" variant="outline" className="text-xs" onClick={handleImport}>
+                <Upload className="w-3.5 h-3.5 mr-1.5" />
+                Import to folder
+              </Button>
+            </div>
           )}
         </div>
 

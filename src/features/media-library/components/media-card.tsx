@@ -25,6 +25,8 @@ import {
   Wind,
   Maximize2,
   X,
+  Folder,
+  FolderOpen,
 } from 'lucide-react'
 import {
   ContextMenu,
@@ -44,7 +46,7 @@ import { importMediaAnalysisService } from '../services/media-analysis-service-l
 import { getMediaType, formatDuration } from '../utils/validation'
 import { MediaInfoPopover } from './media-info-popover'
 import { getSharedProxyKey } from '../utils/proxy-key'
-import { useMediaLibraryStore } from '../stores/media-library-store'
+import { useMediaLibraryStore, useMediaFolders } from '../stores/media-library-store'
 import { useMediaPreparationStore } from '../stores/media-preparation-store'
 import { CARD_GRID_BASE, CARD_LIST_BASE, CARD_PERF_STYLE } from './card-styles'
 import { setMediaDragData, clearMediaDragData } from '../utils/drag-data-cache'
@@ -114,6 +116,8 @@ interface MediaCardActionMenuProps {
   isExtractingEmbeddedSubtitles: boolean
   isTaggable: boolean
   isTagging: boolean
+  targetMediaIds?: string[]
+  currentFolder?: string | null
   onGenerateProxy: (event: React.MouseEvent) => void | Promise<void>
   onDeleteProxy: (event: React.MouseEvent) => Promise<void>
   onGenerateTranscript: (event: React.MouseEvent) => void | Promise<void>
@@ -314,6 +318,7 @@ function resolveMenuVisibility(props: MediaCardActionMenuProps) {
   }
 }
 
+// fallow-ignore-next-line complexity
 function MediaCardActionMenuItems(props: MediaCardActionMenuProps) {
   const {
     onRelink,
@@ -420,6 +425,17 @@ function MediaCardActionMenuItems(props: MediaCardActionMenuProps) {
     groups.push(<AiActions key="ai" t={t} onAnalyzeWithAI={onAnalyzeWithAI} />)
   }
 
+  if (props.targetMediaIds && props.targetMediaIds.length > 0) {
+    groups.push(
+      <FolderActions
+        key="folder"
+        t={t}
+        targetMediaIds={props.targetMediaIds}
+        currentFolder={props.currentFolder}
+      />,
+    )
+  }
+
   groups.push(<DeleteMediaAction key="destructive" t={t} onDelete={onDelete} />)
 
   return (
@@ -430,6 +446,58 @@ function MediaCardActionMenuItems(props: MediaCardActionMenuProps) {
           {group}
         </Fragment>
       ))}
+    </>
+  )
+}
+
+type FolderActionsProps = MediaCardMenuGroupProps & {
+  targetMediaIds: string[]
+  currentFolder?: string | null
+}
+
+function FolderActions({ targetMediaIds, currentFolder }: FolderActionsProps) {
+  const folders = useMediaFolders()
+  const moveMediaToFolder = useMediaLibraryStore((s) => s.moveMediaToFolder)
+
+  if (folders.length === 0 && !currentFolder) {
+    return null
+  }
+
+  return (
+    <>
+      <ContextMenuLabel>Folder</ContextMenuLabel>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>
+          <Folder className="w-3 h-3 mr-2 text-amber-500" />
+          Move to folder
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent>
+          {currentFolder && (
+            <ContextMenuItem
+              onClick={(e) => {
+                e.stopPropagation()
+                void moveMediaToFolder(targetMediaIds, null)
+              }}
+            >
+              <FolderOpen className="w-3 h-3 mr-2 text-muted-foreground" />
+              Root (Remove from folder)
+            </ContextMenuItem>
+          )}
+          {folders.map((f) => (
+            <ContextMenuItem
+              key={f.name}
+              disabled={f.name === currentFolder}
+              onClick={(e) => {
+                e.stopPropagation()
+                void moveMediaToFolder(targetMediaIds, f.name)
+              }}
+            >
+              <Folder className="w-3 h-3 mr-2 text-amber-500" />
+              {f.name}
+            </ContextMenuItem>
+          ))}
+        </ContextMenuSubContent>
+      </ContextMenuSub>
     </>
   )
 }
@@ -1538,6 +1606,8 @@ const MediaCardInternal = memo(function MediaCardInternal({
 
   const actionMenuItems = (
     <MediaCardActionMenuItems
+      targetMediaIds={getTargetMediaItems().map((m) => m.id)}
+      currentFolder={media.folderPath}
       isBroken={isBroken}
       onRelink={onRelink}
       canGenerateProxy={canGenerateProxy}
@@ -1703,6 +1773,11 @@ const MediaCardInternal = memo(function MediaCardInternal({
                     <h3 className="text-xs font-medium text-foreground truncate">
                       {media.fileName}
                     </h3>
+                    {media.folderPath && (
+                      <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[9px] font-mono flex-shrink-0">
+                        {media.folderPath}
+                      </span>
+                    )}
                     {(mediaType === 'video' || mediaType === 'audio') && media.duration > 0 && (
                       <span className="text-[10px] text-muted-foreground flex-shrink-0">
                         {formatDuration(media.duration)}
@@ -1853,12 +1928,23 @@ const MediaCardInternal = memo(function MediaCardInternal({
                     {mediaType === 'lottie' && <FileJson className="w-2.5 h-2.5" />}
                   </div>
 
-                  {/* Duration badge */}
-                  {(mediaType === 'video' || mediaType === 'audio') && media.duration > 0 && (
-                    <div className="px-1 py-0.5 bg-black/70 border border-white/20 rounded text-[8px] font-mono text-white">
-                      {formatDuration(media.duration)}
-                    </div>
-                  )}
+                  {/* Duration badge and folder badge */}
+                  <div className="flex items-center gap-1 overflow-hidden">
+                    {media.folderPath && (
+                      <div
+                        className="px-1 py-0.5 bg-black/70 border border-amber-500/40 rounded text-[8px] font-mono text-amber-300 flex items-center gap-0.5 truncate max-w-[65px]"
+                        title={media.folderPath}
+                      >
+                        <Folder className="w-2 h-2 text-amber-400 shrink-0" />
+                        <span className="truncate">{media.folderPath}</span>
+                      </div>
+                    )}
+                    {(mediaType === 'video' || mediaType === 'audio') && media.duration > 0 && (
+                      <div className="px-1 py-0.5 bg-black/70 border border-white/20 rounded text-[8px] font-mono text-white shrink-0">
+                        {formatDuration(media.duration)}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
               {canScrubPreview && skimProgress !== null && (
