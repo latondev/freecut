@@ -52,6 +52,31 @@ type GateStatus =
   | { kind: 'reconnect'; handleName: string } // Saved handle, permission revoked
   | { kind: 'ready' }
 
+// fallow-ignore-next-line complexity
+async function attemptAutoReconnect(handle: FileSystemDirectoryHandle): Promise<boolean> {
+  const electronAPI = (
+    window as unknown as {
+      electronAPI?: { requestAutoReconnect?: () => Promise<boolean> }
+    }
+  ).electronAPI
+
+  if (electronAPI?.requestAutoReconnect) {
+    try {
+      const reconnected = await electronAPI.requestAutoReconnect()
+      if (reconnected) return true
+    } catch (e) {
+      logger.warn('Electron auto-reconnect attempt failed', e)
+    }
+  }
+
+  try {
+    const permission = await requestHandlePermission(handle)
+    return permission === 'granted'
+  } catch {
+    return false
+  }
+}
+
 export function WorkspaceGate({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<GateStatus>({ kind: 'initializing' })
   const [error, setError] = useState<string | null>(null)
@@ -82,34 +107,55 @@ export function WorkspaceGate({ children }: { children: React.ReactNode }) {
   // Initial load: check if we have a saved handle, check its permission.
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
+
+    // fallow-ignore-next-line complexity
+    const initialize = async () => {
       if (!isFileSystemAccessSupported()) {
         if (!cancelled) setStatus({ kind: 'unavailable' })
         return
       }
-      // Promote any legacy `workspace:current` into a proper known-workspace
-      // record before we read it, so the indicator's "known workspaces" list
-      // includes the one the user is about to use.
+
       await ensureKnownWorkspaceForCurrent()
       const record = await getWorkspaceHandleRecord()
       if (!record) {
         if (!cancelled) setStatus({ kind: 'pick' })
         return
       }
+
       const handle = record.handle as FileSystemDirectoryHandle
+      ;(
+        window as unknown as { __freecut_do_reconnect__?: () => Promise<boolean> }
+      ).__freecut_do_reconnect__ = async () => {
+        const granted = (await requestHandlePermission(handle)) === 'granted'
+        if (granted) await activate(handle)
+        return granted
+      }
+
       const permission = await queryHandlePermission(handle)
       if (cancelled) return
       if (permission === 'granted') {
         await activate(handle)
-      } else {
-        setStatus({ kind: 'reconnect', handleName: record.name })
+        return
       }
-    })().catch((error) => {
+
+      const autoReconnected = await attemptAutoReconnect(handle)
+      if (cancelled) return
+      if (autoReconnected) {
+        await activate(handle)
+        return
+      }
+
+      setStatus({ kind: 'reconnect', handleName: record.name })
+    }
+
+    initialize().catch((error) => {
       logger.error('Gate initialization failed', error)
       if (!cancelled) setStatus({ kind: 'pick' })
     })
+
     return () => {
       cancelled = true
+      delete (window as unknown as { __freecut_do_reconnect__?: unknown }).__freecut_do_reconnect__
     }
   }, [activate])
 

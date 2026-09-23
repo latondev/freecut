@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import { FolderOpen, FolderX, Loader2, RefreshCw, AlertTriangle, BookOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -18,6 +19,20 @@ interface Props {
 
 export function WorkspaceGateSplash({ status, error, onPickFolder, onReconnect }: Props) {
   const { t } = useTranslation()
+
+  // If user gestures anywhere (clicking anywhere or pressing Enter/Space), trigger reconnect immediately
+  useEffect(() => {
+    if (status.kind !== 'reconnect') return
+    const handleGesture = () => {
+      onReconnect()
+    }
+    window.addEventListener('pointerdown', handleGesture, { once: true })
+    window.addEventListener('keydown', handleGesture, { once: true })
+    return () => {
+      window.removeEventListener('pointerdown', handleGesture)
+      window.removeEventListener('keydown', handleGesture)
+    }
+  }, [status.kind, onReconnect])
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-6">
       <div className="max-w-lg w-full text-center">
@@ -99,7 +114,7 @@ export function WorkspaceGateSplash({ status, error, onPickFolder, onReconnect }
                 <FolderOpen className="h-4 w-4" />
                 {t('projects.workspaceGate.chooseDifferentFolder')}
               </Button>
-              <Button size="lg" className="gap-2" onClick={onReconnect}>
+              <Button size="lg" className="gap-2" onClick={onReconnect} autoFocus>
                 <RefreshCw className="h-4 w-4" />
                 {t('projects.workspaceGate.reconnect')}
               </Button>

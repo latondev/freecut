@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell, session, screen } = require('electron');
+const { app, BrowserWindow, Menu, shell, session, screen, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -11,7 +11,7 @@ if (!gotTheLock) {
 }
 
 // 2. Hardware Acceleration & High-Performance Discrete GPU Flags
-app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer,VaapiVideoDecoder,WebCodecs');
+app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer,VaapiVideoDecoder,WebCodecs,FileSystemAccessPersistentPermissions');
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
@@ -195,12 +195,22 @@ function startLocalServer(distDir) {
       }
     });
 
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      resolve({ server, port: address.port });
+    const PREFERRED_PORT = 24678;
+    server.listen(PREFERRED_PORT, '127.0.0.1', () => {
+      resolve({ server, port: PREFERRED_PORT });
     });
 
-    server.on('error', reject);
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.warn(`[Desktop] Port ${PREFERRED_PORT} in use, picking random open port.`);
+        server.listen(0, '127.0.0.1', () => {
+          const address = server.address();
+          resolve({ server, port: address.port });
+        });
+      } else {
+        reject(err);
+      }
+    });
   });
 }
 
@@ -354,6 +364,32 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(async () => {
+  // Auto-approve permission requests (including File System Access API)
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    callback(true);
+  });
+  session.defaultSession.setPermissionCheckHandler(() => true);
+  session.defaultSession.setDevicePermissionHandler(() => true);
+
+  // Handle auto-reconnect requests from renderer with userGesture context
+  ipcMain.handle('freecut:request-user-gesture-reconnect', async (event) => {
+    const sender = event.sender;
+    if (!sender || sender.isDestroyed()) return false;
+    try {
+      return await sender.executeJavaScript(`
+        (async () => {
+          if (typeof window.__freecut_do_reconnect__ === 'function') {
+            return await window.__freecut_do_reconnect__();
+          }
+          return false;
+        })()
+      `, true /* userGesture = true */);
+    } catch (err) {
+      console.warn('[Desktop] Auto-reconnect with userGesture failed:', err);
+      return false;
+    }
+  });
+
   // Ensure headers for any internal interceptor
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const responseHeaders = { ...details.responseHeaders };
