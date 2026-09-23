@@ -1,0 +1,1824 @@
+import { Theme } from "theme.slint";
+
+export struct TrackVisual {
+    id: string,
+    name: string,
+    is-video: bool,
+    locked: bool,
+    muted: bool,
+}
+
+export struct ClipVisual {
+    id: string,
+    name: string,
+    track-index: int,
+    start-px: length,
+    width-px: length,
+    timeline-start: int,
+    timeline-duration: int,
+    is-video: bool,
+    is-selected: bool,
+}
+
+export component App inherits Window {
+    title: "FreeCut";
+    background: Theme.page;
+    preferred-width: 1400px;
+    preferred-height: 900px;
+    min-width: 960px;
+    min-height: 600px;
+
+    in-out property <bool> dark: true;
+    in-out property <bool> has-project: false;
+    in-out property <string> project-name: "Untitled project";
+    in-out property <string> project-status: "Ready";
+    in-out property <string> workspace-mode: "Editor";
+    in-out property <[string]> panes;
+    in-out property <[string]> media-items;
+    in-out property <string> selected-media: "Nothing selected";
+    in-out property <string> selected-clip: "Nothing selected";
+    in-out property <int> clip-count: 0;
+
+    // Dock & Layout properties
+    in-out property <length> media-width: 276px;
+    in-out property <length> inspector-width: 292px;
+    in-out property <length> timeline-height: 280px;
+    in-out property <bool> show-media: true;
+    in-out property <bool> show-inspector: true;
+    in-out property <string> active-menu: "";
+    in-out property <bool> show-settings-dialog: false;
+
+    // Phase 2 Core & Command properties
+    in-out property <bool> can-undo: false;
+    in-out property <bool> can-redo: false;
+    in-out property <bool> is-dirty: false;
+    in-out property <[string]> timeline-clips;
+
+    // Phase 3 Timeline Visual properties
+    in-out property <[TrackVisual]> timeline-tracks;
+    in-out property <[ClipVisual]> visual-clips;
+    in-out property <int> playhead-frame: 0;
+    in-out property <string> playhead-timecode: "00:00:00:00";
+    in-out property <length> playhead-px: 0px;
+    in-out property <float> timeline-zoom: 1.0;
+    in-out property <string> timeline-zoom-text: "100%";
+    in-out property <bool> has-selected-clip: false;
+    in-out property <string> selected-clip-name: "Nothing selected";
+    in-out property <string> selected-clip-track: "V1";
+    in-out property <int> selected-clip-start: 0;
+    in-out property <int> selected-clip-duration: 0;
+
+    // Phase 4 Preview & Playback properties
+    in-out property <bool> is-playing: false;
+    in-out property <bool> is-looping: false;
+    in-out property <string> total-duration-timecode: "00:00:11:00";
+    in-out property <string> aspect-ratio: "16:9";
+    in-out property <image> preview-frame;
+    in-out property <bool> has-preview-frame: false;
+
+    // Phase 5 Export properties
+    // Phase 5 Export properties
+    in-out property <bool> show-export-dialog: false;
+    in-out property <string> export-preset: "YouTube 1080p";
+    in-out property <string> export-resolution: "1920x1080";
+    in-out property <string> export-fps: "30 fps";
+    in-out property <string> export-format: "AVI Video (.avi)";
+    in-out property <string> export-output-path: "C:\\Users\\PC\\Videos\\FreeCut_Export.avi";
+    in-out property <bool> is-exporting: false;
+    in-out property <float> export-progress: 0.0;
+    in-out property <string> export-status-text: "Ready to export";
+    in-out property <bool> export-completed: false;
+    in-out property <string> export-error: "";
+
+    // Phase 6 UX Parity & Inspector Properties
+    in-out property <string> inspector-tab: "video";
+    in-out property <float> clip-scale: 1.0;
+    in-out property <float> clip-pos-x: 0.0;
+    in-out property <float> clip-pos-y: 0.0;
+    in-out property <float> clip-rotation: 0.0;
+    in-out property <float> clip-opacity: 1.0;
+    in-out property <float> clip-speed: 1.0;
+
+    in-out property <float> clip-volume-db: 0.0;
+    in-out property <bool> clip-muted: false;
+
+    in-out property <float> clip-brightness: 0.0;
+    in-out property <float> clip-contrast: 0.0;
+    in-out property <float> clip-saturation: 0.0;
+    in-out property <bool> clip-grayscale: false;
+    in-out property <bool> clip-invert: false;
+
+    // Phase 6 Media Library & Notifications
+    in-out property <string> media-search-query: "";
+    in-out property <bool> show-toast: false;
+    in-out property <string> toast-message: "";
+    in-out property <string> toast-kind: "info";
+    in-out property <string> autosave-status: "Saved";
+
+    callback new-project();
+    callback open-project();
+    callback save-project();
+    callback save-as-project();
+    callback import-media();
+    callback export-project();
+    callback toggle-theme();
+    callback media-selected(index: int);
+    callback clip-selected(index: int);
+
+    // Phase 1 Dock & Shell callbacks
+    callback layout-changed(media-w: length, inspector-w: length, timeline-h: length);
+    callback reset-layout();
+    callback toggle-media();
+    callback toggle-inspector();
+    callback open-settings();
+    callback close-settings();
+
+    // Phase 2 Command callbacks
+    callback undo-action();
+    callback redo-action();
+    callback delete-clip(index: int);
+
+    // Phase 3 Timeline callbacks
+    callback seek-playhead-px(px: length);
+    callback select-clip-id(id: string);
+    callback split-at-playhead();
+    callback delete-selected-clip();
+    callback add-sample-clip(is-video: bool);
+    callback zoom-in();
+    callback zoom-out();
+    callback toggle-track-mute(track-index: int);
+    callback toggle-track-lock(track-index: int);
+    callback add-track(is-video: bool);
+
+    // Phase 4 Playback callbacks
+    callback toggle-playback();
+    callback step-frame(delta: int);
+    callback jump-to-start();
+    callback jump-to-end();
+    callback toggle-loop();
+    callback set-aspect-ratio(ratio: string);
+
+    // Phase 5 Export callbacks
+    callback open-export-dialog();
+    callback close-export-dialog();
+    callback browse-export-path();
+    callback start-export();
+    callback cancel-export();
+    callback retry-export();
+    callback reveal-export-file();
+    callback set-export-preset(preset: string);
+    callback set-export-resolution(res: string);
+    callback set-export-fps(fps: string);
+    callback set-export-format(fmt: string);
+
+    // Phase 6 Inspector Callbacks
+    callback set-inspector-tab(tab: string);
+    callback set-clip-scale(scale: float);
+    callback set-clip-pos(pos-x: float, pos-y: float);
+    callback set-clip-rotation(rot: float);
+    callback set-clip-opacity(op: float);
+    callback set-clip-speed(spd: float);
+    callback set-clip-volume(vol: float);
+    callback toggle-clip-mute();
+    callback set-clip-brightness(val: float);
+    callback set-clip-contrast(val: float);
+    callback set-clip-saturation(val: float);
+    callback toggle-clip-grayscale();
+    callback toggle-clip-invert();
+    callback reset-clip-effects();
+
+    // Phase 6 Media Library & Toast Callbacks
+    callback add-media-to-timeline(index: int);
+    callback delete-media-item(index: int);
+    callback dismiss-toast();
+
+    forward-focus: global-focus;
+    global-focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == " " {
+                root.toggle-playback();
+                accept
+            } else if event.text == "s" || event.text == "S" {
+                root.split-at-playhead();
+                accept
+            } else if event.text == Key.Delete || event.text == Key.Backspace {
+                root.delete-selected-clip();
+                accept
+            } else if event.text == Key.LeftArrow {
+                root.step-frame(-1);
+                accept
+            } else if event.text == Key.RightArrow {
+                root.step-frame(1);
+                accept
+            } else if event.text == Key.Home {
+                root.jump-to-start();
+                accept
+            } else if event.text == Key.End {
+                root.jump-to-end();
+                accept
+            } else if event.modifiers.control && (event.text == "z" || event.text == "Z") {
+                root.undo-action();
+                accept
+            } else if event.modifiers.control && (event.text == "y" || event.text == "Y") {
+                root.redo-action();
+                accept
+            } else if event.modifiers.control && (event.text == "s" || event.text == "S") {
+                root.save-project();
+                accept
+            } else if event.modifiers.control && (event.text == "e" || event.text == "E") {
+                root.open-export-dialog();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+
+    // Main Layout
+
+    VerticalLayout {
+        spacing: 0px;
+        padding: 0px;
+
+        // Titlebar & Main Menu
+        Rectangle {
+            height: 38px;
+            background: Theme.panel;
+            Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
+            HorizontalLayout {
+                padding-left: 14px; padding-right: 8px; spacing: 6px;
+                Text { text: "FC"; color: Theme.accent; font-size: 13px; font-weight: 700; vertical-alignment: center; }
+                Text { text: "FreeCut"; color: Theme.fg; font-size: 14px; font-weight: 600; vertical-alignment: center; }
+                Rectangle { width: 1px; height: 18px; background: Theme.line; y: 10px; }
+
+                // File Menu Button
+                Rectangle {
+                    width: 36px; height: 26px; border-radius: 4px;
+                    background: (root.active-menu == "file" || touch-file.has-hover) ? Theme.field-hover : Colors.transparent;
+                    Text { text: "File"; color: Theme.fg; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; font-size: 12px; }
+                    touch-file := TouchArea {
+                        clicked => {
+                            root.active-menu = (root.active-menu == "file") ? "" : "file";
+                        }
+                    }
+                }
+
+                // Edit Menu Button
+                Rectangle {
+                    width: 36px; height: 26px; border-radius: 4px;
+                    background: (root.active-menu == "edit" || touch-edit.has-hover) ? Theme.field-hover : Colors.transparent;
+                    Text { text: "Edit"; color: Theme.fg; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; font-size: 12px; }
+                    touch-edit := TouchArea {
+                        clicked => {
+                            root.active-menu = (root.active-menu == "edit") ? "" : "edit";
+                        }
+                    }
+                }
+
+                // View Menu Button
+                Rectangle {
+                    width: 42px; height: 26px; border-radius: 4px;
+                    background: (root.active-menu == "view" || touch-view.has-hover) ? Theme.field-hover : Colors.transparent;
+                    Text { text: "View"; color: Theme.fg; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; font-size: 12px; }
+                    touch-view := TouchArea {
+                        clicked => {
+                            root.active-menu = (root.active-menu == "view") ? "" : "view";
+                        }
+                    }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                // Center Project Status
+                Text {
+                    text: root.project-name + (root.is-dirty ? " *" : "");
+                    color: root.is-dirty ? Theme.accent : Theme.fg-muted;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                }
+                Text { text: "·"; color: Theme.fg-dim; vertical-alignment: center; }
+                Text { text: root.project-status; color: Theme.fg-dim; font-size: 11px; vertical-alignment: center; }
+
+                Rectangle { width: 1px; height: 18px; background: Theme.line; y: 10px; }
+
+                // Quick Action Buttons
+                Rectangle {
+                    width: 46px; height: 26px; border-radius: 4px;
+                    background: touch-new.has-hover ? Theme.field-hover : Colors.transparent;
+                    Text { text: "New"; color: Theme.fg-muted; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; font-size: 11px; }
+                    touch-new := TouchArea { clicked => { root.new-project(); } }
+                }
+                Rectangle {
+                    width: 46px; height: 26px; border-radius: 4px;
+                    background: touch-open.has-hover ? Theme.field-hover : Colors.transparent;
+                    Text { text: "Open"; color: Theme.fg-muted; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; font-size: 11px; }
+                    touch-open := TouchArea { clicked => { root.open-project(); } }
+                }
+                Rectangle {
+                    width: 46px; height: 26px; border-radius: 4px;
+                    background: touch-save.has-hover ? Theme.field-hover : Colors.transparent;
+                    Text { text: "Save"; color: Theme.fg-muted; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; font-size: 11px; }
+                    touch-save := TouchArea { clicked => { root.save-project(); } }
+                }
+                Rectangle {
+                    width: 58px; height: 26px; border-radius: 4px;
+                    background: touch-settings.has-hover ? Theme.field-hover : Colors.transparent;
+                    Text { text: "Settings"; color: Theme.fg-muted; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; font-size: 11px; }
+                    touch-settings := TouchArea { clicked => { root.open-settings(); } }
+                }
+                Rectangle {
+                    width: 50px; height: 26px; border-radius: 4px;
+                    background: touch-theme.has-hover ? Theme.field-hover : Colors.transparent;
+                    Text { text: root.dark ? "Light" : "Dark"; color: Theme.fg-muted; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; font-size: 11px; }
+                    touch-theme := TouchArea { clicked => { root.toggle-theme(); } }
+                }
+                Rectangle {
+                    width: 76px; height: 26px; border-radius: 4px;
+                    background: touch-export.has-hover ? Theme.accent-hover : Theme.accent;
+                    Text { text: "Export"; color: Theme.on-accent; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; font-weight: 600; font-size: 11px; }
+                    touch-export := TouchArea { clicked => { root.open-export-dialog(); } }
+                }
+            }
+        }
+
+        // Workspace Panels with Resizable Splitters
+        HorizontalLayout {
+            vertical-stretch: 1;
+            padding: 8px;
+            spacing: 0px;
+
+            // 1. Media Library Pane
+            if root.show-media : Rectangle {
+                width: root.media-width;
+                background: Theme.panel;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: Theme.line;
+
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 9px;
+                    HorizontalLayout {
+                        height: 24px;
+                        Text { text: "Media Library"; color: Theme.fg; font-size: 14px; font-weight: 600; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: root.media-items.length + " items"; color: Theme.fg-dim; font-size: 10px; vertical-alignment: center; }
+                        // Hide button
+                        Rectangle {
+                            width: 20px; height: 20px; border-radius: 3px;
+                            background: touch-hide-media.has-hover ? Theme.field-hover : Colors.transparent;
+                            Text { text: "✕"; color: Theme.fg-dim; horizontal-alignment: center; vertical-alignment: center; font-size: 10px; width: parent.width; height: parent.height; }
+                            touch-hide-media := TouchArea { clicked => { root.toggle-media(); } }
+                        }
+                    }
+                    Rectangle { height: 1px; background: Theme.line; }
+                    Rectangle {
+                        height: 34px; border-radius: 5px; background: touch-import.has-hover ? Theme.field-hover : Theme.field;
+                        Text { text: "+ Import media"; color: Theme.fg; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; font-size: 11px; }
+                        touch-import := TouchArea { clicked => { root.import-media(); } }
+                    }
+                    Text { text: "Click to select video, audio or images"; color: Theme.fg-dim; font-size: 10px; horizontal-alignment: center; width: parent.width; }
+                    Rectangle { height: 1px; background: Theme.line; }
+                    VerticalLayout {
+                        spacing: 6px;
+                        for item[i] in root.media-items: Rectangle {
+                            height: 48px; border-radius: 5px; background: Theme.well;
+                            border-width: 1px; border-color: Theme.line;
+                            HorizontalLayout {
+                                padding-left: 8px; padding-right: 8px; spacing: 8px;
+                                Text { text: "🎬"; font-size: 14px; vertical-alignment: center; }
+                                VerticalLayout {
+                                    vertical-stretch: 1; alignment: center;
+                                    Text { text: item; color: Theme.fg; font-size: 11px; font-weight: 600; overflow: elide; }
+                                    Text { text: "Asset #" + (i + 1) + " • 1080p"; color: Theme.fg-dim; font-size: 9px; }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                // Quick Add button
+                                Rectangle {
+                                    width: 44px; height: 26px; border-radius: 3px;
+                                    background: add-tl-btn.has-hover ? Theme.accent-hover : Theme.accent;
+                                    Text { text: "+ Add"; color: Theme.on-accent; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    add-tl-btn := TouchArea { clicked => { root.add-media-to-timeline(i); } }
+                                }
+                                // Quick Delete button
+                                Rectangle {
+                                    width: 24px; height: 26px; border-radius: 3px;
+                                    background: del-media-btn.has-hover ? #ef444433 : Colors.transparent;
+                                    Text { text: "🗑"; color: del-media-btn.has-hover ? #ef4444 : Theme.fg-dim; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    del-media-btn := TouchArea { clicked => { root.delete-media-item(i); } }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+                    HorizontalLayout {
+                        Text { text: "Local project media"; color: Theme.fg-dim; font-size: 10px; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: "Auto-saved"; color: Theme.accent; font-size: 9px; vertical-alignment: center; }
+                    }
+                }
+            }
+
+            // Left Splitter (between Media and Center Workspace)
+            if root.show-media : Rectangle {
+                width: 8px;
+                background: Colors.transparent;
+                Rectangle {
+                    width: 2px;
+                    x: 3px;
+                    height: parent.height - 16px;
+                    y: 8px;
+                    border-radius: 1px;
+                    background: split-left-touch.pressed ? Theme.splitter-active : (split-left-touch.has-hover ? Theme.splitter-hover : Theme.splitter);
+                }
+                split-left-touch := TouchArea {
+                    mouse-cursor: col-resize;
+                    moved => {
+                        if (self.pressed) {
+                            root.media-width = max(180px, min(480px, root.media-width + (self.mouse-x - self.pressed-x)));
+                            root.layout-changed(root.media-width, root.inspector-width, root.timeline-height);
+                        }
+                    }
+                }
+            }
+
+            // 2. Center Workspace (Preview + Timeline separated by Horizontal Splitter)
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 0px;
+
+                // Preview Monitor Pane
+                Rectangle {
+                    vertical-stretch: 1;
+                    min-height: 180px;
+                    background: Theme.panel;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: Theme.line;
+
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 8px;
+
+                        // Header Bar with Aspect Ratio Selector
+                        HorizontalLayout {
+                            height: 22px;
+                            spacing: 8px;
+                            Text { text: "Preview Monitor"; color: Theme.fg; font-size: 12px; font-weight: 600; vertical-alignment: center; }
+                            Rectangle {
+                                width: 56px; height: 20px; border-radius: 3px; background: Theme.field;
+                                HorizontalLayout {
+                                    alignment: center;
+                                    Text { text: root.aspect-ratio; color: Theme.accent; font-size: 10px; font-weight: 700; vertical-alignment: center; }
+                                }
+                                TouchArea {
+                                    clicked => {
+                                        root.set-aspect-ratio(root.aspect-ratio == "16:9" ? "9:16" : "16:9");
+                                    }
+                                }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text { text: "1920x1080 • 30 fps"; color: Theme.fg-dim; font-size: 10px; vertical-alignment: center; }
+                        }
+                        Rectangle { height: 1px; background: Theme.line; }
+
+                        // Video Display Box
+                        Rectangle {
+                            vertical-stretch: 1;
+                            background: #09090b;
+                            border-radius: 4px;
+                            clip: true;
+
+                            if root.has-preview-frame : Image {
+                                width: parent.width;
+                                height: parent.height;
+                                source: root.preview-frame;
+                                image-fit: contain;
+                            }
+
+                            if !root.has-preview-frame : VerticalLayout {
+                                alignment: center;
+                                spacing: 8px;
+                                Text {
+                                    text: root.has-selected-clip ? ("🎬 Editing: " + root.selected-clip-name) : (root.has-project ? "Preview Monitor (Ready)" : "Create or open a project");
+                                    color: Theme.fg; horizontal-alignment: center; vertical-alignment: center;
+                                    font-size: 14px; font-weight: 600;
+                                }
+                                Text {
+                                    text: "Timecode: " + root.playhead-timecode;
+                                    color: Theme.accent; horizontal-alignment: center; vertical-alignment: center;
+                                    font-size: 12px; font-weight: 700;
+                                }
+                                if root.has-selected-clip: Text {
+                                    text: "Track: " + root.selected-clip-track + " • Duration: " + root.selected-clip-duration + " frames";
+                                    color: Theme.fg-dim; horizontal-alignment: center; vertical-alignment: center;
+                                    font-size: 11px;
+                                }
+                            }
+
+                            // Overlay Timecode Badge on bottom-left
+                            if root.has-preview-frame : Rectangle {
+                                x: 10px;
+                                y: parent.height - 30px;
+                                width: 96px;
+                                height: 20px;
+                                border-radius: 3px;
+                                background: #000000bb;
+                                HorizontalLayout {
+                                    alignment: center;
+                                    Text { text: root.playhead-timecode; color: Theme.accent; font-size: 10px; font-weight: 700; vertical-alignment: center; }
+                                }
+                            }
+
+                            // Overlay Clip Name Badge on top-left
+                            if root.has-preview-frame && root.has-selected-clip : Rectangle {
+                                x: 10px;
+                                y: 10px;
+                                height: 20px;
+                                border-radius: 3px;
+                                background: #000000bb;
+                                HorizontalLayout {
+                                    padding-left: 8px; padding-right: 8px;
+                                    Text { text: "🎬 " + root.selected-clip-name; color: Theme.fg; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                }
+                            }
+                        }
+
+                        // Transport Control Bar
+                        Rectangle {
+                            height: 34px;
+                            border-radius: 4px;
+                            background: Theme.track-bg;
+                            border-width: 1px;
+                            border-color: Theme.line;
+
+                            HorizontalLayout {
+                                padding-left: 10px; padding-right: 10px; spacing: 8px;
+                                alignment: center;
+
+                                // Dual Timecode display
+                                Text {
+                                    text: root.playhead-timecode + " / " + root.total-duration-timecode;
+                                    color: Theme.accent; font-size: 11px; font-weight: 700; vertical-alignment: center;
+                                }
+
+                                Rectangle { horizontal-stretch: 1; }
+
+                                // Transport buttons cluster
+                                HorizontalLayout {
+                                    spacing: 4px;
+                                    alignment: center;
+
+                                    // Jump Start
+                                    Rectangle {
+                                        width: 28px; height: 26px; border-radius: 3px;
+                                        background: btn-js.has-hover ? Theme.field-hover : Theme.field;
+                                        Text { text: "⏮"; color: Theme.fg; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                        btn-js := TouchArea { clicked => { root.jump-to-start(); } }
+                                    }
+
+                                    // Step Back
+                                    Rectangle {
+                                        width: 28px; height: 26px; border-radius: 3px;
+                                        background: btn-sb.has-hover ? Theme.field-hover : Theme.field;
+                                        Text { text: "◀"; color: Theme.fg; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                        btn-sb := TouchArea { clicked => { root.step-frame(-1); } }
+                                    }
+
+                                    // Big Play / Pause Button
+                                    Rectangle {
+                                        width: 44px; height: 26px; border-radius: 4px;
+                                        background: root.is-playing ? Theme.accent : (btn-play.has-hover ? Theme.accent-hover : Theme.field-hover);
+                                        Text {
+                                            text: root.is-playing ? "⏸" : "▶";
+                                            color: root.is-playing ? Theme.on-accent : Theme.accent;
+                                            font-size: 13px; font-weight: 700;
+                                            horizontal-alignment: center; vertical-alignment: center;
+                                            width: parent.width; height: parent.height;
+                                        }
+                                        btn-play := TouchArea { clicked => { root.toggle-playback(); } }
+                                    }
+
+                                    // Step Forward
+                                    Rectangle {
+                                        width: 28px; height: 26px; border-radius: 3px;
+                                        background: btn-sf.has-hover ? Theme.field-hover : Theme.field;
+                                        Text { text: "▶"; color: Theme.fg; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                        btn-sf := TouchArea { clicked => { root.step-frame(1); } }
+                                    }
+
+                                    // Jump End
+                                    Rectangle {
+                                        width: 28px; height: 26px; border-radius: 3px;
+                                        background: btn-je.has-hover ? Theme.field-hover : Theme.field;
+                                        Text { text: "⏭"; color: Theme.fg; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                        btn-je := TouchArea { clicked => { root.jump-to-end(); } }
+                                    }
+                                }
+
+                                Rectangle { horizontal-stretch: 1; }
+
+                                // Loop Toggle Button
+                                Rectangle {
+                                    width: 58px; height: 24px; border-radius: 3px;
+                                    background: root.is-looping ? Theme.accent-soft : (btn-loop.has-hover ? Theme.field-hover : Theme.field);
+                                    border-width: 1px;
+                                    border-color: root.is-looping ? Theme.accent : Colors.transparent;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        Text {
+                                            text: "🔁 Loop";
+                                            color: root.is-looping ? Theme.accent : Theme.fg-dim;
+                                            font-size: 10px; font-weight: 600;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    btn-loop := TouchArea { clicked => { root.toggle-loop(); } }
+                                }
+                            }
+                        }
+                    }
+                }
+
+
+                // Center Splitter (Horizontal splitter between Preview and Timeline)
+                Rectangle {
+                    height: 8px;
+                    background: Colors.transparent;
+                    Rectangle {
+                        height: 2px;
+                        y: 3px;
+                        width: parent.width - 16px;
+                        x: 8px;
+                        border-radius: 1px;
+                        background: split-center-touch.pressed ? Theme.splitter-active : (split-center-touch.has-hover ? Theme.splitter-hover : Theme.splitter);
+                    }
+                    split-center-touch := TouchArea {
+                        mouse-cursor: row-resize;
+                        moved => {
+                            if (self.pressed) {
+                                root.timeline-height = max(140px, min(500px, root.timeline-height - (self.mouse-y - self.pressed-y)));
+                                root.layout-changed(root.media-width, root.inspector-width, root.timeline-height);
+                            }
+                        }
+                    }
+                }
+
+                // Timeline Pane
+                Rectangle {
+                    height: root.timeline-height;
+                    background: Theme.panel;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: Theme.line;
+
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 6px;
+
+                        // 1. Toolbar Timeline
+                        HorizontalLayout {
+                            height: 28px;
+                            spacing: 8px;
+
+                            // Title & Timecode
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: "Timeline"; color: Theme.fg; font-size: 12px; font-weight: 700; vertical-alignment: center; }
+                                Rectangle {
+                                    height: 22px; border-radius: 4px; background: Theme.field;
+                                    HorizontalLayout {
+                                        padding-left: 8px; padding-right: 8px;
+                                        Text { text: root.playhead-timecode; color: Theme.accent; font-size: 11px; font-weight: 700; vertical-alignment: center; }
+                                    }
+                                }
+                            }
+
+                            Rectangle { width: 1px; height: 16px; background: Theme.line; y: 6px; }
+
+                            // Tools: Split, Delete
+                            Rectangle {
+                                width: 64px; height: 24px; border-radius: 4px;
+                                background: btn-split.has-hover ? Theme.field-hover : Theme.field;
+                                HorizontalLayout {
+                                    alignment: center;
+                                    Text { text: "✂ Split"; color: root.has-selected-clip ? Theme.fg : Theme.fg-dim; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                                }
+                                btn-split := TouchArea {
+                                    clicked => { root.split-at-playhead(); }
+                                }
+                            }
+
+                            Rectangle {
+                                width: 64px; height: 24px; border-radius: 4px;
+                                background: btn-del.has-hover ? Theme.danger : Theme.field;
+                                HorizontalLayout {
+                                    alignment: center;
+                                    Text { text: "🗑 Del"; color: root.has-selected-clip ? Theme.fg : Theme.fg-dim; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                                }
+                                btn-del := TouchArea {
+                                    clicked => { root.delete-selected-clip(); }
+                                }
+                            }
+
+                            Rectangle { width: 1px; height: 16px; background: Theme.line; y: 6px; }
+
+                            // Add Sample Clip Buttons
+                            Rectangle {
+                                width: 88px; height: 24px; border-radius: 4px;
+                                background: btn-add-v.has-hover ? #10b98144 : #10b98122;
+                                border-width: 1px; border-color: #10b98166;
+                                HorizontalLayout {
+                                    alignment: center;
+                                    Text { text: "+ Video Clip"; color: #34d399; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                }
+                                btn-add-v := TouchArea {
+                                    clicked => { root.add-sample-clip(true); }
+                                }
+                            }
+
+                            Rectangle {
+                                width: 88px; height: 24px; border-radius: 4px;
+                                background: btn-add-a.has-hover ? #8b5cf644 : #8b5cf622;
+                                border-width: 1px; border-color: #8b5cf666;
+                                HorizontalLayout {
+                                    alignment: center;
+                                    Text { text: "+ Audio Clip"; color: #a78bfa; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                                }
+                                btn-add-a := TouchArea {
+                                    clicked => { root.add-sample-clip(false); }
+                                }
+                            }
+
+                            Rectangle { horizontal-stretch: 1; }
+
+                            // Zoom controls
+                            HorizontalLayout {
+                                spacing: 4px;
+                                Rectangle {
+                                    width: 22px; height: 22px; border-radius: 3px; background: btn-zm.has-hover ? Theme.field-hover : Theme.field;
+                                    Text { text: "-"; color: Theme.fg; horizontal-alignment: center; vertical-alignment: center; font-size: 12px; width: parent.width; height: parent.height; }
+                                    btn-zm := TouchArea { clicked => { root.zoom-out(); } }
+                                }
+                                Text { text: root.timeline-zoom-text; color: Theme.fg-muted; font-size: 10px; vertical-alignment: center; }
+                                Rectangle {
+                                    width: 22px; height: 22px; border-radius: 3px; background: btn-zp.has-hover ? Theme.field-hover : Theme.field;
+                                    Text { text: "+"; color: Theme.fg; horizontal-alignment: center; vertical-alignment: center; font-size: 12px; width: parent.width; height: parent.height; }
+                                    btn-zp := TouchArea { clicked => { root.zoom-in(); } }
+                                }
+                            }
+
+                            Rectangle { width: 1px; height: 16px; background: Theme.line; y: 6px; }
+                            Text { text: "Snapping: ON"; color: Theme.accent; font-size: 10px; font-weight: 600; vertical-alignment: center; }
+                        }
+
+                        Rectangle { height: 1px; background: Theme.line; }
+
+                        // 2. Timeline Canvas (Track Headers + Track Lanes & Ruler)
+                        HorizontalLayout {
+                            vertical-stretch: 1;
+                            spacing: 0px;
+
+                            // Left Column: Track Headers
+                            Rectangle {
+                                width: 104px;
+                                background: Theme.track-bg;
+                                border-radius: 4px;
+                                Rectangle { x: parent.width - 1px; y: 0px; width: 1px; height: parent.height; background: Theme.line; }
+
+                                VerticalLayout {
+                                    padding: 0px; spacing: 0px;
+                                    // Corner header (aligns with ruler)
+                                    Rectangle {
+                                        height: 24px;
+                                        background: Theme.ruler-bg;
+                                        Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
+                                        HorizontalLayout {
+                                            padding-left: 8px; padding-right: 6px;
+                                            Text { text: "TRACKS"; color: Theme.fg-dim; font-size: 9px; font-weight: 700; vertical-alignment: center; }
+                                            Rectangle { horizontal-stretch: 1; }
+                                            Rectangle {
+                                                width: 16px; height: 16px; border-radius: 3px;
+                                                background: btn-add-tr.has-hover ? Theme.field-hover : Colors.transparent;
+                                                Text { text: "+"; color: Theme.fg; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                                btn-add-tr := TouchArea { clicked => { root.add-track(true); } }
+                                            }
+                                        }
+                                    }
+
+                                    // Track Header List
+                                    for track[ti] in root.timeline-tracks: Rectangle {
+                                        height: 48px;
+                                        background: Theme.track-bg;
+                                        Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.track-border; }
+
+                                        HorizontalLayout {
+                                            padding-left: 8px; padding-right: 6px; spacing: 6px;
+                                            // Badge V1 / A1
+                                            Rectangle {
+                                                width: 22px; height: 18px; border-radius: 3px; y: 15px;
+                                                background: track.is-video ? #10b98133 : #8b5cf633;
+                                                border-width: 1px;
+                                                border-color: track.is-video ? #10b98188 : #8b5cf688;
+                                                Text {
+                                                    text: track.name;
+                                                    color: track.is-video ? #34d399 : #a78bfa;
+                                                    font-size: 9px; font-weight: 700;
+                                                    horizontal-alignment: center; vertical-alignment: center;
+                                                    width: parent.width; height: parent.height;
+                                                }
+                                            }
+                                            Rectangle { horizontal-stretch: 1; }
+                                            // Mute button
+                                            Rectangle {
+                                                width: 18px; height: 18px; border-radius: 3px; y: 15px;
+                                                background: track.muted ? Theme.danger : (btn-mute.has-hover ? Theme.field-hover : Colors.transparent);
+                                                Text { text: track.muted ? "M" : (track.is-video ? "👁" : "🔊"); font-size: 9px; color: Theme.fg; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                                btn-mute := TouchArea { clicked => { root.toggle-track-mute(ti); } }
+                                            }
+                                            // Lock button
+                                            Rectangle {
+                                                width: 18px; height: 18px; border-radius: 3px; y: 15px;
+                                                background: track.locked ? Theme.field : (btn-lock.has-hover ? Theme.field-hover : Colors.transparent);
+                                                Text { text: track.locked ? "🔒" : "🔓"; font-size: 9px; color: Theme.fg-dim; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                                btn-lock := TouchArea { clicked => { root.toggle-track-lock(ti); } }
+                                            }
+                                        }
+                                    }
+                                    Rectangle { vertical-stretch: 1; }
+                                }
+                            }
+
+                            // Right Column: Time Ruler & Track Lanes
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                background: Theme.well;
+                                clip: true;
+
+                                VerticalLayout {
+                                    padding: 0px; spacing: 0px;
+
+                                    // Ruler Area
+                                    Rectangle {
+                                        height: 24px;
+                                        background: Theme.ruler-bg;
+                                        Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
+
+                                        HorizontalLayout {
+                                            padding-left: 10px; padding-right: 10px; spacing: 0px;
+                                            Text { text: "00:00"; color: Theme.fg-dim; font-size: 9px; vertical-alignment: center; width: 70px; }
+                                            Text { text: "00:02"; color: Theme.fg-dim; font-size: 9px; vertical-alignment: center; width: 70px; }
+                                            Text { text: "00:04"; color: Theme.fg-dim; font-size: 9px; vertical-alignment: center; width: 70px; }
+                                            Text { text: "00:06"; color: Theme.fg-dim; font-size: 9px; vertical-alignment: center; width: 70px; }
+                                            Text { text: "00:08"; color: Theme.fg-dim; font-size: 9px; vertical-alignment: center; width: 70px; }
+                                            Text { text: "00:10"; color: Theme.fg-dim; font-size: 9px; vertical-alignment: center; width: 70px; }
+                                            Text { text: "00:12"; color: Theme.fg-dim; font-size: 9px; vertical-alignment: center; width: 70px; }
+                                            Text { text: "00:14"; color: Theme.fg-dim; font-size: 9px; vertical-alignment: center; width: 70px; }
+                                            Text { text: "00:16"; color: Theme.fg-dim; font-size: 9px; vertical-alignment: center; width: 70px; }
+                                            Rectangle { horizontal-stretch: 1; }
+                                        }
+
+                                        // Ruler Touch Area for seeking playhead
+                                        ruler-touch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            moved => {
+                                                if (self.pressed) {
+                                                    root.seek-playhead-px(self.mouse-x);
+                                                }
+                                            }
+                                            clicked => {
+                                                root.seek-playhead-px(self.mouse-x);
+                                            }
+                                        }
+                                    }
+
+                                    // Track Lanes Area (holds clip blocks)
+                                    Rectangle {
+                                        vertical-stretch: 1;
+                                        background: Theme.track-lane;
+
+                                        // Background horizontal divider lines for tracks
+                                        VerticalLayout {
+                                            padding: 0px; spacing: 0px;
+                                            for track[ti] in root.timeline-tracks: Rectangle {
+                                                height: 48px;
+                                                background: Math.mod(ti, 2) == 0 ? #1a1a1e : #1e1e22;
+                                                Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.track-border; }
+                                            }
+
+                                            Rectangle { vertical-stretch: 1; }
+                                        }
+
+                                        // Clip Blocks
+                                        for clip in root.visual-clips: Rectangle {
+                                            x: clip.start-px;
+                                            y: clip.track-index * 48px + 4px;
+                                            width: max(48px, clip.width-px);
+                                            height: 40px;
+                                            border-radius: 4px;
+                                            background: clip.is-video ?
+                                                (clip.is-selected ? #0e4c3e : (clip-box-touch.has-hover ? #0f3d32 : #0a2d25)) :
+                                                (clip.is-selected ? #3b2269 : (clip-box-touch.has-hover ? #2e1a53 : #20123c));
+                                            border-width: clip.is-selected ? 2px : 1px;
+                                            border-color: clip.is-selected ? (clip.is-video ? #34d399 : #c084fc) : (clip.is-video ? #10b98188 : #8b5cf688);
+                                            clip: true;
+
+                                            HorizontalLayout {
+                                                padding-left: 8px; padding-right: 6px; spacing: 6px;
+                                                Text {
+                                                    text: clip.is-video ? "🎬" : "🎵";
+                                                    font-size: 11px;
+                                                    vertical-alignment: center;
+                                                }
+                                                Text {
+                                                    text: clip.name;
+                                                    color: clip.is-selected ? #ffffff : #e4e4e7;
+                                                    font-size: 10px;
+                                                    font-weight: 600;
+                                                    overflow: elide;
+                                                    vertical-alignment: center;
+                                                }
+                                                Rectangle { horizontal-stretch: 1; }
+                                                Text {
+                                                    text: clip.timeline-duration + "f";
+                                                    color: Theme.fg-dim;
+                                                    font-size: 9px;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+
+                                            clip-box-touch := TouchArea {
+                                                clicked => {
+                                                    root.select-clip-id(clip.id);
+                                                }
+                                            }
+                                        }
+
+                                        // Playhead Needle
+                                        Rectangle {
+                                            x: root.playhead-px - 1px;
+                                            y: 0px;
+                                            width: 2px;
+                                            height: parent.height;
+                                            background: Theme.playhead;
+                                        }
+                                    }
+                                }
+
+                                // Playhead Thumb
+                                Rectangle {
+                                    x: root.playhead-px - 5px;
+                                    y: 0px;
+                                    width: 10px;
+                                    height: 10px;
+                                    background: Theme.playhead;
+                                    border-radius: 2px;
+                                }
+                            }
+                        }
+                    }
+                }
+
+            }
+
+            // Right Splitter (between Center Workspace and Inspector)
+            if root.show-inspector : Rectangle {
+                width: 8px;
+                background: Colors.transparent;
+                Rectangle {
+                    width: 2px;
+                    x: 3px;
+                    height: parent.height - 16px;
+                    y: 8px;
+                    border-radius: 1px;
+                    background: split-right-touch.pressed ? Theme.splitter-active : (split-right-touch.has-hover ? Theme.splitter-hover : Theme.splitter);
+                }
+                split-right-touch := TouchArea {
+                    mouse-cursor: col-resize;
+                    moved => {
+                        if (self.pressed) {
+                            root.inspector-width = max(200px, min(480px, root.inspector-width - (self.mouse-x - self.pressed-x)));
+                            root.layout-changed(root.media-width, root.inspector-width, root.timeline-height);
+                        }
+                    }
+                }
+            }
+
+            // 3. Inspector Pane
+            if root.show-inspector : Rectangle {
+                width: root.inspector-width;
+                background: Theme.panel;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: Theme.line;
+
+                VerticalLayout {
+                    padding: 14px;
+                    spacing: 12px;
+                    HorizontalLayout {
+                        height: 24px;
+                        Text { text: "Inspector"; color: Theme.fg; font-size: 14px; font-weight: 600; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: "Properties"; color: Theme.fg-dim; font-size: 10px; vertical-alignment: center; }
+                        // Hide button
+                        Rectangle {
+                            width: 20px; height: 20px; border-radius: 3px;
+                            background: touch-hide-insp.has-hover ? Theme.field-hover : Colors.transparent;
+                            Text { text: "✕"; color: Theme.fg-dim; horizontal-alignment: center; vertical-alignment: center; font-size: 10px; width: parent.width; height: parent.height; }
+                            touch-hide-insp := TouchArea { clicked => { root.toggle-inspector(); } }
+                        }
+                    }
+                    Rectangle { height: 1px; background: Theme.line; }
+                    Text {
+                        text: root.has-selected-clip ? root.selected-clip-name : (root.selected-clip == "Nothing selected" ? root.selected-media : root.selected-clip);
+                        color: root.has-selected-clip ? Theme.accent : Theme.fg;
+                        font-size: 13px; font-weight: 700; overflow: elide;
+                    }
+
+                    if root.has-selected-clip : Rectangle {
+                        height: 28px; border-radius: 4px; background: Theme.field;
+                        HorizontalLayout {
+                            padding-left: 10px; padding-right: 10px;
+                            Text { text: "Track"; vertical-alignment: center; color: Theme.fg-muted; font-size: 11px; }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text { text: root.selected-clip-track; color: Theme.accent; font-size: 11px; font-weight: 700; vertical-alignment: center; }
+                        }
+                    }
+
+                    if root.has-selected-clip : Rectangle {
+                        height: 28px; border-radius: 4px; background: Theme.field;
+                        HorizontalLayout {
+                            padding-left: 10px; padding-right: 10px;
+                            Text { text: "Start Frame"; vertical-alignment: center; color: Theme.fg-muted; font-size: 11px; }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text { text: root.selected-clip-start + " f"; color: Theme.fg; font-size: 11px; vertical-alignment: center; }
+                        }
+                    }
+
+                    if root.has-selected-clip : Rectangle {
+                        height: 28px; border-radius: 4px; background: Theme.field;
+                        HorizontalLayout {
+                            padding-left: 10px; padding-right: 10px;
+                            Text { text: "Duration"; vertical-alignment: center; color: Theme.fg-muted; font-size: 11px; }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text { text: root.selected-clip-duration + " f"; color: Theme.fg; font-size: 11px; vertical-alignment: center; }
+                        }
+                    }
+
+                    // Inspector Tabs Switcher
+                    HorizontalLayout {
+                        height: 28px; spacing: 4px;
+                        Rectangle {
+                            border-radius: 4px; background: root.inspector-tab == "video" ? Theme.accent : Theme.field;
+                            HorizontalLayout { alignment: center; Text { text: "🎬 Video"; color: root.inspector-tab == "video" ? Theme.on-accent : Theme.fg-muted; font-size: 11px; font-weight: 600; vertical-alignment: center; } }
+                            TouchArea { clicked => { root.set-inspector-tab("video"); } }
+                        }
+                        Rectangle {
+                            border-radius: 4px; background: root.inspector-tab == "audio" ? Theme.accent : Theme.field;
+                            HorizontalLayout { alignment: center; Text { text: "🎵 Audio"; color: root.inspector-tab == "audio" ? Theme.on-accent : Theme.fg-muted; font-size: 11px; font-weight: 600; vertical-alignment: center; } }
+                            TouchArea { clicked => { root.set-inspector-tab("audio"); } }
+                        }
+                        Rectangle {
+                            border-radius: 4px; background: root.inspector-tab == "effects" ? Theme.accent : Theme.field;
+                            HorizontalLayout { alignment: center; Text { text: "✨ Effects"; color: root.inspector-tab == "effects" ? Theme.on-accent : Theme.fg-muted; font-size: 11px; font-weight: 600; vertical-alignment: center; } }
+                            TouchArea { clicked => { root.set-inspector-tab("effects"); } }
+                        }
+                    }
+
+                    // TAB 1: VIDEO CONTROLS
+                    if root.inspector-tab == "video" : VerticalLayout {
+                        spacing: 8px;
+
+                        // Scale row
+                        Rectangle {
+                            height: 32px; border-radius: 4px; background: Theme.field;
+                            HorizontalLayout {
+                                padding-left: 8px; padding-right: 8px; spacing: 6px;
+                                Text { text: "Scale"; vertical-alignment: center; color: Theme.fg-muted; font-size: 11px; }
+                                Rectangle { horizontal-stretch: 1; }
+                                Rectangle {
+                                    width: 22px; height: 22px; border-radius: 3px; background: Theme.panel;
+                                    Text { text: "-"; color: Theme.fg; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    TouchArea { clicked => { root.set-clip-scale(max(0.5, root.clip-scale - 0.1)); } }
+                                }
+                                Text { text: Math.round(root.clip-scale * 100.0) + "%"; color: Theme.fg; font-size: 11px; font-weight: 700; vertical-alignment: center; width: 44px; horizontal-alignment: center; }
+                                Rectangle {
+                                    width: 22px; height: 22px; border-radius: 3px; background: Theme.panel;
+                                    Text { text: "+"; color: Theme.fg; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    TouchArea { clicked => { root.set-clip-scale(min(2.0, root.clip-scale + 0.1)); } }
+                                }
+                            }
+                        }
+
+                        // Opacity row
+                        Rectangle {
+                            height: 32px; border-radius: 4px; background: Theme.field;
+                            HorizontalLayout {
+                                padding-left: 8px; padding-right: 8px; spacing: 6px;
+                                Text { text: "Opacity"; vertical-alignment: center; color: Theme.fg-muted; font-size: 11px; }
+                                Rectangle { horizontal-stretch: 1; }
+                                Rectangle {
+                                    width: 22px; height: 22px; border-radius: 3px; background: Theme.panel;
+                                    Text { text: "-"; color: Theme.fg; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    TouchArea { clicked => { root.set-clip-opacity(max(0.0, root.clip-opacity - 0.1)); } }
+                                }
+                                Text { text: Math.round(root.clip-opacity * 100.0) + "%"; color: Theme.fg; font-size: 11px; font-weight: 700; vertical-alignment: center; width: 44px; horizontal-alignment: center; }
+                                Rectangle {
+                                    width: 22px; height: 22px; border-radius: 3px; background: Theme.panel;
+                                    Text { text: "+"; color: Theme.fg; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    TouchArea { clicked => { root.set-clip-opacity(min(1.0, root.clip-opacity + 0.1)); } }
+                                }
+                            }
+                        }
+
+                        // Speed multiplier pills
+                        Rectangle {
+                            height: 34px; border-radius: 4px; background: Theme.field;
+                            HorizontalLayout {
+                                padding-left: 8px; padding-right: 8px; spacing: 4px;
+                                Text { text: "Speed"; vertical-alignment: center; color: Theme.fg-muted; font-size: 11px; }
+                                Rectangle { horizontal-stretch: 1; }
+                                for spd in [0.5, 1.0, 1.5, 2.0]: Rectangle {
+                                    width: 38px; height: 22px; border-radius: 3px;
+                                    background: root.clip-speed == spd ? Theme.accent : Theme.panel;
+                                    Text { text: spd + "x"; color: root.clip-speed == spd ? Theme.on-accent : Theme.fg; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    TouchArea { clicked => { root.set-clip-speed(spd); } }
+                                }
+                            }
+                        }
+
+                        // Rotation presets
+                        Rectangle {
+                            height: 34px; border-radius: 4px; background: Theme.field;
+                            HorizontalLayout {
+                                padding-left: 8px; padding-right: 8px; spacing: 4px;
+                                Text { text: "Rotation"; vertical-alignment: center; color: Theme.fg-muted; font-size: 11px; }
+                                Rectangle { horizontal-stretch: 1; }
+                                for rot in [0.0, 90.0, 180.0, 270.0]: Rectangle {
+                                    width: 38px; height: 22px; border-radius: 3px;
+                                    background: root.clip-rotation == rot ? Theme.accent : Theme.panel;
+                                    Text { text: Math.round(rot) + "°"; color: root.clip-rotation == rot ? Theme.on-accent : Theme.fg; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    TouchArea { clicked => { root.set-clip-rotation(rot); } }
+                                }
+                            }
+                        }
+                    }
+
+                    // TAB 2: AUDIO CONTROLS
+                    if root.inspector-tab == "audio" : VerticalLayout {
+                        spacing: 8px;
+
+                        // Volume dB row
+                        Rectangle {
+                            height: 32px; border-radius: 4px; background: Theme.field;
+                            HorizontalLayout {
+                                padding-left: 8px; padding-right: 8px; spacing: 6px;
+                                Text { text: "Volume"; vertical-alignment: center; color: Theme.fg-muted; font-size: 11px; }
+                                Rectangle { horizontal-stretch: 1; }
+                                Rectangle {
+                                    width: 22px; height: 22px; border-radius: 3px; background: Theme.panel;
+                                    Text { text: "-"; color: Theme.fg; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    TouchArea { clicked => { root.set-clip-volume(max(-60.0, root.clip-volume-db - 1.0)); } }
+                                }
+                                Text { text: Math.round(root.clip-volume-db) + " dB"; color: Theme.fg; font-size: 11px; font-weight: 700; vertical-alignment: center; width: 50px; horizontal-alignment: center; }
+                                Rectangle {
+                                    width: 22px; height: 22px; border-radius: 3px; background: Theme.panel;
+                                    Text { text: "+"; color: Theme.fg; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    TouchArea { clicked => { root.set-clip-volume(min(12.0, root.clip-volume-db + 1.0)); } }
+                                }
+                            }
+                        }
+
+                        // Quick volume buttons
+                        HorizontalLayout {
+                            spacing: 4px;
+                            for vol in [-12.0, -6.0, 0.0, 6.0]: Rectangle {
+                                height: 24px; border-radius: 3px;
+                                background: root.clip-volume-db == vol ? Theme.accent : Theme.field;
+                                Text { text: (vol > 0.0 ? ("+" + vol) : (vol + "")) + " dB"; color: root.clip-volume-db == vol ? Theme.on-accent : Theme.fg; font-size: 10px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                TouchArea { clicked => { root.set-clip-volume(vol); } }
+                            }
+                        }
+
+                        // Mute button
+                        Rectangle {
+                            height: 32px; border-radius: 4px;
+                            background: root.clip-muted ? #ef444433 : Theme.field;
+                            border-width: 1px; border-color: root.clip-muted ? #ef4444 : Theme.line;
+                            HorizontalLayout {
+                                alignment: center; spacing: 6px;
+                                Text { text: root.clip-muted ? "🔇 Clip Muted" : "🔊 Audio Active (Normal)"; color: root.clip-muted ? #ef4444 : Theme.fg; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                            }
+                            TouchArea { clicked => { root.toggle-clip-mute(); } }
+                        }
+                    }
+
+                    // TAB 3: EFFECTS CONTROLS
+                    if root.inspector-tab == "effects" : VerticalLayout {
+                        spacing: 8px;
+
+                        // Brightness
+                        Rectangle {
+                            height: 32px; border-radius: 4px; background: Theme.field;
+                            HorizontalLayout {
+                                padding-left: 8px; padding-right: 8px; spacing: 6px;
+                                Text { text: "Brightness"; vertical-alignment: center; color: Theme.fg-muted; font-size: 11px; }
+                                Rectangle { horizontal-stretch: 1; }
+                                Rectangle {
+                                    width: 22px; height: 22px; border-radius: 3px; background: Theme.panel;
+                                    Text { text: "-"; color: Theme.fg; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    TouchArea { clicked => { root.set-clip-brightness(max(-100.0, root.clip-brightness - 10.0)); } }
+                                }
+                                Text { text: Math.round(root.clip-brightness) + ""; color: Theme.fg; font-size: 11px; font-weight: 700; vertical-alignment: center; width: 40px; horizontal-alignment: center; }
+                                Rectangle {
+                                    width: 22px; height: 22px; border-radius: 3px; background: Theme.panel;
+                                    Text { text: "+"; color: Theme.fg; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    TouchArea { clicked => { root.set-clip-brightness(min(100.0, root.clip-brightness + 10.0)); } }
+                                }
+                            }
+                        }
+
+                        // Contrast
+                        Rectangle {
+                            height: 32px; border-radius: 4px; background: Theme.field;
+                            HorizontalLayout {
+                                padding-left: 8px; padding-right: 8px; spacing: 6px;
+                                Text { text: "Contrast"; vertical-alignment: center; color: Theme.fg-muted; font-size: 11px; }
+                                Rectangle { horizontal-stretch: 1; }
+                                Rectangle {
+                                    width: 22px; height: 22px; border-radius: 3px; background: Theme.panel;
+                                    Text { text: "-"; color: Theme.fg; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    TouchArea { clicked => { root.set-clip-contrast(max(-100.0, root.clip-contrast - 10.0)); } }
+                                }
+                                Text { text: Math.round(root.clip-contrast) + ""; color: Theme.fg; font-size: 11px; font-weight: 700; vertical-alignment: center; width: 40px; horizontal-alignment: center; }
+                                Rectangle {
+                                    width: 22px; height: 22px; border-radius: 3px; background: Theme.panel;
+                                    Text { text: "+"; color: Theme.fg; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    TouchArea { clicked => { root.set-clip-contrast(min(100.0, root.clip-contrast + 10.0)); } }
+                                }
+                            }
+                        }
+
+                        // Saturation
+                        Rectangle {
+                            height: 32px; border-radius: 4px; background: Theme.field;
+                            HorizontalLayout {
+                                padding-left: 8px; padding-right: 8px; spacing: 6px;
+                                Text { text: "Saturation"; vertical-alignment: center; color: Theme.fg-muted; font-size: 11px; }
+                                Rectangle { horizontal-stretch: 1; }
+                                Rectangle {
+                                    width: 22px; height: 22px; border-radius: 3px; background: Theme.panel;
+                                    Text { text: "-"; color: Theme.fg; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    TouchArea { clicked => { root.set-clip-saturation(max(-100.0, root.clip-saturation - 10.0)); } }
+                                }
+                                Text { text: Math.round(root.clip-saturation) + ""; color: Theme.fg; font-size: 11px; font-weight: 700; vertical-alignment: center; width: 40px; horizontal-alignment: center; }
+                                Rectangle {
+                                    width: 22px; height: 22px; border-radius: 3px; background: Theme.panel;
+                                    Text { text: "+"; color: Theme.fg; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                                    TouchArea { clicked => { root.set-clip-saturation(min(100.0, root.clip-saturation + 10.0)); } }
+                                }
+                            }
+                        }
+
+                        // Grayscale and Invert row
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Rectangle {
+                                height: 30px; border-radius: 4px;
+                                background: root.clip-grayscale ? Theme.accent : Theme.field;
+                                HorizontalLayout { alignment: center; Text { text: root.clip-grayscale ? "⬛ B&W: ON" : "⬜ B&W: OFF"; color: root.clip-grayscale ? Theme.on-accent : Theme.fg; font-size: 10px; font-weight: 600; vertical-alignment: center; } }
+                                TouchArea { clicked => { root.toggle-clip-grayscale(); } }
+                            }
+                            Rectangle {
+                                height: 30px; border-radius: 4px;
+                                background: root.clip-invert ? Theme.accent : Theme.field;
+                                HorizontalLayout { alignment: center; Text { text: root.clip-invert ? "🔄 Invert: ON" : "🔄 Invert: OFF"; color: root.clip-invert ? Theme.on-accent : Theme.fg; font-size: 10px; font-weight: 600; vertical-alignment: center; } }
+                                TouchArea { clicked => { root.toggle-clip-invert(); } }
+                            }
+                        }
+
+                        // Reset button
+                        Rectangle {
+                            height: 28px; border-radius: 4px; background: rst-touch.has-hover ? Theme.field-hover : Theme.field;
+                            border-width: 1px; border-color: Theme.line;
+                            HorizontalLayout { alignment: center; spacing: 4px; Text { text: "⟲ Reset All Effects"; color: Theme.fg-dim; font-size: 10px; font-weight: 600; vertical-alignment: center; } }
+                            rst-touch := TouchArea { clicked => { root.reset-clip-effects(); } }
+                        }
+                    }
+
+
+                    if root.has-selected-clip : HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle {
+                            height: 28px; border-radius: 4px; background: insp-split.has-hover ? Theme.field-hover : Theme.field;
+                            horizontal-stretch: 1;
+                            HorizontalLayout { alignment: center; Text { text: "✂ Split"; color: Theme.fg; font-size: 11px; font-weight: 600; vertical-alignment: center; } }
+                            insp-split := TouchArea { clicked => { root.split-at-playhead(); } }
+                        }
+                        Rectangle {
+                            height: 28px; border-radius: 4px; background: insp-del.has-hover ? Theme.danger : Theme.field;
+                            horizontal-stretch: 1;
+                            HorizontalLayout { alignment: center; Text { text: "🗑 Delete"; color: Theme.fg; font-size: 11px; font-weight: 600; vertical-alignment: center; } }
+                            insp-del := TouchArea { clicked => { root.delete-selected-clip(); } }
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+                    Text {
+                        text: root.has-selected-clip ? "Use toolbar above to cut, move or manage this clip." : "Click on a clip in the timeline or media library to edit its properties";
+                        color: Theme.fg-dim; font-size: 10px; wrap: word-wrap;
+                    }
+
+                }
+            }
+        }
+    }
+
+    // Dropdown Menus Layer
+    if root.active-menu != "" : Rectangle {
+        x: 0px; y: 38px; width: parent.width; height: parent.height - 38px;
+        background: Colors.transparent;
+        // Click outside dismisses menu
+        TouchArea { clicked => { root.active-menu = ""; } }
+
+        // File Menu
+        if root.active-menu == "file" : Rectangle {
+            x: 80px; y: 2px; width: 170px; height: 192px;
+            background: Theme.panel;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: Theme.line;
+            VerticalLayout {
+                padding: 6px; spacing: 2px;
+                Rectangle {
+                    height: 28px; border-radius: 4px; background: m-new.has-hover ? Theme.field-hover : Colors.transparent;
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px; Text { text: "New Project"; color: Theme.fg; font-size: 11px; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "Ctrl+N"; color: Theme.fg-dim; font-size: 10px; vertical-alignment: center; } }
+                    m-new := TouchArea { clicked => { root.active-menu = ""; root.new-project(); } }
+                }
+                Rectangle {
+                    height: 28px; border-radius: 4px; background: m-open.has-hover ? Theme.field-hover : Colors.transparent;
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px; Text { text: "Open Project..."; color: Theme.fg; font-size: 11px; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "Ctrl+O"; color: Theme.fg-dim; font-size: 10px; vertical-alignment: center; } }
+                    m-open := TouchArea { clicked => { root.active-menu = ""; root.open-project(); } }
+                }
+                Rectangle {
+                    height: 28px; border-radius: 4px; background: m-save.has-hover ? Theme.field-hover : Colors.transparent;
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px; Text { text: "Save"; color: Theme.fg; font-size: 11px; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "Ctrl+S"; color: Theme.fg-dim; font-size: 10px; vertical-alignment: center; } }
+                    m-save := TouchArea { clicked => { root.active-menu = ""; root.save-project(); } }
+                }
+                Rectangle {
+                    height: 28px; border-radius: 4px; background: m-save-as.has-hover ? Theme.field-hover : Colors.transparent;
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px; Text { text: "Save As..."; color: Theme.fg; font-size: 11px; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "Ctrl+Shift+S"; color: Theme.fg-dim; font-size: 10px; vertical-alignment: center; } }
+                    m-save-as := TouchArea { clicked => { root.active-menu = ""; root.save-as-project(); } }
+                }
+                Rectangle { height: 1px; background: Theme.line; }
+                Rectangle {
+                    height: 28px; border-radius: 4px; background: m-imp.has-hover ? Theme.field-hover : Colors.transparent;
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px; Text { text: "Import Media..."; color: Theme.fg; font-size: 11px; vertical-alignment: center; } }
+                    m-imp := TouchArea { clicked => { root.active-menu = ""; root.import-media(); } }
+                }
+                Rectangle {
+                    height: 28px; border-radius: 4px; background: m-exp.has-hover ? Theme.field-hover : Colors.transparent;
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px; Text { text: "Export Video..."; color: Theme.accent; font-size: 11px; font-weight: 600; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "Ctrl+E"; color: Theme.fg-dim; font-size: 10px; vertical-alignment: center; } }
+                    m-exp := TouchArea { clicked => { root.active-menu = ""; root.open-export-dialog(); } }
+                }
+            }
+        }
+
+        // Edit Menu
+        if root.active-menu == "edit" : Rectangle {
+            x: 120px; y: 2px; width: 160px; height: 120px;
+            background: Theme.panel;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: Theme.line;
+            VerticalLayout {
+                padding: 6px; spacing: 2px;
+                Rectangle {
+                    height: 28px; border-radius: 4px;
+                    background: (root.can-undo && m-undo.has-hover) ? Theme.field-hover : Colors.transparent;
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px; Text { text: "Undo"; color: root.can-undo ? Theme.fg : Theme.fg-dim; font-size: 11px; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "Ctrl+Z"; color: Theme.fg-dim; font-size: 10px; vertical-alignment: center; } }
+                    m-undo := TouchArea {
+                        clicked => {
+                            if (root.can-undo) {
+                                root.active-menu = "";
+                                root.undo-action();
+                            }
+                        }
+                    }
+                }
+                Rectangle {
+                    height: 28px; border-radius: 4px;
+                    background: (root.can-redo && m-redo.has-hover) ? Theme.field-hover : Colors.transparent;
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px; Text { text: "Redo"; color: root.can-redo ? Theme.fg : Theme.fg-dim; font-size: 11px; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "Ctrl+Y"; color: Theme.fg-dim; font-size: 10px; vertical-alignment: center; } }
+                    m-redo := TouchArea {
+                        clicked => {
+                            if (root.can-redo) {
+                                root.active-menu = "";
+                                root.redo-action();
+                            }
+                        }
+                    }
+                }
+                Rectangle { height: 1px; background: Theme.line; }
+                Rectangle {
+                    height: 28px; border-radius: 4px; background: m-pref.has-hover ? Theme.field-hover : Colors.transparent;
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px; Text { text: "Preferences..."; color: Theme.fg; font-size: 11px; vertical-alignment: center; } }
+                    m-pref := TouchArea { clicked => { root.active-menu = ""; root.open-settings(); } }
+                }
+            }
+        }
+
+        // View Menu
+        if root.active-menu == "view" : Rectangle {
+            x: 160px; y: 2px; width: 180px; height: 154px;
+            background: Theme.panel;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: Theme.line;
+            VerticalLayout {
+                padding: 6px; spacing: 2px;
+                Rectangle {
+                    height: 28px; border-radius: 4px; background: m-tog-media.has-hover ? Theme.field-hover : Colors.transparent;
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px; Text { text: root.show-media ? "Hide Media Panel" : "Show Media Panel"; color: Theme.fg; font-size: 11px; vertical-alignment: center; } }
+                    m-tog-media := TouchArea { clicked => { root.active-menu = ""; root.toggle-media(); } }
+                }
+                Rectangle {
+                    height: 28px; border-radius: 4px; background: m-tog-insp.has-hover ? Theme.field-hover : Colors.transparent;
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px; Text { text: root.show-inspector ? "Hide Inspector Panel" : "Show Inspector Panel"; color: Theme.fg; font-size: 11px; vertical-alignment: center; } }
+                    m-tog-insp := TouchArea { clicked => { root.active-menu = ""; root.toggle-inspector(); } }
+                }
+                Rectangle { height: 1px; background: Theme.line; }
+                Rectangle {
+                    height: 28px; border-radius: 4px; background: m-reset-layout.has-hover ? Theme.field-hover : Colors.transparent;
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px; Text { text: "Reset Workspace Layout"; color: Theme.fg; font-size: 11px; vertical-alignment: center; } }
+                    m-reset-layout := TouchArea { clicked => { root.active-menu = ""; root.reset-layout(); } }
+                }
+                Rectangle {
+                    height: 28px; border-radius: 4px; background: m-tog-theme.has-hover ? Theme.field-hover : Colors.transparent;
+                    HorizontalLayout { padding-left: 10px; padding-right: 10px; Text { text: root.dark ? "Switch to Light Mode" : "Switch to Dark Mode"; color: Theme.fg; font-size: 11px; vertical-alignment: center; } }
+                    m-tog-theme := TouchArea { clicked => { root.active-menu = ""; root.toggle-theme(); } }
+                }
+            }
+        }
+    }
+
+    // Modal Dialog Layer (Settings & Preferences)
+    if root.show-settings-dialog : Rectangle {
+        x: 0px; y: 0px; width: parent.width; height: parent.height;
+        background: Theme.backdrop;
+
+        // Dismiss when clicking outside modal box
+        TouchArea { clicked => { root.close-settings(); } }
+
+        Rectangle {
+            width: 460px;
+            height: 330px;
+            background: Theme.panel;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Theme.line;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+
+            VerticalLayout {
+                padding: 20px;
+                spacing: 14px;
+
+                HorizontalLayout {
+                    height: 26px;
+                    Text { text: "Preferences & Workspace Settings"; color: Theme.fg; font-size: 15px; font-weight: 700; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Rectangle {
+                        width: 24px; height: 24px; border-radius: 4px;
+                        background: dlg-close.has-hover ? Theme.field-hover : Colors.transparent;
+                        Text { text: "✕"; color: Theme.fg-muted; horizontal-alignment: center; vertical-alignment: center; font-size: 12px; width: parent.width; height: parent.height; }
+                        dlg-close := TouchArea { clicked => { root.close-settings(); } }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Theme.line; }
+
+                // Theme Setting Row
+                HorizontalLayout {
+                    height: 34px; spacing: 10px;
+                    Text { text: "Application Theme"; color: Theme.fg; font-size: 12px; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Rectangle {
+                        width: 80px; height: 28px; border-radius: 4px;
+                        background: set-theme-touch.has-hover ? Theme.field-hover : Theme.field;
+                        Text { text: root.dark ? "Dark Theme" : "Light Theme"; color: Theme.fg; horizontal-alignment: center; vertical-alignment: center; font-size: 11px; width: parent.width; height: parent.height; }
+                        set-theme-touch := TouchArea { clicked => { root.toggle-theme(); } }
+                    }
+                }
+
+                // Layout Reset Row
+                HorizontalLayout {
+                    height: 34px; spacing: 10px;
+                    Text { text: "Workspace Dock Layout"; color: Theme.fg; font-size: 12px; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Rectangle {
+                        width: 90px; height: 28px; border-radius: 4px;
+                        background: set-reset-touch.has-hover ? Theme.field-hover : Theme.field;
+                        Text { text: "Reset Default"; color: Theme.fg; horizontal-alignment: center; vertical-alignment: center; font-size: 11px; width: parent.width; height: parent.height; }
+                        set-reset-touch := TouchArea { clicked => { root.reset-layout(); } }
+                    }
+                }
+
+                // Storage Info
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "App Data & Logging Directory:"; color: Theme.fg-muted; font-size: 11px; }
+                    Rectangle {
+                        height: 32px; border-radius: 4px; background: Theme.well;
+                        HorizontalLayout {
+                            padding-left: 10px; padding-right: 10px;
+                            Text { text: "%APPDATA%\\FreeCut"; color: Theme.fg-dim; font-size: 11px; vertical-alignment: center; }
+                        }
+                    }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                // Footer Buttons
+                HorizontalLayout {
+                    Rectangle { horizontal-stretch: 1; }
+                    Rectangle {
+                        width: 80px; height: 30px; border-radius: 5px;
+                        background: Theme.accent;
+                        Text { text: "Close"; color: Theme.on-accent; horizontal-alignment: center; vertical-alignment: center; font-weight: 600; font-size: 12px; width: parent.width; height: parent.height; }
+                        TouchArea { clicked => { root.close-settings(); } }
+                    }
+                }
+            }
+        }
+    }
+
+    // Modal Dialog Layer (Export Video)
+    if root.show-export-dialog : Rectangle {
+        x: 0px; y: 0px; width: parent.width; height: parent.height;
+        background: Theme.backdrop;
+
+        // Dismiss when clicking outside if not currently exporting
+        TouchArea {
+            clicked => {
+                if !root.is-exporting {
+                    root.close-export-dialog();
+                }
+            }
+        }
+
+        Rectangle {
+            width: 580px;
+            height: root.is-exporting || root.export-completed || root.export-error != "" ? 490px : 440px;
+            background: Theme.panel;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Theme.line;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+
+            VerticalLayout {
+                padding: 22px;
+                spacing: 14px;
+
+                // Title bar
+                HorizontalLayout {
+                    height: 28px;
+                    Text { text: "🎬 Export Video"; color: Theme.fg; font-size: 16px; font-weight: 700; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    if !root.is-exporting : Rectangle {
+                        width: 24px; height: 24px; border-radius: 4px;
+                        background: exp-close.has-hover ? Theme.field-hover : Colors.transparent;
+                        Text { text: "✕"; color: Theme.fg-muted; horizontal-alignment: center; vertical-alignment: center; font-size: 12px; width: parent.width; height: parent.height; }
+                        exp-close := TouchArea { clicked => { root.close-export-dialog(); } }
+                    }
+                }
+
+                Rectangle { height: 1px; background: Theme.line; }
+
+                // Presets Bar
+                VerticalLayout {
+                    spacing: 6px;
+                    Text { text: "Export Presets:"; color: Theme.fg-muted; font-size: 11px; font-weight: 600; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        for p in ["YouTube 1080p", "Shorts 9:16", "720p Fast", "4K Master"] : Rectangle {
+                            height: 28px;
+                            border-radius: 4px;
+                            background: root.export-preset == p ? Theme.accent : (p-touch.has-hover ? Theme.field-hover : Theme.field);
+                            HorizontalLayout {
+                                padding-left: 10px; padding-right: 10px;
+                                alignment: center;
+                                Text {
+                                    text: p;
+                                    color: root.export-preset == p ? Theme.on-accent : Theme.fg;
+                                    font-size: 11px; font-weight: 600; vertical-alignment: center;
+                                }
+                            }
+                            p-touch := TouchArea {
+                                enabled: !root.is-exporting;
+                                clicked => { root.set-export-preset(p); }
+                            }
+                        }
+                    }
+                }
+
+                // Settings Grid (Resolution, FPS, Format)
+                HorizontalLayout {
+                    spacing: 12px;
+                    // Resolution
+                    VerticalLayout {
+                        horizontal-stretch: 1; spacing: 4px;
+                        Text { text: "Resolution:"; color: Theme.fg-dim; font-size: 10px; }
+                        Rectangle {
+                            height: 32px; border-radius: 4px; background: Theme.well; border-width: 1px; border-color: Theme.line;
+                            HorizontalLayout {
+                                padding-left: 10px; padding-right: 10px;
+                                Text { text: root.export-resolution; color: Theme.fg; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                            }
+                        }
+                    }
+                    // Framerate
+                    VerticalLayout {
+                        horizontal-stretch: 1; spacing: 4px;
+                        Text { text: "Framerate:"; color: Theme.fg-dim; font-size: 10px; }
+                        Rectangle {
+                            height: 32px; border-radius: 4px; background: Theme.well; border-width: 1px; border-color: Theme.line;
+                            HorizontalLayout {
+                                padding-left: 10px; padding-right: 10px;
+                                Text { text: root.export-fps; color: Theme.fg; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                            }
+                        }
+                    }
+                    // Format
+                    VerticalLayout {
+                        horizontal-stretch: 1; spacing: 4px;
+                        Text { text: "Container / Format:"; color: Theme.fg-dim; font-size: 10px; }
+                        Rectangle {
+                            height: 32px; border-radius: 4px; background: Theme.well; border-width: 1px; border-color: Theme.line;
+                            HorizontalLayout {
+                                padding-left: 10px; padding-right: 10px;
+                                Text { text: root.export-format; color: Theme.accent; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                            }
+                        }
+                    }
+                }
+
+                // Output File Path Row
+                VerticalLayout {
+                    spacing: 4px;
+                    Text { text: "Destination Output File:"; color: Theme.fg-muted; font-size: 11px; font-weight: 600; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle {
+                            horizontal-stretch: 1; height: 32px; border-radius: 4px; background: Theme.well; border-width: 1px; border-color: Theme.line;
+                            HorizontalLayout {
+                                padding-left: 10px; padding-right: 10px;
+                                Text { text: root.export-output-path; color: Theme.fg; font-size: 11px; overflow: elide; vertical-alignment: center; }
+                            }
+                        }
+                        if !root.is-exporting : Rectangle {
+                            width: 86px; height: 32px; border-radius: 4px;
+                            background: browse-touch.has-hover ? Theme.field-hover : Theme.field;
+                            HorizontalLayout {
+                                alignment: center; spacing: 4px;
+                                Text { text: "📁 Browse"; color: Theme.fg; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                            }
+                            browse-touch := TouchArea { clicked => { root.browse-export-path(); } }
+                        }
+                    }
+                }
+
+                // Progress / Status Box (Visible during exporting, completed, or error)
+                if root.is-exporting || root.export-completed || root.export-error != "" : VerticalLayout {
+                    spacing: 6px;
+                    HorizontalLayout {
+                        Text {
+                            text: root.export-error != "" ? ("❌ Error: " + root.export-error) : (root.export-completed ? "✔ Export Finished!" : root.export-status-text);
+                            color: root.export-error != "" ? #ef4444 : (root.export-completed ? #10b981 : Theme.accent);
+                            font-size: 11px; font-weight: 600; vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text {
+                            text: Math.round(root.export-progress * 100.0) + "%";
+                            color: root.export-completed ? #10b981 : Theme.fg;
+                            font-size: 11px; font-weight: 700; vertical-alignment: center;
+                        }
+                    }
+                    // Progress bar track
+                    Rectangle {
+                        height: 6px; border-radius: 3px; background: Theme.field; clip: true;
+                        Rectangle {
+                            x: 0px; y: 0px; height: parent.height;
+                            width: parent.width * root.export-progress;
+                            background: root.export-error != "" ? #ef4444 : (root.export-completed ? #10b981 : Theme.accent);
+                        }
+                    }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                // Footer Actions Row
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: end;
+
+                    if root.export-completed : Rectangle {
+                        width: 140px; height: 32px; border-radius: 4px;
+                        background: rev-touch.has-hover ? Theme.field-hover : Theme.field;
+                        border-width: 1px; border-color: Theme.accent;
+                        HorizontalLayout {
+                            alignment: center; spacing: 4px;
+                            Text { text: "📂 Reveal in Folder"; color: Theme.accent; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                        }
+                        rev-touch := TouchArea { clicked => { root.reveal-export-file(); } }
+                    }
+
+                    if root.export-error != "" : Rectangle {
+                        width: 80px; height: 32px; border-radius: 4px;
+                        background: retry-touch.has-hover ? Theme.field-hover : Theme.field;
+                        HorizontalLayout {
+                            alignment: center;
+                            Text { text: "Retry"; color: Theme.fg; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                        }
+                        retry-touch := TouchArea { clicked => { root.retry-export(); } }
+                    }
+
+                    if root.is-exporting : Rectangle {
+                        width: 90px; height: 32px; border-radius: 4px;
+                        background: cancel-touch.has-hover ? #ef4444 : #dc2626;
+                        HorizontalLayout {
+                            alignment: center;
+                            Text { text: "Cancel"; color: #ffffff; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                        }
+                        cancel-touch := TouchArea { clicked => { root.cancel-export(); } }
+                    }
+
+                    if !root.is-exporting && !root.export-completed : Rectangle {
+                        width: 120px; height: 32px; border-radius: 5px;
+                        background: start-exp-touch.has-hover ? Theme.accent-hover : Theme.accent;
+                        HorizontalLayout {
+                            alignment: center; spacing: 4px;
+                            Text { text: "▶ Start Export"; color: Theme.on-accent; font-size: 12px; font-weight: 700; vertical-alignment: center; }
+                        }
+                        start-exp-touch := TouchArea { clicked => { root.start-export(); } }
+                    }
+
+                    if !root.is-exporting : Rectangle {
+                        width: 80px; height: 32px; border-radius: 4px;
+                        background: dlg-btn-close.has-hover ? Theme.field-hover : Theme.field;
+                        HorizontalLayout {
+                            alignment: center;
+                            Text { text: "Close"; color: Theme.fg; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                        }
+                        dlg-btn-close := TouchArea { clicked => { root.close-export-dialog(); } }
+                    }
+                }
+            }
+        }
+    }
+
+    // Floating Toast Notification Layer
+    if root.show-toast : Rectangle {
+        x: (parent.width - 340px) / 2;
+        y: 44px;
+        width: 340px;
+        height: 38px;
+        border-radius: 6px;
+        background: root.toast-kind == "success" ? #059669 : (root.toast-kind == "error" ? #dc2626 : (root.toast-kind == "warning" ? #d97706 : #1e293b));
+        border-width: 1px;
+        border-color: #ffffff33;
+
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 10px;
+            spacing: 8px;
+            Text {
+                text: root.toast-kind == "success" ? "✓" : (root.toast-kind == "error" ? "⚠" : (root.toast-kind == "warning" ? "⚡" : "ℹ"));
+                color: Colors.white;
+                font-size: 13px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.toast-message;
+                color: Colors.white;
+                font-size: 11px;
+                font-weight: 600;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            Rectangle {
+                width: 20px; height: 20px; border-radius: 3px;
+                Text { text: "✕"; color: #ffffffbb; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; width: parent.width; height: parent.height; }
+                TouchArea { clicked => { root.dismiss-toast(); } }
+            }
+        }
+    }
+}
+
+
+
+

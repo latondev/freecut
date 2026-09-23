@@ -42,6 +42,8 @@ coverage
 
 *.mp4
 *.mov
+*.bmp
+
 
 # DevTools performance trace exports
 Trace-*.json
@@ -101,3 +103,5 @@ artifacts/
 .playwright-cli/
 # Added by code-review-graph
 .code-review-graph/
+release/
+

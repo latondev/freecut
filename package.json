@@ -2,8 +2,16 @@
   "name": "freecut",
   "version": "0.0.0",
   "private": true,
+  "description": "FreeCut - Professional open source desktop and web video editor",
+  "author": "latondev",
   "type": "module",
+  "main": "desktop/main.cjs",
   "scripts": {
+    "desktop": "electron .",
+    "desktop:run": "vp build && electron .",
+    "desktop:dev": "node desktop/dev.cjs",
+    "desktop:pack": "electron-builder --dir",
+    "desktop:dist": "electron-builder",
     "dev": "vp dev --host",
     "dev:quiet": "vp dev --host --mode perf",
     "dev:compare": "node scripts/run-dev-and-perf.mjs",
@@ -117,6 +125,8 @@
     "@vitejs/plugin-react": "6.0.1",
     "@vitest/coverage-v8": "4.1.10",
     "@webgpu/types": "0.1.69",
+    "electron": "^44.4.5",
+    "electron-builder": "26.15.3",
     "jsdom": "27.4.0",
     "playwright": "1.60.0",
     "tailwindcss": "4.2.2",
@@ -127,5 +137,44 @@
     "esbuild": "0.28.1",
     "typescript": "7.0.2"
   },
-  "packageManager": "npm@11.8.0"
+  "packageManager": "npm@11.8.0",
+  "build": {
+    "appId": "com.latondev.freecut",
+    "productName": "FreeCut",
+    "electronVersion": "44.4.5",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "desktop/**/*",
+      "public/icons/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icons/icon-512.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "FreeCut"
+    }
+  }
 }
