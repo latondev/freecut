@@ -8,6 +8,7 @@
   "main": "desktop/main.cjs",
   "scripts": {
     "desktop": "electron .",
+    "desktop:build": "vp build",
     "desktop:run": "vp build && electron .",
     "desktop:dev": "node desktop/dev.cjs",
     "desktop:pack": "electron-builder --dir",

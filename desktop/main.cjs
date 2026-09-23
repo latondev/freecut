@@ -10,7 +10,7 @@ if (!gotTheLock) {
   process.exit(0);
 }
 
-// 2. Hardware Acceleration & Performance Flags for Video Editing
+// 2. Hardware Acceleration & High-Performance Discrete GPU Flags
 app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer,VaapiVideoDecoder,WebCodecs');
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
@@ -18,6 +18,22 @@ app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('force_high_performance_gpu');
+app.commandLine.appendSwitch('gpu-preference', '2');
+
+// Auto-register executable in Windows DirectX Graphics Settings for High-Performance Discrete GPU
+function registerWindowsGpuPreference() {
+  if (process.platform !== 'win32') return;
+  try {
+    const { exec } = require('child_process');
+    const exePath = app.isPackaged ? process.execPath : path.resolve('node_modules/electron/dist/electron.exe');
+    const regCmd = `reg add "HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences" /v "${exePath}" /t REG_SZ /d "GpuPreference=2;" /f`;
+    exec(regCmd, () => {});
+  } catch (e) {
+    // Non-fatal
+  }
+}
+registerWindowsGpuPreference();
 
 const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
 let mainWindow = null;

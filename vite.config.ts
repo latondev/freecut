@@ -122,7 +122,7 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
-    sourcemap: true,
+    sourcemap: process.env.SOURCEMAP === 'true',
     // @mediabunny/ac3 is an intentionally large lazy decoder bundle (~1.1 MB minified).
     // Keep warnings focused on unexpected growth rather than this known outlier.
     chunkSizeWarningLimit: 1200,
