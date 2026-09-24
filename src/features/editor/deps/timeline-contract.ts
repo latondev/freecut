@@ -107,4 +107,9 @@ export {
   useZoomStore,
   wouldCreateCompositionCycle,
   isTimelineTemplateDragData,
+  generateTimelineCaptionsBatch,
+  cancelBatchCaptionGeneration,
+  type BatchCaptionProgress,
+  TranscribeDialog,
+  type TranscribeDialogValues,
 } from '@/features/timeline/contracts/editor'

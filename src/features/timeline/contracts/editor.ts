@@ -123,3 +123,10 @@ export const importBentoLayoutDialog = () => import('../components/bento-layout-
 export const importReverseConformDialog = () => import('../components/reverse-conform-dialog')
 export const importSilenceRemovalDialog = () => import('../components/silence-removal-dialog')
 export const importFillerRemovalDialog = () => import('../components/filler-removal-dialog')
+
+export {
+  generateTimelineCaptionsBatch,
+  cancelBatchCaptionGeneration,
+  type BatchCaptionProgress,
+} from '../utils/batch-caption-generator'
+export { TranscribeDialog, type TranscribeDialogValues } from '../deps/transcribe-dialog'

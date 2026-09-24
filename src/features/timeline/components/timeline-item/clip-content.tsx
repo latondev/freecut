@@ -1,13 +1,6 @@
-import {
-  Suspense,
-  lazy,
-  memo,
-  useCallback,
-  useDeferredValue,
-  useMemo,
-  type ReactNode,
-} from 'react'
-import { Link2 } from 'lucide-react'
+import { Suspense, lazy, memo, useCallback, useDeferredValue, useMemo, type ReactNode } from 'react'
+import { Link2, Type, Sparkles, Square } from 'lucide-react'
+import { cn } from '@/shared/ui/cn'
 import { perfMarkRender } from '@/shared/logging/perf-marks'
 import type { TimelineItem } from '@/types/timeline'
 import { useSettingsStore } from '@/features/timeline/deps/settings'
@@ -244,28 +237,40 @@ function ClipTitleText({
 
 function MediaClipLabel({
   label,
+  itemType,
   isLinked,
   linkedSyncOffsetLabel,
   showLinkIcon,
   showLabel,
   showSyncOffset,
-}: Omit<ClipTitleTextProps, 'badge'>) {
+  isOverlay = false,
+}: Omit<ClipTitleTextProps, 'badge'> & { itemType?: TimelineItem['type']; isOverlay?: boolean }) {
   return (
     <div
-      className="px-2 text-[11px] font-medium truncate shrink-0"
+      className={cn(
+        'px-2 text-[11px] font-medium truncate shrink-0 select-none',
+        isOverlay
+          ? 'absolute top-0 inset-x-0 z-10 pointer-events-none bg-gradient-to-b from-black/75 via-black/35 to-transparent text-white drop-shadow-sm'
+          : 'text-foreground',
+      )}
       style={{
         height: EDITOR_LAYOUT_CSS_VALUES.timelineClipLabelRowHeight,
         lineHeight: EDITOR_LAYOUT_CSS_VALUES.timelineClipLabelRowHeight,
       }}
     >
-      <ClipTitleText
-        label={label}
-        isLinked={isLinked}
-        linkedSyncOffsetLabel={linkedSyncOffsetLabel}
-        showLinkIcon={showLinkIcon}
-        showLabel={showLabel}
-        showSyncOffset={showSyncOffset}
-      />
+      <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+        {itemType === 'audio' && (
+          <span className="shrink-0 text-[11px] leading-none opacity-90 mr-0.5">♫</span>
+        )}
+        <ClipTitleText
+          label={label}
+          isLinked={isLinked}
+          linkedSyncOffsetLabel={linkedSyncOffsetLabel}
+          showLinkIcon={showLinkIcon}
+          showLabel={showLabel}
+          showSyncOffset={showSyncOffset}
+        />
+      </div>
     </div>
   )
 }
@@ -394,7 +399,7 @@ const VideoClipVisualContent = memo(function VideoClipVisualContent({
   }
 
   return (
-    <div className="relative overflow-hidden flex-1 min-h-0">
+    <div className="absolute inset-0 overflow-hidden">
       <Suspense fallback={null}>
         <LazyClipFilmstrip
           mediaId={item.mediaId}
@@ -441,7 +446,7 @@ const AudioClipVisualContent = memo(function AudioClipVisualContent({
   }
 
   return (
-    <div className="relative overflow-hidden bg-waveform-gradient flex-1 min-h-0">
+    <div className="absolute inset-0 overflow-hidden bg-emerald-500/10">
       <div
         className="absolute inset-0"
         style={{
@@ -498,7 +503,7 @@ const ImageClipVisualContent = memo(function ImageClipVisualContent({
   }
 
   return (
-    <div className="relative overflow-hidden flex-1 min-h-0">
+    <div className="absolute inset-0 overflow-hidden">
       <Suspense fallback={null}>
         <LazyImageFilmstrip
           mediaId={item.mediaId}
@@ -522,50 +527,55 @@ const ImageClipVisualContent = memo(function ImageClipVisualContent({
   )
 })
 
+// fallow-ignore-next-line complexity
 const StaticClipContent = memo(function StaticClipContent({ item }: { item: TimelineItem }) {
   perfMarkRender('ClipContent')
 
   if (item.type === 'text') {
+    const textContent = getTextItemPlainText(item) || item.label || 'Text'
     return (
-      <div className="absolute inset-0 flex flex-col px-2 py-1 overflow-hidden">
-        <div className="text-[10px] text-muted-foreground truncate">Text</div>
-        <div className="text-xs font-medium truncate flex-1">
-          {getTextItemPlainText(item) || 'Empty text'}
-        </div>
+      <div className="absolute inset-0 flex items-center gap-1.5 px-2.5 overflow-hidden text-white select-none">
+        <Type className="w-3.5 h-3.5 shrink-0 opacity-90" />
+        <span className="text-xs font-semibold truncate tracking-tight">{textContent}</span>
       </div>
     )
   }
 
   if (item.type === 'subtitle') {
-    const cueCount = item.cues.length
-    const firstCueText = item.cues[0]?.text ?? ''
+    const firstCueText = item.cues[0]?.text ?? item.label ?? 'Subtitles'
     return (
-      <div className="absolute inset-0 flex flex-col px-2 py-1 overflow-hidden">
-        <div className="text-[10px] text-muted-foreground truncate">
-          {`Subtitles · ${cueCount} cue${cueCount === 1 ? '' : 's'}`}
-        </div>
-        <div className="text-xs font-medium truncate flex-1">
-          {firstCueText || item.label || 'Subtitles'}
-        </div>
+      <div className="absolute inset-0 flex items-center gap-1.5 px-2.5 overflow-hidden text-white select-none">
+        <span className="shrink-0 font-bold text-[9px] bg-black/40 px-1 py-0.5 rounded leading-none">
+          CC
+        </span>
+        <span className="text-xs font-medium truncate">{firstCueText}</span>
       </div>
     )
   }
 
   if (item.type === 'adjustment') {
-    const enabledEffectsCount = item.effects?.filter((effect) => effect.enabled).length ?? 0
     return (
-      <div className="absolute inset-0 flex flex-col px-2 py-1 overflow-hidden">
-        <div className="text-[10px] text-muted-foreground truncate">Adjustment Layer</div>
-        <div className="text-xs font-medium truncate flex-1">
-          {enabledEffectsCount > 0
-            ? `${enabledEffectsCount} effect${enabledEffectsCount > 1 ? 's' : ''}`
-            : 'No effects'}
-        </div>
+      <div className="absolute inset-0 flex items-center gap-1.5 px-2.5 overflow-hidden text-purple-100 select-none">
+        <Sparkles className="w-3.5 h-3.5 shrink-0 text-purple-300" />
+        <span className="text-xs font-medium truncate">{item.label || 'Adjustment Layer'}</span>
       </div>
     )
   }
 
-  return <div className="px-2 py-1 text-xs font-medium truncate">{item.label}</div>
+  if (item.type === 'shape') {
+    return (
+      <div className="absolute inset-0 flex items-center gap-1.5 px-2.5 overflow-hidden text-white select-none">
+        <Square className="w-3.5 h-3.5 shrink-0 text-amber-200" />
+        <span className="text-xs font-medium truncate">{item.label || 'Shape'}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex h-full items-center px-2.5 text-xs font-medium truncate text-white select-none">
+      {item.label}
+    </div>
+  )
 })
 
 const DetailedCompositionClipContent = memo(function DetailedCompositionClipContent({
@@ -951,19 +961,11 @@ const WidthGatedMediaClipContent = memo(function WidthGatedMediaClipContent(
 
   return (
     <div
-      className="absolute inset-0 flex flex-col"
+      className="absolute inset-0 overflow-hidden"
       data-media-clip-content
       hidden={!hasVisibleClipContent}
       style={!hasVisibleClipContent ? { display: 'none' } : undefined}
     >
-      <MediaClipLabel
-        label={item.label}
-        isLinked={isLinked}
-        linkedSyncOffsetLabel={linkedSyncOffsetLabel}
-        showLinkIcon={showLinkIcon}
-        showLabel={showLabel}
-        showSyncOffset={showSyncOffset}
-      />
       {showVisualDetail && item.type === 'video' && (
         <VideoClipVisualContent {...props} item={item as MediaTimelineItem & { type: 'video' }} />
       )}
@@ -973,6 +975,16 @@ const WidthGatedMediaClipContent = memo(function WidthGatedMediaClipContent(
       {showVisualDetail && item.type === 'image' && (
         <ImageClipVisualContent {...props} item={item as MediaTimelineItem & { type: 'image' }} />
       )}
+      <MediaClipLabel
+        label={item.label}
+        itemType={item.type}
+        isLinked={isLinked}
+        linkedSyncOffsetLabel={linkedSyncOffsetLabel}
+        showLinkIcon={showLinkIcon}
+        showLabel={showLabel}
+        showSyncOffset={showSyncOffset}
+        isOverlay={showVisualDetail}
+      />
     </div>
   )
 })

@@ -126,6 +126,14 @@
     {
       "file": "src/features/editor/deps/timeline-store.ts",
       "exports": ["*"]
+    },
+    {
+      "file": "src/features/timeline/contracts/editor.ts",
+      "exports": ["*"]
+    },
+    {
+      "file": "src/features/editor/deps/timeline-contract.ts",
+      "exports": ["*"]
     }
   ]
 }

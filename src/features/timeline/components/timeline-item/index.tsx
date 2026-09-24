@@ -576,21 +576,23 @@ export const TimelineItem = memo(function TimelineItem({
   const itemColorClasses = useMemo(() => {
     switch (item.type) {
       case 'video':
-        return 'bg-timeline-video border-timeline-video'
+        return 'bg-timeline-video border border-slate-700/80 text-white'
       case 'audio':
-        return 'bg-timeline-audio border-timeline-audio'
+        return 'bg-emerald-600/35 border border-emerald-500/70 text-emerald-200'
       case 'image':
-        return 'bg-timeline-image/30 border-timeline-image'
+        return 'bg-slate-900 border border-slate-700/80 text-white'
       case 'text':
-        return 'bg-timeline-text/30 border-timeline-text'
+        return 'bg-orange-500 border border-orange-600/80 text-white'
+      case 'subtitle':
+        return 'bg-amber-600 border border-amber-700/80 text-white'
       case 'shape':
-        return 'bg-timeline-shape/30 border-timeline-shape'
+        return 'bg-rose-500/40 border border-rose-400/60 text-white'
       case 'adjustment':
-        return 'bg-purple-500/30 border-purple-400'
+        return 'bg-purple-600/40 border border-purple-400/60 text-purple-100'
       case 'composition':
-        return 'bg-violet-600/40 border-violet-400'
+        return 'bg-violet-600/50 border border-violet-400/70 text-violet-100'
       default:
-        return 'bg-timeline-video border-timeline-video'
+        return 'bg-timeline-video border border-slate-700/80 text-white'
     }
   }, [item.type])
 
@@ -929,7 +931,7 @@ export const TimelineItem = memo(function TimelineItem({
           data-selected={isSelected ? 'true' : undefined}
           data-compact-clip={useCompactClipShell ? 'true' : undefined}
           className={cn(
-            'timeline-item @container absolute inset-y-px rounded overflow-visible group/timeline-item',
+            'timeline-item @container absolute inset-y-px rounded-md overflow-visible group/timeline-item',
             itemColorClasses,
             cursorClass,
             !isBeingDragged && !isStretching && !trackLocked && 'hover:brightness-110',
@@ -987,11 +989,11 @@ export const TimelineItem = memo(function TimelineItem({
         >
           {/* Keep selection visible throughout drag so the moving cohort stays legible. */}
           {isSelected && !trackLocked && (
-            <div className="timeline-selection-indicator absolute inset-0 rounded pointer-events-none z-20 border border-primary" />
+            <div className="timeline-selection-indicator absolute inset-0 rounded-md pointer-events-none z-20 border-2 border-cyan-400 shadow-sm shadow-cyan-500/50" />
           )}
 
           {isEffectDropTarget && (
-            <div className="absolute inset-0 rounded pointer-events-none z-20 border border-dashed border-sky-300/90 bg-sky-400/15 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.35)]">
+            <div className="absolute inset-0 rounded-md pointer-events-none z-20 border border-dashed border-sky-300/90 bg-sky-400/15 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.35)]">
               {multiEffectDropTargetCount > 1 && (
                 <div className="absolute top-1 right-1 rounded-full bg-sky-300/90 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-slate-950">
                   {multiEffectDropTargetCount} clips
@@ -1000,7 +1002,7 @@ export const TimelineItem = memo(function TimelineItem({
             </div>
           )}
 
-          <div className="absolute inset-px rounded-[3px] overflow-hidden">
+          <div className="absolute inset-px rounded-[5px] overflow-hidden">
             {!useCompactClipShell && (
               <>
                 <SegmentStatusOverlays overlays={segmentOverlays} />

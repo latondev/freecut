@@ -38,9 +38,9 @@ const EDITOR_DENSITY_PRESETS = {
     timelineSidebarWidth: EDIT_DOPESHEET_COLUMN_WIDTH,
     timelineMeterWidth: 84,
     timelineMixerWidth: 260,
-    timelineTrackHeight: 100,
-    timelineClipLabelRowHeight: 24,
-    timelineWaveformRowHeight: 24,
+    timelineTrackHeight: 52,
+    timelineClipLabelRowHeight: 20,
+    timelineWaveformRowHeight: 20,
   },
 } as const
 
