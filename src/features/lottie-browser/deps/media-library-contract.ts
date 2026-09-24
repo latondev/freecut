@@ -4,3 +4,7 @@
  */
 
 export { useMediaLibraryStore } from '@/features/media-library/stores/media-library-store'
+export {
+  setMediaDragData,
+  clearMediaDragData,
+} from '@/features/media-library/utils/drag-data-cache'

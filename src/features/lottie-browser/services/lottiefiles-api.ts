@@ -9,6 +9,7 @@
  */
 
 import type { MediaAttribution } from '@/types/storage'
+import { fetchIconScoutFreeAnimations } from './iconscout-free-lottie'
 
 const ENDPOINT = 'https://graphql.lottiefiles.com/2022-08'
 
@@ -16,7 +17,7 @@ const ENDPOINT = 'https://graphql.lottiefiles.com/2022-08'
 export const LOTTIEFILES_LICENSE = 'Lottie Simple License (FL 9.13.21)'
 
 /** Browse feeds (used when there is no active search query). */
-export type LottieBrowseCategory = 'featured' | 'popular' | 'recent'
+export type LottieBrowseCategory = 'featured' | 'popular' | 'recent' | 'free-lottie'
 
 export interface LottieFilesAnimation {
   id: string
@@ -31,6 +32,10 @@ export interface LottieFilesAnimation {
   author: string | null
   /** Creator profile path, e.g. "/animoox" (may be null). */
   authorPath: string | null
+  /** Optional provider source (e.g. 'IconScout' or 'LottieFiles') */
+  provider?: string
+  /** Optional original asset page link */
+  pageUrl?: string
 }
 
 export interface LottiePage {
@@ -116,6 +121,8 @@ function mapNode(node: RawNode): LottieFilesAnimation | null {
  * non-empty, otherwise the selected browse feed. Pass `after` (an `endCursor`
  * from a previous page) to paginate.
  */
+
+// fallow-ignore-next-line complexity
 export async function fetchLottieAnimations(params: {
   category: LottieBrowseCategory
   query?: string
@@ -123,6 +130,24 @@ export async function fetchLottieAnimations(params: {
   first?: number
   signal?: AbortSignal
 }): Promise<LottiePage> {
+  if (params.category === 'free-lottie') {
+    let offset = 0
+    if (params.after) {
+      try {
+        const decoded = atob(params.after)
+        const match = decoded.match(/arrayconnection:(\d+)/)
+        if (match && match[1]) {
+          offset = parseInt(match[1], 10) + 1
+        }
+      } catch {}
+    }
+    return fetchIconScoutFreeAnimations({
+      query: params.query,
+      offset,
+      limit: params.first ?? 24,
+    })
+  }
+
   const trimmed = params.query?.trim() ?? ''
   const isSearch = trimmed.length > 0
   const field = rootField(params.category, isSearch)
@@ -176,6 +201,17 @@ export async function fetchLottieAnimations(params: {
  * omit a per-animation source URL rather than fabricate one that may 404.
  */
 export function buildLottieAttribution(animation: LottieFilesAnimation): MediaAttribution {
+  if (animation.provider === 'IconScout' || animation.id.startsWith('iconscout-')) {
+    return {
+      provider: 'IconScout',
+      author: animation.author ?? undefined,
+      authorUrl: animation.pageUrl ?? undefined,
+      sourceUrl: animation.pageUrl ?? undefined,
+      sourceId: animation.id,
+      license: 'IconScout Free License',
+    }
+  }
+
   return {
     provider: 'LottieFiles',
     author: animation.author ?? undefined,

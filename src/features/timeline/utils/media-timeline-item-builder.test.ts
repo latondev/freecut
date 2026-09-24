@@ -137,4 +137,34 @@ describe('buildMediaTimelineItems', () => {
     expect(audioItem?.sourceFps).toBe(30)
     expect(audioItem?.sourceEnd).toBe(90)
   })
+
+  it('builds lottie item preserving native aspect ratio without stretching to canvas', () => {
+    const [lottieItem] = buildMediaTimelineItems({
+      media: makeMedia({
+        mimeType: 'application/lottie+json',
+        fps: 60,
+        width: 300,
+        height: 300,
+        duration: 3,
+      }),
+      mediaId: 'lottie-1',
+      mediaType: 'lottie',
+      label: 'badge.lottie',
+      projectFps: 30,
+      blobUrl: 'blob:lottie',
+      canvasWidth: 1920,
+      canvasHeight: 1080,
+      placements: { primary: { trackId: 'v2', from: 0, durationInFrames: 90 } },
+    })
+
+    expect(lottieItem?.type).toBe('lottie')
+    if (lottieItem?.type === 'lottie') {
+      expect(lottieItem.transform).toMatchObject({
+        width: 300,
+        height: 300,
+      })
+      expect(lottieItem.sourceWidth).toBe(300)
+      expect(lottieItem.sourceHeight).toBe(300)
+    }
+  })
 })

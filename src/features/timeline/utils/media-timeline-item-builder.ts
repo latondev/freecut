@@ -1,5 +1,5 @@
 import type { AudioItem, ImageItem, LottieItem, TimelineItem, VideoItem } from '@/types/timeline'
-import { computeInitialTransform } from './transform-init'
+import { computeInitialTransform, computeInitialLottieTransform } from './transform-init'
 
 export type MediaTimelineItemType = 'video' | 'audio' | 'image' | 'lottie'
 
@@ -123,6 +123,7 @@ function buildTimelineBaseItem(params: {
   }
 }
 
+// fallow-ignore-next-line complexity
 export function buildMediaTimelineItem(params: {
   media: TimelineMediaMetadata
   mediaId: string
@@ -175,10 +176,21 @@ export function buildMediaTimelineItem(params: {
 
   if (params.mediaType === 'lottie') {
     const frameRate = params.media.fps || 30
+    const lottieWidth = params.media.width && params.media.width > 0 ? params.media.width : 400
+    const lottieHeight = params.media.height && params.media.height > 0 ? params.media.height : 400
     return {
       ...baseItem,
       type: 'lottie',
-      ...visualFields,
+      src: params.blobUrl,
+      thumbnailUrl: params.thumbnailUrl || undefined,
+      sourceWidth: lottieWidth,
+      sourceHeight: lottieHeight,
+      transform: computeInitialLottieTransform(
+        lottieWidth,
+        lottieHeight,
+        params.canvasWidth,
+        params.canvasHeight,
+      ),
       frameRate,
       totalFrames: Math.max(1, Math.round((params.media.duration || 0) * frameRate)),
       loop: true,

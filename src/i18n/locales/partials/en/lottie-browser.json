@@ -6,10 +6,12 @@
     "categories": {
       "featured": "Featured",
       "popular": "Popular",
-      "recent": "Recent"
+      "recent": "Recent",
+      "free-lottie": "Free Lottie"
     },
     "addToMedia": "Add to media library",
     "added": "Added to media library",
+    "dragToTimeline": "Drag to timeline",
     "importFailed": "Import failed — click to retry",
     "by": "by {{author}}",
     "empty": "No animations found",

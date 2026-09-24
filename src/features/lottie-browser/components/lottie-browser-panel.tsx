@@ -4,11 +4,19 @@ import { ChevronLeft, ChevronRight, Loader2, Search, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/shared/ui/cn'
 import type { LottieBrowseCategory } from '../services/lottiefiles-api'
-import { LOTTIE_PAGE_SIZE, useLottieBrowserStore } from '../stores/lottie-browser-store'
+import {
+  LOTTIE_PAGE_SIZE,
+  findImportedMediaForAnimation,
+  useLottieBrowserStore,
+} from '../stores/lottie-browser-store'
+import { useMediaLibraryStore } from '../deps/media-library'
 import { LottieCard } from './lottie-card'
 
-const CATEGORIES: LottieBrowseCategory[] = ['featured', 'popular', 'recent']
+import { ICONSCOUNT_SUB_CATEGORIES } from '../services/iconscout-free-lottie'
 
+const CATEGORIES: LottieBrowseCategory[] = ['featured', 'popular', 'recent', 'free-lottie']
+
+// fallow-ignore-next-line complexity
 function LottieBrowserPanelComponent() {
   const { t } = useTranslation()
 
@@ -22,7 +30,9 @@ function LottieBrowserPanelComponent() {
   const hasFetched = useLottieBrowserStore((s) => s.hasFetched)
   const importingIds = useLottieBrowserStore((s) => s.importingIds)
   const importedIds = useLottieBrowserStore((s) => s.importedIds)
+  const importedMediaMap = useLottieBrowserStore((s) => s.importedMediaMap)
   const failedIds = useLottieBrowserStore((s) => s.failedIds)
+  const mediaItems = useMediaLibraryStore((s) => s.mediaItems)
 
   const setCategory = useLottieBrowserStore((s) => s.setCategory)
   const setQuery = useLottieBrowserStore((s) => s.setQuery)
@@ -111,22 +121,57 @@ function LottieBrowserPanelComponent() {
         </div>
 
         {!isSearching && (
-          <div className="flex gap-1">
-            {CATEGORIES.map((id) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setCategory(id)}
-                className={cn(
-                  'rounded-md px-2 py-1 text-[11px] font-medium capitalize transition-colors',
-                  category === id
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
-                )}
-              >
-                {t(`lottieBrowser.categories.${id}`)}
-              </button>
-            ))}
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-1 overflow-x-auto no-scrollbar">
+              {CATEGORIES.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setCategory(id)
+                    if (category !== id) {
+                      setInputValue('')
+                      setQuery('')
+                    }
+                  }}
+                  className={cn(
+                    'rounded-md px-2 py-1 text-[11px] font-medium capitalize transition-colors whitespace-nowrap',
+                    category === id
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
+                  )}
+                >
+                  {id === 'free-lottie' ? 'Free Lottie' : t(`lottieBrowser.categories.${id}`)}
+                </button>
+              ))}
+            </div>
+
+            {category === 'free-lottie' && (
+              <div className="flex gap-1 overflow-x-auto no-scrollbar py-0.5">
+                {ICONSCOUNT_SUB_CATEGORIES.map((sub) => {
+                  const active = (sub.id === 'all' && !query) || query === sub.id
+                  return (
+                    <button
+                      key={sub.id}
+                      type="button"
+                      onClick={() => {
+                        const nextQ = sub.id === 'all' ? '' : sub.id
+                        setInputValue(nextQ)
+                        setQuery(nextQ)
+                      }}
+                      className={cn(
+                        'whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border',
+                        active
+                          ? 'border-amber-500/60 bg-amber-500/20 text-amber-300 font-semibold'
+                          : 'border-border/60 bg-secondary/30 text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {sub.label}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -162,16 +207,27 @@ function LottieBrowserPanelComponent() {
           <div
             className={cn('grid grid-cols-2 gap-3 transition-opacity', isLoading && 'opacity-60')}
           >
-            {items.map((animation) => (
-              <LottieCard
-                key={animation.id}
-                animation={animation}
-                isImporting={importingIds.has(animation.id)}
-                isImported={importedIds.has(animation.id)}
-                isFailed={failedIds.has(animation.id)}
-                onImport={importAnimation}
-              />
-            ))}
+            {items.map((animation) => {
+              const importedMedia = findImportedMediaForAnimation(
+                animation.id,
+                animation.name,
+                importedMediaMap,
+                mediaItems,
+              )
+              const isImported = importedIds.has(animation.id) || Boolean(importedMedia)
+
+              return (
+                <LottieCard
+                  key={animation.id}
+                  animation={animation}
+                  importedMedia={importedMedia}
+                  isImporting={importingIds.has(animation.id)}
+                  isImported={isImported}
+                  isFailed={failedIds.has(animation.id)}
+                  onImport={importAnimation}
+                />
+              )
+            })}
           </div>
         )}
       </div>

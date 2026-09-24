@@ -9,6 +9,8 @@ import {
 } from '../services/lottiefiles-api'
 import { useMediaLibraryStore } from '../deps/media-library'
 
+import type { MediaMetadata } from '@/types/storage'
+
 const logger = createLogger('LottieBrowserStore')
 
 export const LOTTIE_PAGE_SIZE = 24
@@ -37,6 +39,8 @@ interface LottieBrowserState {
   importingIds: Set<string>
   /** Animations already added to the media library this session. */
   importedIds: Set<string>
+  /** Map of animationId -> MediaMetadata for direct drag-and-drop */
+  importedMediaMap: Record<string, MediaMetadata>
   /** Animations whose last import attempt failed (click again to retry). */
   failedIds: Set<string>
   /** Bumped on every fetch so late responses can be discarded. */
@@ -57,6 +61,37 @@ function withoutId(set: Set<string>, id: string): Set<string> {
   return next
 }
 
+export function findImportedMediaForAnimation(
+  animationId: string,
+  animationName: string,
+  importedMediaMap: Record<string, MediaMetadata>,
+  mediaItems: MediaMetadata[],
+): MediaMetadata | undefined {
+  if (importedMediaMap[animationId]) {
+    return importedMediaMap[animationId]
+  }
+  const cleanId = animationId.replace(/^(iconscout-|free-)/, '')
+  return (
+    mediaItems.find((m) => {
+      const sid = m.attribution?.sourceId
+      return (
+        sid === animationId ||
+        sid === cleanId ||
+        sid === `iconscout-${cleanId}` ||
+        sid === `free-${cleanId}`
+      )
+    }) ??
+    mediaItems.find(
+      (m) =>
+        m.mimeType === 'application/lottie+json' &&
+        m.fileName
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '')
+          .startsWith(animationName.toLowerCase().replace(/[^a-z0-9]/g, '')),
+    )
+  )
+}
+
 export const useLottieBrowserStore = create<LottieBrowserState>()((set, get) => ({
   category: 'featured',
   query: '',
@@ -68,6 +103,7 @@ export const useLottieBrowserStore = create<LottieBrowserState>()((set, get) => 
   totalCount: 0,
   importingIds: new Set(),
   importedIds: new Set(),
+  importedMediaMap: {},
   failedIds: new Set(),
   requestId: 0,
 
@@ -162,6 +198,10 @@ export const useLottieBrowserStore = create<LottieBrowserState>()((set, get) => 
       set((current) => ({
         importingIds: withoutId(current.importingIds, animation.id),
         importedIds: new Set(current.importedIds).add(animation.id),
+        importedMediaMap: {
+          ...current.importedMediaMap,
+          [animation.id]: result,
+        },
       }))
     } catch (error) {
       logger.warn('Failed to import animation', error)
