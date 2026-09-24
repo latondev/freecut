@@ -199,11 +199,10 @@ export function TimelinePlayhead({
     updateCurrentPosition()
 
     const unsubscribePlayback = usePlaybackStore.subscribe((state) => {
+      if (isDraggingRef.current) return
       updatePlayheadPosition(
         playheadRef.current,
-        isDraggingRef.current && state.previewFrame !== null
-          ? state.previewFrame
-          : state.currentFrame,
+        state.previewFrame !== null ? state.previewFrame : state.currentFrame,
       )
     })
     const unsubscribeZoom = useZoomStore.subscribe((state, previousState) => {
@@ -305,7 +304,12 @@ export function TimelinePlayhead({
       isDraggingRef.current = true
       mainTimelineScrubActiveRef.current = true
       beginTimelineSkimmerScrub(skimmerScrubOwnerRef.current)
-      setPreviewFrameRef.current(null)
+      const initialFrame = Math.max(0, Math.round(pixelsToFrameRef.current(pointerX)))
+      const clampedInitialFrame =
+        maxFrameRef.current !== undefined
+          ? Math.min(initialFrame, maxFrameRef.current)
+          : initialFrame
+      setScrubFrameRef.current(clampedInitialFrame)
       setIsDragging(true)
     },
     [coordinateSurfaceRef, inRuler],
@@ -322,81 +326,87 @@ export function TimelinePlayhead({
 
     const runScrubLoop = (timestamp: number) => {
       rafIdRef.current = null
+      if (!isDraggingRef.current) return
+
       const clientX = scrubClientXRef.current
-      if (clientX === null) return
-
-      withPerfMeasure('tl.raf.playheadScrub', () => {
-        const scrollContainer = scrubScrollContainerRef.current
-        const bounds = scrollContainer?.getBoundingClientRect()
-        if (scrollContainer && bounds) {
-          const velocity = getPlayheadEdgeScrollVelocity(clientX, bounds)
-          const canScroll =
-            (velocity < 0 && scrollContainer.scrollLeft > 0) ||
-            (velocity > 0 &&
-              scrollContainer.scrollLeft + scrollContainer.clientWidth <
-                scrollContainer.scrollWidth)
-          if (velocity !== 0 && canScroll) {
-            const previousTimestamp = scrubAnimationTimeRef.current ?? timestamp - 1000 / 60
-            scrollContainer.scrollLeft += getEdgeScrollDelta(velocity, timestamp, previousTimestamp)
-            scrubAnimationTimeRef.current = timestamp
-          } else {
-            scrubAnimationTimeRef.current = null
+      if (clientX !== null) {
+        withPerfMeasure('tl.raf.playheadScrub', () => {
+          const scrollContainer = scrubScrollContainerRef.current
+          const bounds = scrollContainer?.getBoundingClientRect()
+          if (scrollContainer && bounds) {
+            const velocity = getPlayheadEdgeScrollVelocity(clientX, bounds)
+            const canScroll =
+              (velocity < 0 && scrollContainer.scrollLeft > 0) ||
+              (velocity > 0 &&
+                scrollContainer.scrollLeft + scrollContainer.clientWidth <
+                  scrollContainer.scrollWidth)
+            if (velocity !== 0 && canScroll) {
+              const previousTimestamp = scrubAnimationTimeRef.current ?? timestamp - 1000 / 60
+              scrollContainer.scrollLeft += getEdgeScrollDelta(
+                velocity,
+                timestamp,
+                previousTimestamp,
+              )
+              scrubAnimationTimeRef.current = timestamp
+            } else {
+              scrubAnimationTimeRef.current = null
+            }
           }
-        }
 
-        const coordinateSurface = scrubCoordinateSurfaceRef.current
-        const coordinateBounds =
-          coordinateSurface?.getBoundingClientRect() ?? scrollContainer?.getBoundingClientRect()
-        if (!coordinateBounds) return
+          const coordinateSurface = scrubCoordinateSurfaceRef.current
+          const coordinateBounds =
+            coordinateSurface?.getBoundingClientRect() ?? scrollContainer?.getBoundingClientRect()
+          if (!coordinateBounds) return
 
-        const scrollLeft = scrollContainer?.scrollLeft ?? 0
-        const coordinateScrollOffset = coordinateSurface ? 0 : scrollLeft
-        const pointerX = clientX - coordinateBounds.left + coordinateScrollOffset
-        let targetFrame = Math.max(0, Math.round(pixelsToFrameRef.current(pointerX)))
-        if (maxFrameRef.current !== undefined) {
-          targetFrame = Math.min(targetFrame, maxFrameRef.current)
-        }
+          const scrollLeft = scrollContainer?.scrollLeft ?? 0
+          const coordinateScrollOffset = coordinateSurface ? 0 : scrollLeft
+          const pointerX = clientX - coordinateBounds.left + coordinateScrollOffset
+          let targetFrame = Math.max(0, Math.round(pixelsToFrameRef.current(pointerX)))
+          if (maxFrameRef.current !== undefined) {
+            targetFrame = Math.min(targetFrame, maxFrameRef.current)
+          }
 
-        if (
-          shouldCommitScrubFrame({
-            state: scrubThrottleStateRef.current,
-            pointerX,
-            targetFrame,
-            pixelsPerSecond: pixelsPerSecondRef.current,
-            nowMs: performance.now(),
+          if (
+            shouldCommitScrubFrame({
+              state: scrubThrottleStateRef.current,
+              pointerX,
+              targetFrame,
+              pixelsPerSecond: pixelsPerSecondRef.current,
+              nowMs: performance.now(),
+            })
+          ) {
+            setScrubFrameRef.current(targetFrame)
+          }
+
+          const viewportBounds = scrollContainer?.getBoundingClientRect() ?? coordinateBounds
+          // Match the committed playhead's integer-frame position during the
+          // gesture so a stationary press/release cannot visibly settle sideways.
+          const frameTimelineX = Math.round(frameToPixelsRef.current(targetFrame))
+          const maxTimelineX =
+            maxFrameRef.current === undefined
+              ? undefined
+              : Math.round(frameToPixelsRef.current(maxFrameRef.current))
+          const visualTimelineX = Math.max(
+            scrollLeft,
+            Math.min(
+              frameTimelineX,
+              scrollLeft + Math.max(0, viewportBounds.width - 1),
+              maxTimelineX ?? Number.POSITIVE_INFINITY,
+            ),
+          )
+          for (const element of scrubPlayheadElementsRef.current) {
+            setTranslateXIfChanged(element, visualTimelineX)
+          }
+          notifyTimelineScrubVisualFrame(scrollContainer, {
+            frame: targetFrame,
+            source: 'main',
+            viewportProgress: getTimelineScrubViewportProgress(
+              visualTimelineX - scrollLeft,
+              viewportBounds.width - 1,
+            ),
           })
-        ) {
-          setScrubFrameRef.current(targetFrame)
-        }
-
-        const viewportBounds = scrollContainer?.getBoundingClientRect() ?? coordinateBounds
-        // Match the committed playhead's integer-frame position during the
-        // gesture so a stationary press/release cannot visibly settle sideways.
-        const frameTimelineX = Math.round(frameToPixelsRef.current(targetFrame))
-        const maxTimelineX =
-          maxFrameRef.current === undefined
-            ? undefined
-            : Math.round(frameToPixelsRef.current(maxFrameRef.current))
-        const visualTimelineX = Math.max(
-          scrollLeft,
-          Math.min(
-            frameTimelineX,
-            scrollLeft + Math.max(0, viewportBounds.width - 1),
-            maxTimelineX ?? Number.POSITIVE_INFINITY,
-          ),
-        )
-        for (const element of scrubPlayheadElementsRef.current) {
-          setTranslateXIfChanged(element, visualTimelineX)
-        }
-        notifyTimelineScrubVisualFrame(scrollContainer, {
-          frame: targetFrame,
-          source: 'main',
-          viewportProgress: getTimelineScrubViewportProgress(
-            visualTimelineX - scrollLeft,
-            viewportBounds.width - 1,
-          ),
         })
-      })
+      }
 
       if (isDraggingRef.current) rafIdRef.current = requestAnimationFrame(runScrubLoop)
     }
@@ -489,16 +499,16 @@ export function TimelinePlayhead({
       {/* Shared line + (ruler-only) flag handle. */}
       <PlayheadMarks handle={inRuler ? 'flag' : 'none'} topOffsetPx={topOffsetPx} />
 
-      {/* Invisible larger hit area over the flag — draggable to scrub. */}
+      {/* Flag hit area in ruler — draggable to scrub. Covers full ruler height. */}
       {inRuler && (
         <div
           data-playhead-handle
           className="absolute"
           style={{
-            top: `${topOffsetPx}px`,
+            top: '0px',
             left: '0px',
             width: '20px',
-            height: '20px',
+            height: '32px',
             transform: 'translateX(-50%)',
             cursor: activeToolRef.current === 'razor' ? 'default' : 'ew-resize',
             // Pass through pointer events in razor mode or during external drag operations
@@ -508,6 +518,23 @@ export function TimelinePlayhead({
           onMouseDown={handleMouseDown}
         />
       )}
+
+      {/* Vertical line hit area spanning the tracks below the ruler */}
+      <div
+        data-playhead-line-handle
+        className="absolute"
+        style={{
+          top: inRuler ? '32px' : '0px',
+          bottom: '0px',
+          left: '0px',
+          width: '12px',
+          transform: 'translateX(-50%)',
+          cursor: activeToolRef.current === 'razor' ? 'default' : 'ew-resize',
+          pointerEvents: activeToolRef.current === 'razor' || isExternalDrag ? 'none' : 'auto',
+          backgroundColor: 'transparent',
+        }}
+        onMouseDown={handleMouseDown}
+      />
     </div>
   )
 }

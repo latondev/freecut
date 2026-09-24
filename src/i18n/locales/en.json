@@ -106,6 +106,8 @@
     "timeline": {
       "snapByDefault": "Snap by Default",
       "snapByDefaultDescription": "Sets the initial snap state when a project opens.",
+      "enableTimelineSkimming": "Timeline Skimming",
+      "enableTimelineSkimmingDescription": "Preview video frame and audio as the cursor hovers across the timeline.",
       "showWaveforms": "Show Waveforms",
       "showFilmstrips": "Show Filmstrips",
       "enableFilmstripExtraction": "Extract Filmstrips",

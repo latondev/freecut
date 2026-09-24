@@ -38,10 +38,7 @@ import { useMarkersStore } from './markers-store'
 import { useTimelineSettingsStore } from './timeline-settings-store'
 import { ROOT_HISTORY_CONTEXT, useTimelineCommandStore } from './timeline-command-store'
 import { useCompositionsStore, type SubComposition } from './compositions-store'
-import {
-  getActiveTabId,
-  useCompositionNavigationStore,
-} from './composition-navigation-store'
+import { getActiveTabId, useCompositionNavigationStore } from './composition-navigation-store'
 import { useSequencesStore } from './sequences-store'
 import { getProject, updateProject, saveProjectThumbnail } from '@/infrastructure/storage'
 import {
@@ -785,8 +782,7 @@ function captureTimelinePersistenceSnapshot(): TimelinePersistenceSnapshot {
     compositions,
     currentFrame: heldRoot ? heldRoot.currentFrame : playback.currentFrame,
     zoomLevel: heldRoot?.zoomLevel ?? rootView?.zoomLevel ?? zoom.level,
-    scrollPosition:
-      heldRoot?.scrollPosition ?? rootView?.scrollPosition ?? settings.scrollPosition,
+    scrollPosition: heldRoot?.scrollPosition ?? rootView?.scrollPosition ?? settings.scrollPosition,
     busAudioEq: heldRoot ? heldRoot.busAudioEq : playback.busAudioEq,
     masterBusDb: playback.masterBusDb,
     markers: heldRoot ? heldRoot.markers : markers.markers,
@@ -1217,11 +1213,23 @@ export async function hydrateTimelineStoresFromProject(project: Project): Promis
   useTimelineSettingsStore.getState().setFps(project.metadata?.fps || 30)
   // snapEnabled is UI state, seeded from the app-level default
   useTimelineSettingsStore.getState().setSnapEnabled(useSettingsStore.getState().snapEnabled)
+  useTimelineSettingsStore
+    .getState()
+    .setTimelineSkimmingEnabled(useSettingsStore.getState().timelineSkimmingEnabled ?? false)
   useTimelineSettingsStore.getState().markClean()
 
   // Clear undo history when loading
   useTimelineCommandStore.getState().clearHistory()
 }
+
+useSettingsStore.subscribe((state, prevState) => {
+  if (state.snapEnabled !== prevState.snapEnabled) {
+    useTimelineSettingsStore.getState().setSnapEnabled(state.snapEnabled)
+  }
+  if (state.timelineSkimmingEnabled !== prevState.timelineSkimmingEnabled) {
+    useTimelineSettingsStore.getState().setTimelineSkimmingEnabled(state.timelineSkimmingEnabled)
+  }
+})
 
 const inFlightTimelineLoads = new Map<string, Promise<void>>()
 let timelineLoadQueueTail: Promise<void> | null = null
@@ -1230,10 +1238,7 @@ function getTimelineLoadKey(projectId: string, options: LoadTimelineOptions): st
   return JSON.stringify([projectId, options.allowProjectUpgrade === true])
 }
 
-export function loadTimeline(
-  projectId: string,
-  options: LoadTimelineOptions = {},
-): Promise<void> {
+export function loadTimeline(projectId: string, options: LoadTimelineOptions = {}): Promise<void> {
   const loadKey = getTimelineLoadKey(projectId, options)
   const inFlightLoad = inFlightTimelineLoads.get(loadKey)
   if (inFlightLoad) return inFlightLoad

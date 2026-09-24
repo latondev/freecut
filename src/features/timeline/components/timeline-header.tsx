@@ -28,6 +28,7 @@ import {
   Link2,
   Volume2,
   Diamond,
+  Eye,
 } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { formatHotkeyBinding } from '@/config/hotkeys'
@@ -349,12 +350,7 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
         finishSliderZoomInteraction()
       }
     },
-    [
-      commitSliderZoom,
-      finishSliderZoomInteraction,
-      releaseSliderZoomGesture,
-      renderSliderPreview,
-    ],
+    [commitSliderZoom, finishSliderZoomInteraction, releaseSliderZoomGesture, renderSliderPreview],
   )
 
   const controlledSliderValue = zoomToSlider(settledZoomLevel)
@@ -456,6 +452,8 @@ export const TimelineHeader = memo(function TimelineHeader({
   const toggleSnap = useTimelineStore((s) => s.toggleSnap)
   const audioSkimmingEnabled = useTimelineStore((s) => s.audioSkimmingEnabled)
   const toggleAudioSkimming = useTimelineStore((s) => s.toggleAudioSkimming)
+  const timelineSkimmingEnabled = useTimelineStore((s) => s.timelineSkimmingEnabled)
+  const toggleTimelineSkimming = useTimelineStore((s) => s.toggleTimelineSkimming)
   const inPoint = useTimelineStore((s) => s.inPoint)
   const outPoint = useTimelineStore((s) => s.outPoint)
   const setInPoint = useTimelineStore((s) => s.setInPoint)
@@ -807,6 +805,31 @@ export const TimelineHeader = memo(function TimelineHeader({
             }
           >
             <Volume2 className="w-3.5 h-3.5" />
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            style={btnSize}
+            className={
+              timelineSkimmingEnabled
+                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                : ''
+            }
+            onClick={toggleTimelineSkimming}
+            aria-label={
+              timelineSkimmingEnabled
+                ? t('timeline.header.disableTimelineSkimming')
+                : t('timeline.header.enableTimelineSkimming')
+            }
+            aria-pressed={timelineSkimmingEnabled}
+            data-tooltip={
+              timelineSkimmingEnabled
+                ? t('timeline.header.timelineSkimmingEnabled')
+                : t('timeline.header.timelineSkimmingDisabled')
+            }
+          >
+            <Eye className="w-3.5 h-3.5" />
           </Button>
 
           <Separator orientation="vertical" className="h-5 mx-1.5" />

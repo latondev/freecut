@@ -29,8 +29,11 @@ import {
   TranscribeDialog,
   type TranscribeDialogValues,
 } from '@/features/editor/deps/timeline-contract'
-import type { TimelineItem } from '@/types/timeline'
+import type { TimelineItem, ImageItem } from '@/types/timeline'
+import type { AnimatableProperty, EasingType } from '@/types/keyframe'
 import { useSelectionStore } from '@/shared/state/selection'
+import { useProjectStore } from '@/features/editor/deps/projects'
+import { cn } from '@/shared/ui/cn'
 import { toast } from 'sonner'
 
 const RANDOM_TRANSITIONS = [
@@ -64,7 +67,19 @@ const CREATIVE_IDS = new Set([
 const DIRECTIONS = ['from-left', 'from-right', 'from-top', 'from-bottom'] as const
 
 type TransitionCategoryMode = 'all' | 'smooth' | 'motion' | 'creative'
-type ImageAnimPreset = 'zoom-in' | 'zoom-out' | 'pan-left' | 'pan-right' | 'pan-up' | 'pan-down'
+type MotionEasingMode = 'ease-in-out' | 'linear'
+type ImageAnimPreset =
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'pan-left'
+  | 'pan-right'
+  | 'pan-up'
+  | 'pan-down'
+  | 'zoom-in-pan-left'
+  | 'zoom-in-pan-right'
+  | 'zoom-out-pan-left'
+  | 'zoom-out-pan-right'
+
 type ImageAnimType = 'random' | ImageAnimPreset
 
 const ANIM_POOL: readonly ImageAnimPreset[] = [
@@ -74,16 +89,21 @@ const ANIM_POOL: readonly ImageAnimPreset[] = [
   'pan-right',
   'pan-up',
   'pan-down',
+  'zoom-in-pan-left',
+  'zoom-in-pan-right',
+  'zoom-out-pan-left',
+  'zoom-out-pan-right',
 ]
 
 interface KeyframePayload {
   itemId: string
-  property: 'width' | 'height' | 'x' | 'y'
+  property: AnimatableProperty
   frame: number
   value: number
-  easing?: 'linear' | 'ease-out'
+  easing?: EasingType
 }
 
+// fallow-ignore-next-line complexity
 function buildImageMotionKeyframes(
   itemId: string,
   duration: number,
@@ -92,66 +112,153 @@ function buildImageMotionKeyframes(
   baseH: number,
   baseX: number,
   baseY: number,
+  easingMode: MotionEasingMode = 'ease-in-out',
 ): KeyframePayload[] {
-  const end = duration - 1
+  const end = Math.max(1, duration - 1)
+  const ease = easingMode
+
+  // Safe scale for pan motions: 1.15 gives 7.5% margin on each side to guarantee no black borders
+  const panScale = 1.15
+  const panW = Math.round(baseW * panScale)
+  const panH = Math.round(baseH * panScale)
+
+  // Dynamic safe pan distance proportional to dimensions (4%, safely inside 7.5% margin)
+  const dx = Math.max(24, Math.round(baseW * 0.04))
+  const dy = Math.max(20, Math.round(baseH * 0.04))
+
+  // Zoom dimensions (1.15x)
+  const zoomW = Math.round(baseW * 1.15)
+  const zoomH = Math.round(baseH * 1.15)
+
   if (anim === 'zoom-in') {
-    const zoomW = Math.round(baseW * 1.15)
-    const zoomH = Math.round(baseH * 1.15)
     return [
-      { itemId, property: 'width', frame: 0, value: baseW, easing: 'ease-out' },
-      { itemId, property: 'height', frame: 0, value: baseH, easing: 'ease-out' },
+      { itemId, property: 'width', frame: 0, value: baseW, easing: ease },
+      { itemId, property: 'height', frame: 0, value: baseH, easing: ease },
+      { itemId, property: 'x', frame: 0, value: baseX, easing: ease },
+      { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
       { itemId, property: 'width', frame: end, value: zoomW, easing: 'linear' },
       { itemId, property: 'height', frame: end, value: zoomH, easing: 'linear' },
+      { itemId, property: 'x', frame: end, value: baseX, easing: 'linear' },
+      { itemId, property: 'y', frame: end, value: baseY, easing: 'linear' },
     ]
   }
 
   if (anim === 'zoom-out') {
-    const zoomW = Math.round(baseW * 1.15)
-    const zoomH = Math.round(baseH * 1.15)
     return [
-      { itemId, property: 'width', frame: 0, value: zoomW, easing: 'ease-out' },
-      { itemId, property: 'height', frame: 0, value: zoomH, easing: 'ease-out' },
+      { itemId, property: 'width', frame: 0, value: zoomW, easing: ease },
+      { itemId, property: 'height', frame: 0, value: zoomH, easing: ease },
+      { itemId, property: 'x', frame: 0, value: baseX, easing: ease },
+      { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
       { itemId, property: 'width', frame: end, value: baseW, easing: 'linear' },
       { itemId, property: 'height', frame: end, value: baseH, easing: 'linear' },
+      { itemId, property: 'x', frame: end, value: baseX, easing: 'linear' },
+      { itemId, property: 'y', frame: end, value: baseY, easing: 'linear' },
     ]
   }
 
-  const w = Math.round(baseW * 1.1)
-  const h = Math.round(baseH * 1.1)
-  const baseFrames: KeyframePayload[] = [
-    { itemId, property: 'width', frame: 0, value: w, easing: 'linear' },
-    { itemId, property: 'height', frame: 0, value: h, easing: 'linear' },
-  ]
-
   if (anim === 'pan-left') {
     return [
-      ...baseFrames,
-      { itemId, property: 'x', frame: 0, value: baseX + 60, easing: 'ease-out' },
-      { itemId, property: 'x', frame: end, value: baseX - 60, easing: 'linear' },
+      { itemId, property: 'width', frame: 0, value: panW, easing: ease },
+      { itemId, property: 'height', frame: 0, value: panH, easing: ease },
+      { itemId, property: 'x', frame: 0, value: baseX + dx, easing: ease },
+      { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
+      { itemId, property: 'width', frame: end, value: panW, easing: 'linear' },
+      { itemId, property: 'height', frame: end, value: panH, easing: 'linear' },
+      { itemId, property: 'x', frame: end, value: baseX - dx, easing: 'linear' },
+      { itemId, property: 'y', frame: end, value: baseY, easing: 'linear' },
     ]
   }
 
   if (anim === 'pan-right') {
     return [
-      ...baseFrames,
-      { itemId, property: 'x', frame: 0, value: baseX - 60, easing: 'ease-out' },
-      { itemId, property: 'x', frame: end, value: baseX + 60, easing: 'linear' },
+      { itemId, property: 'width', frame: 0, value: panW, easing: ease },
+      { itemId, property: 'height', frame: 0, value: panH, easing: ease },
+      { itemId, property: 'x', frame: 0, value: baseX - dx, easing: ease },
+      { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
+      { itemId, property: 'width', frame: end, value: panW, easing: 'linear' },
+      { itemId, property: 'height', frame: end, value: panH, easing: 'linear' },
+      { itemId, property: 'x', frame: end, value: baseX + dx, easing: 'linear' },
+      { itemId, property: 'y', frame: end, value: baseY, easing: 'linear' },
     ]
   }
 
   if (anim === 'pan-up') {
     return [
-      ...baseFrames,
-      { itemId, property: 'y', frame: 0, value: baseY + 50, easing: 'ease-out' },
-      { itemId, property: 'y', frame: end, value: baseY - 50, easing: 'linear' },
+      { itemId, property: 'width', frame: 0, value: panW, easing: ease },
+      { itemId, property: 'height', frame: 0, value: panH, easing: ease },
+      { itemId, property: 'x', frame: 0, value: baseX, easing: ease },
+      { itemId, property: 'y', frame: 0, value: baseY + dy, easing: ease },
+      { itemId, property: 'width', frame: end, value: panW, easing: 'linear' },
+      { itemId, property: 'height', frame: end, value: panH, easing: 'linear' },
+      { itemId, property: 'x', frame: end, value: baseX, easing: 'linear' },
+      { itemId, property: 'y', frame: end, value: baseY - dy, easing: 'linear' },
     ]
   }
 
-  // pan-down
+  if (anim === 'pan-down') {
+    return [
+      { itemId, property: 'width', frame: 0, value: panW, easing: ease },
+      { itemId, property: 'height', frame: 0, value: panH, easing: ease },
+      { itemId, property: 'x', frame: 0, value: baseX, easing: ease },
+      { itemId, property: 'y', frame: 0, value: baseY - dy, easing: ease },
+      { itemId, property: 'width', frame: end, value: panW, easing: 'linear' },
+      { itemId, property: 'height', frame: end, value: panH, easing: 'linear' },
+      { itemId, property: 'x', frame: end, value: baseX, easing: 'linear' },
+      { itemId, property: 'y', frame: end, value: baseY + dy, easing: 'linear' },
+    ]
+  }
+
+  const halfDx = Math.round(dx * 0.7)
+
+  if (anim === 'zoom-in-pan-left') {
+    return [
+      { itemId, property: 'width', frame: 0, value: baseW, easing: ease },
+      { itemId, property: 'height', frame: 0, value: baseH, easing: ease },
+      { itemId, property: 'x', frame: 0, value: baseX + halfDx, easing: ease },
+      { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
+      { itemId, property: 'width', frame: end, value: zoomW, easing: 'linear' },
+      { itemId, property: 'height', frame: end, value: zoomH, easing: 'linear' },
+      { itemId, property: 'x', frame: end, value: baseX - halfDx, easing: 'linear' },
+      { itemId, property: 'y', frame: end, value: baseY, easing: 'linear' },
+    ]
+  }
+
+  if (anim === 'zoom-in-pan-right') {
+    return [
+      { itemId, property: 'width', frame: 0, value: baseW, easing: ease },
+      { itemId, property: 'height', frame: 0, value: baseH, easing: ease },
+      { itemId, property: 'x', frame: 0, value: baseX - halfDx, easing: ease },
+      { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
+      { itemId, property: 'width', frame: end, value: zoomW, easing: 'linear' },
+      { itemId, property: 'height', frame: end, value: zoomH, easing: 'linear' },
+      { itemId, property: 'x', frame: end, value: baseX + halfDx, easing: 'linear' },
+      { itemId, property: 'y', frame: end, value: baseY, easing: 'linear' },
+    ]
+  }
+
+  if (anim === 'zoom-out-pan-left') {
+    return [
+      { itemId, property: 'width', frame: 0, value: zoomW, easing: ease },
+      { itemId, property: 'height', frame: 0, value: zoomH, easing: ease },
+      { itemId, property: 'x', frame: 0, value: baseX - halfDx, easing: ease },
+      { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
+      { itemId, property: 'width', frame: end, value: Math.round(baseW * 1.05), easing: 'linear' },
+      { itemId, property: 'height', frame: end, value: Math.round(baseH * 1.05), easing: 'linear' },
+      { itemId, property: 'x', frame: end, value: baseX + halfDx, easing: 'linear' },
+      { itemId, property: 'y', frame: end, value: baseY, easing: 'linear' },
+    ]
+  }
+
+  // zoom-out-pan-right
   return [
-    ...baseFrames,
-    { itemId, property: 'y', frame: 0, value: baseY - 50, easing: 'ease-out' },
-    { itemId, property: 'y', frame: end, value: baseY + 50, easing: 'linear' },
+    { itemId, property: 'width', frame: 0, value: zoomW, easing: ease },
+    { itemId, property: 'height', frame: 0, value: zoomH, easing: ease },
+    { itemId, property: 'x', frame: 0, value: baseX + halfDx, easing: ease },
+    { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
+    { itemId, property: 'width', frame: end, value: Math.round(baseW * 1.05), easing: 'linear' },
+    { itemId, property: 'height', frame: end, value: Math.round(baseH * 1.05), easing: 'linear' },
+    { itemId, property: 'x', frame: end, value: baseX - halfDx, easing: 'linear' },
+    { itemId, property: 'y', frame: end, value: baseY, easing: 'linear' },
   ]
 }
 
@@ -220,6 +327,7 @@ function getBatchStageLabel(stage?: string): string {
 
 export const ActionPanel = memo(function ActionPanel() {
   const [fillVoiceGaps, setFillVoiceGaps] = useState(true)
+  const [motionEasing, setMotionEasing] = useState<MotionEasingMode>('ease-in-out')
   const [transitionDuration, setTransitionDuration] = useState(15)
   const [transitionCategory, setTransitionCategory] = useState<TransitionCategoryMode>('all')
   const [transcribeDialogOpen, setTranscribeDialogOpen] = useState(false)
@@ -358,9 +466,14 @@ export const ActionPanel = memo(function ActionPanel() {
     images: TimelineItem[],
     type: ImageAnimType,
     keyframesStore: ReturnType<typeof useKeyframesStore.getState>,
+    easingMode: MotionEasingMode = 'ease-in-out',
   ): void {
     const payloads: KeyframePayload[] = []
     let lastAnim = ''
+
+    const projectMeta = useProjectStore.getState().currentProject?.metadata
+    const defaultW = projectMeta?.width ?? 1920
+    const defaultH = projectMeta?.height ?? 1080
 
     for (const img of images) {
       if (img.durationInFrames < 2) continue
@@ -378,8 +491,9 @@ export const ActionPanel = memo(function ActionPanel() {
           : type
       lastAnim = chosen
 
-      const baseW = img.transform?.width ?? 1920
-      const baseH = img.transform?.height ?? 1080
+      const imageItem = img as ImageItem
+      const baseW = img.transform?.width ?? imageItem.sourceWidth ?? defaultW
+      const baseH = img.transform?.height ?? imageItem.sourceHeight ?? defaultH
       const baseX = img.transform?.x ?? 0
       const baseY = img.transform?.y ?? 0
 
@@ -392,6 +506,7 @@ export const ActionPanel = memo(function ActionPanel() {
           baseH,
           baseX,
           baseY,
+          easingMode,
         ),
       )
     }
@@ -404,27 +519,36 @@ export const ActionPanel = memo(function ActionPanel() {
   // ==========================================
   // ACTION 2: Key-frame Animation Image
   // ==========================================
-  const handleApplyImageAnimation = useCallback((type: ImageAnimType) => {
-    const currentItems = useItemsStore.getState().items
-    const selectedIds = useSelectionStore.getState().selectedItemIds
+  const handleApplyImageAnimation = useCallback(
+    (type: ImageAnimType) => {
+      const currentItems = useItemsStore.getState().items
+      const selectedIds = useSelectionStore.getState().selectedItemIds
 
-    let targetImages: TimelineItem[] = currentItems.filter((it) => it.type === 'image')
-    if (selectedIds.length > 0) {
-      const selImg = currentItems.filter((it) => selectedIds.includes(it.id) && it.type === 'image')
-      if (selImg.length > 0) targetImages = selImg
-    }
+      let targetImages: TimelineItem[] = currentItems.filter((it) => it.type === 'image')
+      if (selectedIds.length > 0) {
+        const selImg = currentItems.filter(
+          (it) => selectedIds.includes(it.id) && it.type === 'image',
+        )
+        if (selImg.length > 0) targetImages = selImg
+      }
 
-    if (targetImages.length === 0) {
-      toast.warning('Không tìm thấy clip Ảnh nào trên Timeline.')
-      return
-    }
+      if (targetImages.length === 0) {
+        toast.warning('Không tìm thấy clip Ảnh nào trên Timeline.')
+        return
+      }
 
-    executeTimelineCommand('APPLY_IMAGE_ANIMATION', () => {
-      applyImageAnimationBatch(targetImages, type, useKeyframesStore.getState())
-    })
+      executeTimelineCommand('APPLY_IMAGE_ANIMATION', () => {
+        applyImageAnimationBatch(targetImages, type, useKeyframesStore.getState(), motionEasing)
+      })
 
-    toast.success(`Đã tạo keyframe animation Ken Burns cho ${targetImages.length} ảnh!`)
-  }, [])
+      const easingLabel =
+        motionEasing === 'ease-in-out' ? 'mượt mà (Ease In-Out)' : 'trôi đều (Linear)'
+      toast.success(
+        `Đã tạo keyframe animation Ken Burns (${easingLabel}) cho ${targetImages.length} ảnh!`,
+      )
+    },
+    [motionEasing],
+  )
 
   const handleResetImageAnimation = useCallback(() => {
     const currentItems = useItemsStore.getState().items
@@ -515,7 +639,7 @@ export const ActionPanel = memo(function ActionPanel() {
   }, [])
 
   return (
-    <div className="h-full flex flex-col min-h-0 overflow-y-auto p-3.5 space-y-4">
+    <div className="h-full overflow-y-auto p-3.5 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between pb-3 border-b border-border/60">
         <div className="flex items-center gap-2">
@@ -545,30 +669,31 @@ export const ActionPanel = memo(function ActionPanel() {
       </div>
 
       {/* 🌟 TẠO CAPTION CHO TOÀN BỘ AUDIO (Khuyên dùng - Tiện nhất) */}
-      <div className="rounded-xl border border-amber-500/35 bg-gradient-to-b from-amber-500/10 via-secondary/25 to-secondary/15 p-3.5 space-y-3 shadow-sm relative overflow-hidden">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
+      <div className="rounded-xl border border-amber-500/35 bg-gradient-to-b from-amber-500/10 via-secondary/25 to-secondary/15 p-3.5 space-y-3 shadow-sm relative">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-6 h-6 rounded-md bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0">
               <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400/30" />
             </div>
-            <div>
-              <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                <span>Tạo Caption Toàn Bộ Audio</span>
-                <span className="text-[9px] font-semibold uppercase tracking-wider bg-amber-500/25 text-amber-200 px-1.5 py-0.5 rounded-full border border-amber-500/40">
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5 flex-wrap">
+                <span>Tạo Caption Tự Động</span>
+                <span className="text-[9px] font-semibold uppercase tracking-wider bg-amber-500/25 text-amber-200 px-1.5 py-0.5 rounded-full border border-amber-500/40 shrink-0">
                   Khuyên dùng
                 </span>
               </div>
             </div>
           </div>
-          <span className="text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded flex items-center gap-1 font-medium">
-            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-            Word-by-word Sync
+          <span className="text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded flex items-center gap-1 font-medium shrink-0">
+            <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+            <span>Word-by-word</span>
           </span>
         </div>
 
         <p className="text-[11px] text-muted-foreground leading-snug">
-          Quét toàn bộ Voice/Audio trên Timeline, chọn Model Whisper & Ngôn ngữ 1 lần duy nhất. Xử
-          lý nền qua Web Worker chống giật lag, tự động bật phụ đề chạy chữ đồng bộ theo giọng nói.
+          Quét toàn bộ Voice/Audio trên Timeline, chọn Model Whisper &amp; Ngôn ngữ 1 lần duy nhất.
+          Xử lý nền qua Web Worker chống giật lag, tự động bật phụ đề chạy chữ đồng bộ theo giọng
+          nói.
         </p>
 
         {isBatchTranscribing && batchProgress ? (
@@ -613,7 +738,7 @@ export const ActionPanel = memo(function ActionPanel() {
                   {voiceClipsCount > 0 ? `${voiceClipsCount} đoạn Voice/Audio` : '0 audio'}
                 </strong>
               </span>
-              <span className="text-[10px] text-amber-400/80">⚡ Web Worker không lag máy</span>
+              <span className="text-[10px] text-amber-400/80">⚡ Không lag timeline</span>
             </div>
 
             <Button
@@ -624,7 +749,7 @@ export const ActionPanel = memo(function ActionPanel() {
               className="w-full h-9 text-xs font-semibold gap-1.5 border-amber-500/40 bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 hover:border-amber-500/60 shadow-sm transition-all"
             >
               <Zap className="w-4 h-4 text-amber-400 fill-amber-400/50" />
-              <span>⚡ Tạo Caption cho toàn bộ Audio trên Timeline</span>
+              <span>Tạo Caption cho toàn bộ Audio</span>
             </Button>
           </div>
         )}
@@ -683,6 +808,41 @@ export const ActionPanel = memo(function ActionPanel() {
         <p className="text-[11px] text-muted-foreground leading-snug">
           Tạo chuyển động mượt mà cho ảnh tĩnh (phóng to, thu nhỏ, lia máy quay) chuẩn điện ảnh.
         </p>
+
+        {/* Easing Mode Selector */}
+        <div className="flex items-center justify-between text-[11px] px-2 py-1 bg-background/50 rounded-lg border border-border/40">
+          <span className="text-muted-foreground flex items-center gap-1 font-medium text-[11px]">
+            <span>Kiểu lướt:</span>
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setMotionEasing('ease-in-out')}
+              className={cn(
+                'px-2 py-0.5 rounded text-[10px] font-medium transition-all',
+                motionEasing === 'ease-in-out'
+                  ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40 shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40 border border-transparent',
+              )}
+              title="Tăng tốc và giảm tốc êm ái, mượt mà chuẩn điện ảnh"
+            >
+              Mượt mà (Ease)
+            </button>
+            <button
+              type="button"
+              onClick={() => setMotionEasing('linear')}
+              className={cn(
+                'px-2 py-0.5 rounded text-[10px] font-medium transition-all',
+                motionEasing === 'linear'
+                  ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40 shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40 border border-transparent',
+              )}
+              title="Chuyển động liên tục, tốc độ đồng đều như camera trượt"
+            >
+              Trôi đều (Linear)
+            </button>
+          </div>
+        </div>
 
         <Button
           variant="outline"

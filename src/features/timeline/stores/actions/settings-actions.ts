@@ -10,6 +10,7 @@ import { useTimelineSettingsStore } from '../timeline-settings-store'
 import { useTimelineCommandStore } from '../timeline-command-store'
 import { execute } from './shared'
 import { emitUiSound } from '@/shared/ui/ui-sound'
+import { usePlaybackStore } from '@/shared/state/playback'
 
 export function toggleSnap(): void {
   execute('TOGGLE_SNAP', () => {
@@ -23,6 +24,18 @@ export function toggleAudioSkimming(): void {
     useTimelineSettingsStore.getState().toggleAudioSkimming()
   })
   emitUiSound(useTimelineSettingsStore.getState().audioSkimmingEnabled ? 'toggleOn' : 'toggleOff')
+}
+
+export function toggleTimelineSkimming(): void {
+  execute('TOGGLE_TIMELINE_SKIMMING', () => {
+    useTimelineSettingsStore.getState().toggleTimelineSkimming()
+    if (!useTimelineSettingsStore.getState().timelineSkimmingEnabled) {
+      usePlaybackStore.getState().setPreviewFrame(null)
+    }
+  })
+  emitUiSound(
+    useTimelineSettingsStore.getState().timelineSkimmingEnabled ? 'toggleOn' : 'toggleOff',
+  )
 }
 
 export function setScrollPosition(position: number): void {

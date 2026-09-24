@@ -26,7 +26,13 @@ describe('TimelineMarkers ruler scrub cancellation', () => {
       previewItemId: null,
       isPlaying: false,
     })
-    useTimelineStore.setState({ fps: 30, inPoint: null, outPoint: null, markers: [] })
+    useTimelineStore.setState({
+      fps: 30,
+      inPoint: null,
+      outPoint: null,
+      markers: [],
+      timelineSkimmingEnabled: true,
+    })
     mainTimelineScrubActiveRef.current = false
     resetTimelineSkimmerScrubForTest()
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)

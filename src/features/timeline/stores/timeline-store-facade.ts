@@ -49,6 +49,7 @@ let lastFpsRef: unknown = null
 let lastScrollPositionRef: unknown = null
 let lastSnapEnabledRef: unknown = null
 let lastAudioSkimmingEnabledRef: unknown = null
+let lastTimelineSkimmingEnabledRef: unknown = null
 let lastIsDirtyRef: unknown = null
 
 /**
@@ -74,6 +75,7 @@ function getSnapshot(): TimelineState & TimelineActions {
     lastScrollPositionRef !== settingsState.scrollPosition ||
     lastSnapEnabledRef !== settingsState.snapEnabled ||
     lastAudioSkimmingEnabledRef !== settingsState.audioSkimmingEnabled ||
+    lastTimelineSkimmingEnabledRef !== settingsState.timelineSkimmingEnabled ||
     lastIsDirtyRef !== settingsState.isDirty
 
   if (!cachedSnapshot || stateChanged) {
@@ -89,6 +91,7 @@ function getSnapshot(): TimelineState & TimelineActions {
     lastScrollPositionRef = settingsState.scrollPosition
     lastSnapEnabledRef = settingsState.snapEnabled
     lastAudioSkimmingEnabledRef = settingsState.audioSkimmingEnabled
+    lastTimelineSkimmingEnabledRef = settingsState.timelineSkimmingEnabled
     lastIsDirtyRef = settingsState.isDirty
 
     // Rebuild cached snapshot
@@ -105,6 +108,7 @@ function getSnapshot(): TimelineState & TimelineActions {
       scrollPosition: settingsState.scrollPosition,
       snapEnabled: settingsState.snapEnabled,
       audioSkimmingEnabled: settingsState.audioSkimmingEnabled,
+      timelineSkimmingEnabled: settingsState.timelineSkimmingEnabled,
       isDirty: settingsState.isDirty,
 
       // Actions (static references, never change)
@@ -121,6 +125,7 @@ function getSnapshot(): TimelineState & TimelineActions {
       closeAllGapsOnTrack: timelineActions.closeAllGapsOnTrack,
       toggleSnap: timelineActions.toggleSnap,
       toggleAudioSkimming: timelineActions.toggleAudioSkimming,
+      toggleTimelineSkimming: timelineActions.toggleTimelineSkimming,
       setScrollPosition: timelineActions.setScrollPosition,
       moveItem: timelineActions.moveItem,
       moveItems: timelineActions.moveItems,
@@ -320,6 +325,11 @@ function createTimelineStoreFacade(): TimelineStoreFacade {
     }
     if ('audioSkimmingEnabled' in partial && partial.audioSkimmingEnabled !== undefined) {
       useTimelineSettingsStore.getState().setAudioSkimmingEnabled(partial.audioSkimmingEnabled)
+    }
+    if ('timelineSkimmingEnabled' in partial && partial.timelineSkimmingEnabled !== undefined) {
+      useTimelineSettingsStore
+        .getState()
+        .setTimelineSkimmingEnabled(partial.timelineSkimmingEnabled)
     }
     if ('isDirty' in partial && partial.isDirty !== undefined) {
       useTimelineSettingsStore.getState().setIsDirty(partial.isDirty)

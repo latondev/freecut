@@ -37,6 +37,7 @@ import {
 
 // Components
 import { TimelinePlayhead } from './timeline-playhead'
+import { mainTimelineScrubActiveRef } from '@/shared/timeline/main-timeline-scrub'
 import { TimelinePreviewScrubber } from './timeline-preview-scrubber'
 import { TimelineRulerSurface } from './timeline-ruler-surface'
 import { TimelineTrack } from './timeline-track'
@@ -1274,7 +1275,12 @@ export const TimelineContent = memo(function TimelineContent({
     const handleScrubStart = (e: MouseEvent) => {
       const target = e.target as HTMLElement
       // Check if mousedown is on a playhead handle or timeline ruler
-      if (target.closest('[data-playhead-handle]') || target.closest('.timeline-ruler')) {
+      if (
+        target.closest('[data-playhead-handle]') ||
+        target.closest('[data-playhead-line-handle]') ||
+        target.closest('[data-timeline-playhead]') ||
+        target.closest('.timeline-ruler')
+      ) {
         scrubWasActiveRef.current = true
       }
     }
@@ -1441,8 +1447,20 @@ export const TimelineContent = memo(function TimelineContent({
     [],
   )
 
+  // fallow-ignore-next-line complexity
   const handleTimelineMouseMove = useCallback(
+    // fallow-ignore-next-line complexity
     (e: React.MouseEvent) => {
+      // Skip during any scrub or drag (playhead drag, ruler scrub, item drag)
+      if (
+        mainTimelineScrubActiveRef.current ||
+        dragWasActiveRef.current ||
+        scrubWasActiveRef.current
+      ) {
+        cancelPendingHoverPreview()
+        return
+      }
+
       // A hover-skim request that lands in the same frame as the first zoom
       // wheel update makes the program monitor render a new preview frame while
       // the dense timeline is also changing scale. Keep the last settled
@@ -1454,7 +1472,10 @@ export const TimelineContent = memo(function TimelineContent({
 
       if (useEditorStore.getState().transcriptionDialogDepth > 0) {
         cancelPendingHoverPreview()
-        if (usePlaybackStore.getState().previewFrame !== null) {
+        if (
+          !mainTimelineScrubActiveRef.current &&
+          usePlaybackStore.getState().previewFrame !== null
+        ) {
           setPreviewFrameRef.current(null)
         }
         return
@@ -1463,7 +1484,10 @@ export const TimelineContent = memo(function TimelineContent({
       // Skip during playback
       if (usePlaybackStore.getState().isPlaying) {
         cancelPendingHoverPreview()
-        if (usePlaybackStore.getState().previewFrame !== null) {
+        if (
+          !mainTimelineScrubActiveRef.current &&
+          usePlaybackStore.getState().previewFrame !== null
+        ) {
           setPreviewFrameRef.current(null)
         }
         return
@@ -1476,7 +1500,10 @@ export const TimelineContent = memo(function TimelineContent({
       const interactionLockActive = gestureCursorActive || body.style.userSelect === 'none'
       if (interactionLockActive && !marqueePointerDownRef.current) {
         cancelPendingHoverPreview()
-        if (usePlaybackStore.getState().previewFrame !== null) {
+        if (
+          !mainTimelineScrubActiveRef.current &&
+          usePlaybackStore.getState().previewFrame !== null
+        ) {
           setPreviewFrameRef.current(null)
         }
         return
@@ -1529,6 +1556,18 @@ export const TimelineContent = memo(function TimelineContent({
         return
       }
 
+      // If skimming is disabled and we're not using razor, skip hover preview
+      if (!isRazor && !useTimelineSettingsStore.getState().timelineSkimmingEnabled) {
+        cancelPendingHoverPreview()
+        if (
+          !mainTimelineScrubActiveRef.current &&
+          usePlaybackStore.getState().previewFrame !== null
+        ) {
+          setPreviewFrameRef.current(null)
+        }
+        return
+      }
+
       // Dense timelines give a wheel gesture one short intent window before
       // starting the comparatively expensive program-monitor skim. This keeps
       // normal hover responsive while allowing Ctrl/Cmd-wheel to cancel the
@@ -1557,7 +1596,13 @@ export const TimelineContent = memo(function TimelineContent({
   )
 
   const handleTimelineMouseLeave = useCallback(() => {
-    if (marqueePointerDownRef.current) return
+    if (
+      marqueePointerDownRef.current ||
+      mainTimelineScrubActiveRef.current ||
+      scrubWasActiveRef.current
+    ) {
+      return
+    }
 
     cancelPendingHoverPreview()
     setPreviewFrameRef.current(null)

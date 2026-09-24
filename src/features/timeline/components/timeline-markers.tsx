@@ -3,6 +3,7 @@ import { useCallback, useRef, useState, useEffect, useMemo, memo } from 'react'
 
 // Stores and selectors
 import { useTimelineStore } from '../stores/timeline-store'
+import { useTimelineSettingsStore } from '../stores/timeline-settings-store'
 import { setInOutPointsWithoutHistory } from '../stores/actions/marker-actions'
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useMicRecordingStore, isMicRecordingActive } from '@/shared/state/mic-recording-store'
@@ -853,10 +854,25 @@ export const TimelineMarkers = memo(function TimelineMarkers({
 
   const handleRulerMouseMove = useCallback(
     (e: React.MouseEvent) => {
-      if (isDragging || isRangeDragging) return
+      if (isDragging || isRangeDragging || mainTimelineScrubActiveRef.current) return
       // The ruler owns this hover. Prevent TimelineContent's bubbling handler
       // from scheduling a second publication for the same pointer sample.
       e.stopPropagation()
+
+      if (!useTimelineSettingsStore.getState().timelineSkimmingEnabled) {
+        if (hoverPreviewRafRef.current !== null) {
+          cancelAnimationFrame(hoverPreviewRafRef.current)
+          hoverPreviewRafRef.current = null
+        }
+        pendingHoverPreviewFrameRef.current = null
+        if (
+          !mainTimelineScrubActiveRef.current &&
+          usePlaybackStore.getState().previewFrame !== null
+        ) {
+          setPreviewFrameRef.current(null)
+        }
+        return
+      }
 
       const frame = getFrameFromClientX(e.clientX)
       pendingHoverPreviewFrameRef.current = frame
@@ -865,7 +881,7 @@ export const TimelineMarkers = memo(function TimelineMarkers({
         hoverPreviewRafRef.current = null
         const nextFrame = pendingHoverPreviewFrameRef.current
         pendingHoverPreviewFrameRef.current = null
-        if (nextFrame !== null) {
+        if (nextFrame !== null && !mainTimelineScrubActiveRef.current) {
           setPreviewFrameRef.current(nextFrame)
         }
       })
@@ -875,7 +891,7 @@ export const TimelineMarkers = memo(function TimelineMarkers({
 
   const handleRulerMouseLeave = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (isDragging || isRangeDragging) return
+      if (isDragging || isRangeDragging || mainTimelineScrubActiveRef.current) return
 
       const timelineContainer = e.currentTarget.closest('[data-timeline-scroll-container]')
       if (e.relatedTarget instanceof Node && timelineContainer?.contains(e.relatedTarget)) {
@@ -896,7 +912,9 @@ export const TimelineMarkers = memo(function TimelineMarkers({
         hoverPreviewRafRef.current = null
       }
       pendingHoverPreviewFrameRef.current = null
-      setPreviewFrameRef.current(null)
+      if (!mainTimelineScrubActiveRef.current) {
+        setPreviewFrameRef.current(null)
+      }
     },
     [isDragging, isRangeDragging],
   )

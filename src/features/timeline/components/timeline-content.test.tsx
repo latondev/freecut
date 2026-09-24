@@ -185,6 +185,7 @@ function resetStores() {
     outPoint: null,
     scrollPosition: 0,
     snapEnabled: true,
+    timelineSkimmingEnabled: true,
     isDirty: false,
   })
 

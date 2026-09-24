@@ -57,6 +57,7 @@ export interface TimelineState {
   scrollPosition: number
   snapEnabled: boolean
   audioSkimmingEnabled: boolean
+  timelineSkimmingEnabled: boolean
   inPoint: number | null
   outPoint: number | null
   isDirty: boolean // Track unsaved changes
@@ -76,6 +77,7 @@ export interface TimelineActions {
   closeAllGapsOnTrack: (trackId: string) => void
   toggleSnap: () => void
   toggleAudioSkimming: () => void
+  toggleTimelineSkimming: () => void
   setScrollPosition: (position: number) => void
   moveItem: (id: string, newFrom: number, newTrackId?: string) => void
   moveItems: (updates: Array<{ id: string; from: number; trackId?: string }>) => void
