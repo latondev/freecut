@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useEffect, memo, lazy, Suspense, useState } from 'react'
+import { useCallback, useRef, useEffect, memo, lazy, Suspense, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   ChevronDown,
@@ -25,7 +25,6 @@ import {
 import { ActionPanel } from './action-panel'
 import { motion, useReducedMotion } from 'motion/react'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/shared/ui/cn'
 import { useEditorStore } from '@/shared/state/editor'
 import {
   useCompositionNavigationStore,
@@ -35,7 +34,6 @@ import {
 import { usePlaybackStore } from '@/shared/state/playback'
 import { useSelectionStore } from '@/shared/state/selection'
 import { useProjectStore } from '@/features/editor/deps/projects'
-import { DEFAULT_PROJECT_HEIGHT, DEFAULT_PROJECT_WIDTH } from '@/shared/projects/defaults'
 import {
   clearMediaDragData,
   MediaLibrary,
@@ -49,11 +47,10 @@ import {
   createDefaultShapeItem,
   createDefaultSolidColorItem,
   createOverlayLayerTrack,
-  createTextTemplateItem,
   getDefaultGeneratedLayerDurationInFrames,
 } from '@/features/editor/deps/timeline-utils'
 import { addAdjustmentLayer } from '../utils/add-adjustment-layer'
-import type { TextItem, ShapeItem, ShapeType } from '@/types/timeline'
+import type { ShapeItem, ShapeType } from '@/types/timeline'
 import { useMaskEditorStore } from '@/features/editor/deps/preview'
 import type { VisualEffect, GpuEffect } from '@/types/effects'
 import { EFFECT_PRESETS } from '@/types/effects'
@@ -69,224 +66,13 @@ const LazyTranscriptEditorPanel = lazy(() =>
   })),
 )
 import {
-  TEXT_STYLE_PRESETS,
-  type TextStylePresetLayout,
-  type TextStylePreset,
-} from '@/shared/typography/text-style-presets'
-import {
   EDITOR_LAYOUT_CSS_VALUES,
   clampLeftEditorSidebarWidth,
   getEditorLayout,
 } from '@/config/editor-layout'
+import { TextTabPanel } from './text-tab-panel'
 
 const logger = createLogger('MediaSidebar')
-const TEXT_TEMPLATE_PREVIEW_SHELL =
-  'w-full aspect-video rounded-sm border border-border bg-slate-950'
-
-function renderTextTemplatePreview(preset?: TextStylePreset) {
-  if (!preset) {
-    return (
-      <div
-        className={`${TEXT_TEMPLATE_PREVIEW_SHELL} flex flex-col items-center justify-center gap-1`}
-      >
-        <Type className="w-3.5 h-3.5 text-muted-foreground/80" />
-        <div className="text-[9px] leading-none tracking-wide text-muted-foreground/80 uppercase">
-          Text
-        </div>
-      </div>
-    )
-  }
-
-  const copy = preset.sample
-
-  if (preset.previewKind === 'clean') {
-    return (
-      <div className={`${TEXT_TEMPLATE_PREVIEW_SHELL} flex items-center justify-center px-1.5`}>
-        <div className="text-[10px] font-bold tracking-[-0.05em] text-white uppercase leading-none">
-          {copy.title}
-        </div>
-      </div>
-    )
-  }
-
-  if (preset.previewKind === 'lower-third') {
-    return (
-      <div className={`${TEXT_TEMPLATE_PREVIEW_SHELL} relative overflow-hidden`}>
-        <div className="absolute inset-x-1.5 bottom-1.5 rounded-sm bg-slate-800/95 px-1.5 py-1 text-left">
-          <div className="text-[8px] font-semibold leading-none text-slate-50">{copy.title}</div>
-          <div className="mt-0.5 text-[7px] leading-none text-slate-300">{copy.subtitle}</div>
-        </div>
-      </div>
-    )
-  }
-
-  if (preset.previewKind === 'poster') {
-    return (
-      <div className={`${TEXT_TEMPLATE_PREVIEW_SHELL} flex items-center justify-center px-1.5`}>
-        <div className="text-[12px] tracking-[-0.05em] text-amber-100 uppercase leading-none [text-shadow:0_2px_10px_rgba(127,29,29,0.85)]">
-          {copy.title}
-        </div>
-      </div>
-    )
-  }
-
-  if (preset.previewKind === 'outline-pill') {
-    return (
-      <div className={`${TEXT_TEMPLATE_PREVIEW_SHELL} flex items-center justify-center px-1.5`}>
-        <div className="rounded-full border border-sky-400/70 bg-slate-900 px-2 py-1 text-[7px] font-bold tracking-[0.18em] text-slate-100 uppercase leading-none">
-          {copy.title}
-        </div>
-      </div>
-    )
-  }
-
-  if (preset.previewKind === 'cinematic') {
-    return (
-      <div
-        className={`${TEXT_TEMPLATE_PREVIEW_SHELL} flex flex-col items-center justify-center px-1`}
-      >
-        <div className="text-[11px] tracking-[0.28em] text-amber-100 uppercase leading-none [text-shadow:0_2px_8px_rgba(17,24,39,0.9)]">
-          {copy.title}
-        </div>
-      </div>
-    )
-  }
-
-  if (preset.previewKind === 'quote') {
-    return (
-      <div className={`${TEXT_TEMPLATE_PREVIEW_SHELL} p-1.5 flex items-center justify-center`}>
-        <div className="w-full rounded-sm bg-slate-800 px-2 py-1.5 text-center">
-          <div className="text-[8px] italic leading-tight text-slate-50">{copy.title}</div>
-          <div className="mt-0.5 text-[7px] leading-none tracking-[0.08em] text-slate-300">
-            {copy.subtitle}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (preset.previewKind === 'speaker') {
-    return (
-      <div className={`${TEXT_TEMPLATE_PREVIEW_SHELL} px-1.5 py-1 flex flex-col justify-end`}>
-        <div className="rounded-sm bg-slate-800/95 px-1.5 py-1">
-          <div className="text-[8px] font-bold leading-none text-slate-50">{copy.title}</div>
-          <div className="mt-0.5 text-[7px] leading-none text-slate-300">{copy.subtitle}</div>
-        </div>
-      </div>
-    )
-  }
-
-  if (preset.previewKind === 'neon') {
-    return (
-      <div className={`${TEXT_TEMPLATE_PREVIEW_SHELL} p-1.5 flex items-center justify-center`}>
-        <div className="w-full rounded-sm bg-cyan-950 px-1.5 py-1.5 text-center">
-          <div className="text-[10px] font-semibold tracking-[0.16em] text-cyan-300 drop-shadow-[0_0_6px_rgba(34,211,238,0.85)] uppercase">
-            {copy.title}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (preset.previewKind === 'stacked') {
-    return (
-      <div
-        className={`${TEXT_TEMPLATE_PREVIEW_SHELL} flex flex-col items-center justify-center px-1.5`}
-      >
-        <div className="text-[6px] font-semibold tracking-[0.2em] text-amber-300 uppercase">
-          {copy.eyebrow}
-        </div>
-        <div className="mt-1 text-[10px] font-bold tracking-[-0.04em] text-white leading-none">
-          {copy.title}
-        </div>
-        <div className="mt-0.5 text-[7px] leading-none text-slate-300">{copy.subtitle}</div>
-      </div>
-    )
-  }
-
-  if (preset.previewKind === 'breaking') {
-    return (
-      <div className={`${TEXT_TEMPLATE_PREVIEW_SHELL} p-1.5 flex items-center justify-center`}>
-        <div className="w-full rounded-sm bg-slate-900 px-1.5 py-1 text-left">
-          <div className="text-[6px] font-bold tracking-[0.18em] text-red-300 uppercase leading-none">
-            {copy.eyebrow}
-          </div>
-          <div className="mt-1 text-[9px] font-bold tracking-[-0.04em] text-slate-50 leading-none">
-            {copy.title}
-          </div>
-          <div className="mt-0.5 text-[7px] font-semibold leading-none text-amber-200">
-            {copy.subtitle}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (preset.previewKind === 'launch') {
-    return (
-      <div className={`${TEXT_TEMPLATE_PREVIEW_SHELL} p-1.5 flex items-center justify-center`}>
-        <div className="w-full rounded-sm border border-blue-800/80 bg-slate-900 px-1.5 py-1 text-center">
-          <div className="text-[6px] font-bold tracking-[0.22em] text-cyan-300 uppercase">
-            {copy.eyebrow}
-          </div>
-          <div className="mt-1 text-[9px] font-bold tracking-[-0.04em] text-slate-50 leading-tight">
-            {copy.title}
-          </div>
-          <div className="mt-0.5 text-[7px] leading-none text-blue-200">{copy.subtitle}</div>
-        </div>
-      </div>
-    )
-  }
-
-  if (preset.previewKind === 'event') {
-    return (
-      <div className={`${TEXT_TEMPLATE_PREVIEW_SHELL} p-1.5 flex items-center justify-center`}>
-        <div className="w-full rounded-sm bg-slate-900 px-1.5 py-1 text-center">
-          <div className="text-[6px] font-bold tracking-[0.22em] text-rose-300 uppercase">
-            {copy.eyebrow}
-          </div>
-          <div className="mt-1 text-[9px] font-bold text-slate-50 leading-tight">{copy.title}</div>
-          <div className="mt-0.5 text-[7px] text-blue-200 leading-none uppercase">
-            {copy.subtitle}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (preset.previewKind === 'badge') {
-    return (
-      <div className={`${TEXT_TEMPLATE_PREVIEW_SHELL} flex items-center justify-center px-1.5`}>
-        <div className="rounded-full border border-slate-600 bg-slate-800 px-2 py-1 text-[7px] font-bold tracking-[0.18em] text-slate-50 uppercase leading-none">
-          {copy.title}
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div
-      className={`${TEXT_TEMPLATE_PREVIEW_SHELL} flex flex-col items-center justify-center px-1.5`}
-    >
-      <div className="text-[10px] font-bold tracking-[-0.04em] text-white uppercase leading-none">
-        {copy.title}
-      </div>
-      <div className="mt-0.5 text-[7px] leading-none text-slate-300 uppercase">{copy.subtitle}</div>
-    </div>
-  )
-}
-
-const TEXT_TEMPLATE_GROUPS: ReadonlyArray<{
-  key: TextStylePresetLayout
-  labelKey: string
-}> = [
-  { key: 'single', labelKey: 'editor.mediaSidebar.textGroupSingle' },
-  { key: 'two', labelKey: 'editor.mediaSidebar.textGroupTwoSpans' },
-  { key: 'three', labelKey: 'editor.mediaSidebar.textGroupThreeSpans' },
-]
-
-const DEFAULT_TEXT_TEMPLATE_LABEL = 'Text'
-const ADD_TEXT_TEMPLATE_LABEL = 'Add Text'
 
 export const MediaSidebar = memo(function MediaSidebar() {
   const { t } = useTranslation()
@@ -381,52 +167,6 @@ export const MediaSidebar = memo(function MediaSidebar() {
   // These change frequently and would cause re-renders cascading to MediaLibrary/MediaCards
   // Read from store directly in callbacks using getState()
 
-  // Add text item on its own new layer at the playhead, matching what dragging
-  // the same preset onto the canvas does (minus the cursor-driven position).
-  const handleAddText = useCallback(
-    (presetId?: (typeof TEXT_STYLE_PRESETS)[number]['id']) => {
-      // Read all needed state from stores directly to avoid subscriptions
-      const { tracks, fps, addItemOnNewTrack } = useTimelineStore.getState()
-      const { activeTrackId, selectItems, setActiveTrack } = useSelectionStore.getState()
-      const currentProject = useProjectStore.getState().currentProject
-
-      const newTrack = createOverlayLayerTrack({ tracks, activeTrackId })
-
-      if (!newTrack) {
-        logger.warn('No available track for text item')
-        return
-      }
-
-      const durationInFrames = getDefaultGeneratedLayerDurationInFrames(fps)
-
-      // Get canvas dimensions for initial transform
-      const canvasWidth = currentProject?.metadata.width ?? DEFAULT_PROJECT_WIDTH
-      const canvasHeight = currentProject?.metadata.height ?? DEFAULT_PROJECT_HEIGHT
-
-      const textStylePreset = presetId
-        ? TEXT_STYLE_PRESETS.find((preset) => preset.id === presetId)
-        : undefined
-      const textItem: TextItem = createTextTemplateItem({
-        placement: {
-          trackId: newTrack.trackId,
-          from: Math.max(0, usePlaybackStore.getState().currentFrame),
-          durationInFrames,
-          canvasWidth,
-          canvasHeight,
-          fps,
-        },
-        label: textStylePreset?.label,
-        text: t('editor.textSection.defaultText'),
-        textStylePresetId: presetId,
-      })
-
-      addItemOnNewTrack(textItem, newTrack.tracks)
-      setActiveTrack(newTrack.trackId)
-      selectItems([textItem.id])
-    },
-    [t],
-  )
-
   // Add shape item on its own new layer at the playhead, matching the canvas drop.
   const handleAddShape = useCallback((shapeType: ShapeType, shapePreset?: 'solid' | 'gradient') => {
     // Read all needed state from stores directly to avoid subscriptions
@@ -520,19 +260,6 @@ export const MediaSidebar = memo(function MediaSidebar() {
   const { gpuCategories, triggerPreviews } = useGpuEffectPreviewData()
   // Which effect/preset tile is hovered — drives its live sweep animation.
   const [hoveredEffectKey, setHoveredEffectKey] = useState<string | null>(null)
-  const textTemplatesByLayout = useMemo(() => {
-    const grouped = {
-      single: [] as TextStylePreset[],
-      two: [] as TextStylePreset[],
-      three: [] as TextStylePreset[],
-    }
-
-    for (const preset of TEXT_STYLE_PRESETS) {
-      grouped[preset.layout].push(preset)
-    }
-
-    return grouped
-  }, [])
 
   // Category items for the vertical nav
   const categories = [
@@ -558,9 +285,8 @@ export const MediaSidebar = memo(function MediaSidebar() {
 
   const handleTemplateDragStart = useCallback(
     (payload: {
-      itemType: 'text' | 'shape' | 'adjustment'
+      itemType: 'shape' | 'adjustment'
       label: string
-      textStylePresetId?: (typeof TEXT_STYLE_PRESETS)[number]['id']
       shapeType?: ShapeType
       shapePreset?: 'solid' | 'gradient'
       effects?: VisualEffect[]
@@ -728,79 +454,9 @@ export const MediaSidebar = memo(function MediaSidebar() {
 
             {/* Text Tab */}
             <div
-              className={`min-h-0 flex-1 overflow-y-auto p-3 ${activeTab === 'text' ? 'block' : 'hidden'}`}
+              className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'text' ? 'block' : 'hidden'}`}
             >
-              <div className="space-y-3">
-                <div className="space-y-3">
-                  <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                    {t('editor.mediaSidebar.templates')}
-                  </div>
-                  {TEXT_TEMPLATE_GROUPS.map((group) => {
-                    const presets = textTemplatesByLayout[group.key]
-                    const showAddText = group.key === 'single'
-
-                    if (!showAddText && presets.length === 0) {
-                      return null
-                    }
-
-                    return (
-                      <div key={group.key} className="space-y-1.5">
-                        <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                          {t(group.labelKey)}
-                        </div>
-                        <div className="grid grid-cols-3 gap-1.5">
-                          {showAddText ? (
-                            <button
-                              draggable={true}
-                              onDragStart={handleTemplateDragStart({
-                                itemType: 'text',
-                                label: DEFAULT_TEXT_TEMPLATE_LABEL,
-                              })}
-                              onDragEnd={handleTemplateDragEnd}
-                              onClick={() => {
-                                if (shouldSuppressGeneratedItemClick()) return
-                                handleAddText()
-                              }}
-                              className="flex flex-col items-center gap-1 p-1.5 rounded-md border border-border bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50 transition-[transform,background-color,border-color,color] duration-150 active:scale-[0.98] group"
-                            >
-                              {renderTextTemplatePreview()}
-                              <span className="text-[9px] text-muted-foreground group-hover:text-foreground text-center leading-tight w-full">
-                                {ADD_TEXT_TEMPLATE_LABEL}
-                              </span>
-                            </button>
-                          ) : null}
-                          {presets.map((preset) => (
-                            <button
-                              key={preset.id}
-                              draggable={true}
-                              onDragStart={handleTemplateDragStart({
-                                itemType: 'text',
-                                label: preset.label,
-                                textStylePresetId: preset.id,
-                              })}
-                              onDragEnd={handleTemplateDragEnd}
-                              onClick={() => {
-                                if (shouldSuppressGeneratedItemClick()) return
-                                handleAddText(preset.id)
-                              }}
-                              className={cn(
-                                'flex flex-col items-center gap-1 p-1.5 rounded-md border border-border',
-                                'bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50',
-                                'transition-[transform,background-color,border-color,color] duration-150 active:scale-[0.98] group',
-                              )}
-                            >
-                              {renderTextTemplatePreview(preset)}
-                              <span className="text-[9px] text-muted-foreground group-hover:text-foreground text-center leading-tight w-full">
-                                {preset.label}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
+              <TextTabPanel onSuppressClick={shouldSuppressGeneratedItemClick} />
             </div>
 
             {/* Shapes Tab */}

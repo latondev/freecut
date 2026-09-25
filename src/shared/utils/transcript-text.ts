@@ -11,11 +11,38 @@ function firstCharacter(value: string): string {
 }
 
 export function needsTranscriptWordSeparator(previous: string, next: string): boolean {
-  const previousCharacter = lastCharacter(previous)
-  const nextCharacter = firstCharacter(next)
+  const prevTrimmed = previous.trim()
+  const nextTrimmed = next.trim()
+  const previousCharacter = lastCharacter(prevTrimmed)
+  const nextCharacter = firstCharacter(nextTrimmed)
   if (!previousCharacter || !nextCharacter) return false
 
   if (CJK_CHARACTER.test(previousCharacter) || CJK_CHARACTER.test(nextCharacter)) {
+    return false
+  }
+
+  // Numbers with punctuation separator: "4," and "000" -> "4,000", "100." and "000" -> "100.000", "3." and "14" -> "3.14"
+  if (/\d+[,.:/]$/.test(prevTrimmed) && /^\d+/.test(nextTrimmed)) {
+    return false
+  }
+
+  // Digits and attached punctuation: "4" and ",000" -> "4,000"
+  if (/\d+$/.test(prevTrimmed) && /^[,.:/]\d+/.test(nextTrimmed)) {
+    return false
+  }
+
+  // Currency symbol before digits: "$" and "50" -> "$50"
+  if (/^[$€£¥₫]$/.test(prevTrimmed) && /^\d+/.test(nextTrimmed)) {
+    return false
+  }
+
+  // Number before percentage or degree: "50" and "%" -> "50%"
+  if (/\d+$/.test(prevTrimmed) && /^[%‰°]/.test(nextTrimmed)) {
+    return false
+  }
+
+  // Hyphenated word: "e-" and "mail" -> "e-mail"
+  if (/-$/.test(prevTrimmed)) {
     return false
   }
 

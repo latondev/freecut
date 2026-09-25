@@ -285,4 +285,28 @@ describe('full-frame shape presets', () => {
       transform: { width: 1920, height: 1080 },
     })
   })
+
+  it('merges textOverrides onto created text items', () => {
+    const item = createTimelineTemplateItem({
+      placement,
+      template: {
+        type: 'timeline-template',
+        itemType: 'text',
+        label: 'Cyber Cyan',
+        textOverrides: {
+          color: '#00f5ff',
+          fontFamily: 'Anton',
+          letterSpacing: 4,
+        },
+      },
+    })
+
+    expect(item).toMatchObject({
+      type: 'text',
+      label: 'Cyber Cyan',
+      color: '#00f5ff',
+      fontFamily: 'Anton',
+      letterSpacing: 4,
+    })
+  })
 })

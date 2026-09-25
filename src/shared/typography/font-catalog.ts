@@ -11,6 +11,38 @@ export const DEFAULT_TEXT_FONT_FAMILY = 'Inter'
 
 export const FONT_CATALOG: readonly FontCatalogEntry[] = [
   {
+    value: 'CapCut Sans Text',
+    label: 'CapCut Sans Text',
+    family: 'CapCut Sans Text',
+    weights: [400, 500, 700],
+  },
+  { value: 'Anton', label: 'Anton', family: 'Anton', weights: [400] },
+  { value: 'Bebas Neue', label: 'Bebas Neue', family: 'Bebas Neue', weights: [400] },
+  { value: 'Bangers', label: 'Bangers', family: 'Bangers', weights: [400] },
+  { value: 'Russo One', label: 'Russo One', family: 'Russo One', weights: [400] },
+  { value: 'Fredoka', label: 'Fredoka', family: 'Fredoka', weights: [300, 400, 500, 600, 700] },
+  { value: 'Luckiest Guy', label: 'Luckiest Guy', family: 'Luckiest Guy', weights: [400] },
+  {
+    value: 'Permanent Marker',
+    label: 'Permanent Marker',
+    family: 'Permanent Marker',
+    weights: [400],
+  },
+  { value: 'Pacifico', label: 'Pacifico', family: 'Pacifico', weights: [400] },
+  { value: 'Lobster', label: 'Lobster', family: 'Lobster', weights: [400] },
+  {
+    value: 'Orbitron',
+    label: 'Orbitron',
+    family: 'Orbitron',
+    weights: [400, 500, 600, 700, 800, 900],
+  },
+  { value: 'Cinzel', label: 'Cinzel', family: 'Cinzel', weights: [400, 500, 600, 700, 800, 900] },
+  { value: 'Press Start 2P', label: 'Press Start 2P', family: 'Press Start 2P', weights: [400] },
+  { value: 'Syne', label: 'Syne', family: 'Syne', weights: [400, 500, 600, 700, 800] },
+  { value: 'Righteous', label: 'Righteous', family: 'Righteous', weights: [400] },
+  { value: 'Caveat', label: 'Caveat', family: 'Caveat', weights: [400, 500, 600, 700] },
+  { value: 'Black Ops One', label: 'Black Ops One', family: 'Black Ops One', weights: [400] },
+  {
     value: 'Roboto',
     label: 'Roboto',
     family: 'Roboto',

@@ -39,6 +39,7 @@ export interface TimelineTemplateDragData {
   itemType: 'text' | 'shape' | 'adjustment'
   label: string
   textStylePresetId?: TextStylePresetId
+  textOverrides?: Record<string, unknown>
   shapeType?:
     | 'rectangle'
     | 'circle'

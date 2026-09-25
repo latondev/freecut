@@ -18,4 +18,15 @@ describe('transcript text formatting', () => {
   it('preserves Korean word separators', () => {
     expect(needsTranscriptWordSeparator('안녕하세요', '세계')).toBe(true)
   })
+
+  it('joins number fragments without artificial spaces', () => {
+    expect(joinTranscriptWords(['4,', '000'])).toBe('4,000')
+    expect(joinTranscriptWords(['100.', '000'])).toBe('100.000')
+    expect(joinTranscriptWords(['3.', '14'])).toBe('3.14')
+    expect(joinTranscriptWords(['4', ',000'])).toBe('4,000')
+    expect(joinTranscriptWords(['$', '50'])).toBe('$50')
+    expect(joinTranscriptWords(['100', '%'])).toBe('100%')
+    expect(joinTranscriptWords(['10:', '30'])).toBe('10:30')
+    expect(joinTranscriptWords(['e-', 'mail'])).toBe('e-mail')
+  })
 })

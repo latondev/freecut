@@ -157,6 +157,203 @@ function buildTranscriptSegmentFromWords(
   }
 }
 
+// fallow-ignore-next-line complexity
+function shouldMergeTranscriptWords(
+  previousText: string,
+  currentText: string,
+  nextText?: string,
+): boolean {
+  const prevTrimmed = previousText.trim()
+  const currTrimmed = currentText.trim()
+
+  // 1. Numbers with comma, dot, colon, slash:
+  // e.g. "4," + "000" => "4,000"
+  // e.g. "100." + "000" => "100.000"
+  // e.g. "3." + "14" => "3.14"
+  // e.g. "10:" + "30" => "10:30"
+  if (/\d+[,.:/]$/.test(prevTrimmed) && /^\d+/.test(currTrimmed)) {
+    return true
+  }
+
+  // e.g. "4" + ",000" => "4,000"
+  // e.g. "100" + ".000" => "100.000"
+  // e.g. "3" + ".14" => "3.14"
+  // e.g. "10" + ":30" => "10:30"
+  if (/\d+$/.test(prevTrimmed) && /^[,.:/]\d+/.test(currTrimmed)) {
+    return true
+  }
+
+  // e.g. "4" + "," + "000" => curr is standalone separator "," and next is "000"
+  if (
+    /\d+$/.test(prevTrimmed) &&
+    /^[,.:/]$/.test(currTrimmed) &&
+    nextText !== undefined &&
+    /^\d+/.test(nextText.trim())
+  ) {
+    return true
+  }
+
+  // 2. Currency symbol prefix:
+  // e.g. "$" + "100" => "$100"
+  if (/^[$€£¥₫]$/.test(prevTrimmed) && /^\d+/.test(currTrimmed)) {
+    return true
+  }
+
+  // 3. Percentage, permille, degree suffix:
+  // e.g. "100" + "%" => "100%"
+  if (/\d+$/.test(prevTrimmed) && /^[%‰°]/.test(currTrimmed)) {
+    return true
+  }
+
+  // 4. Standalone closing punctuation mark:
+  // e.g. "word" + "," => "word,"
+  // e.g. "hello" + "!" => "hello!"
+  if (/^[.,!?:;…)\]}’”»]+$/.test(currTrimmed)) {
+    return true
+  }
+
+  // 5. Standalone opening punctuation mark:
+  // e.g. "(" + "word" => "(word"
+  if (/^[([{‘“«]+$/.test(prevTrimmed)) {
+    return true
+  }
+
+  // 6. Hyphenated word:
+  // e.g. "COVID-" + "19" => "COVID-19"
+  // e.g. "e-" + "mail" => "e-mail"
+  if (/-$/.test(prevTrimmed) && /^[A-Za-z0-9\p{L}]/u.test(currTrimmed)) {
+    return true
+  }
+
+  return false
+}
+
+function mergeFragmentedTranscriptWords(
+  words: ReturnType<typeof sanitizeTranscriptWord>[],
+): ReturnType<typeof sanitizeTranscriptWord>[] {
+  if (words.length <= 1) return words
+
+  const result: ReturnType<typeof sanitizeTranscriptWord>[] = []
+
+  for (let i = 0; i < words.length; i++) {
+    const current = words[i]!
+    const previous = result.at(-1)
+    const next = words[i + 1]
+
+    if (previous && shouldMergeTranscriptWords(previous.text, current.text, next?.text)) {
+      previous.text = `${previous.text}${current.text}`
+      previous.end = Math.max(previous.end, current.end)
+      if (typeof current.confidence === 'number') {
+        previous.confidence =
+          typeof previous.confidence === 'number'
+            ? Math.min(previous.confidence, current.confidence)
+            : current.confidence
+      }
+      continue
+    }
+
+    result.push({ ...current })
+  }
+
+  return result
+}
+
+const INSEPARABLE_UNITS = new Set([
+  '%',
+  '‰',
+  '°c',
+  '°f',
+  '°',
+  'k',
+  'm',
+  'b',
+  'g',
+  'kg',
+  'km',
+  'cm',
+  'mm',
+  'ml',
+  'l',
+  'đ',
+  'đồng',
+  'vnd',
+  'usd',
+  'eur',
+  's',
+  'ms',
+  'h',
+  'p',
+  'phút',
+  'giây',
+  'giờ',
+  'ngày',
+  'tuần',
+  'tháng',
+  'năm',
+])
+
+const HONORIFICS = new Set([
+  'mr.',
+  'mrs.',
+  'ms.',
+  'dr.',
+  'prof.',
+  'gs.',
+  'ts.',
+  'ths.',
+  'bs.',
+  'ks.',
+])
+
+// fallow-ignore-next-line complexity
+function isUnbreakableCaptionBoundary(previousText: string, nextText: string): boolean {
+  const prevTrimmed = previousText.trim()
+  const nextTrimmed = nextText.trim()
+  const prevLower = prevTrimmed.toLowerCase()
+  const nextLower = nextTrimmed.toLowerCase()
+
+  // 1. Number + number fragment (e.g. "4," and "000", "100." and "000")
+  if (/\d+[,.:/]$/.test(prevTrimmed) && /^\d+/.test(nextTrimmed)) {
+    return true
+  }
+  if (/\d+$/.test(prevTrimmed) && /^[,.:/]\d+/.test(nextTrimmed)) {
+    return true
+  }
+
+  // 2. Currency symbol + number (e.g. "$" and "50")
+  if (/^[$€£¥₫]$/.test(prevTrimmed) && /^\d+/.test(nextTrimmed)) {
+    return true
+  }
+
+  // 3. Number + unit (e.g. "50" and "kg", "10" and "%", "100" and "k")
+  if (/\d+$/.test(prevTrimmed) && INSEPARABLE_UNITS.has(nextLower)) {
+    return true
+  }
+
+  // 4. Next word is pure punctuation or closing bracket
+  if (/^[.,!?:;…)\]}’”»]+$/.test(nextTrimmed)) {
+    return true
+  }
+
+  // 5. Previous word is opening bracket or quote
+  if (/^[([{‘“«]+$/.test(prevTrimmed)) {
+    return true
+  }
+
+  // 6. Hyphen at end of previous word
+  if (/-$/.test(prevTrimmed)) {
+    return true
+  }
+
+  // 7. Honorifics (e.g. "Mr." and "Smith", "TS." and "Nguyễn")
+  if (HONORIFICS.has(prevLower)) {
+    return true
+  }
+
+  return false
+}
+
+// fallow-ignore-next-line complexity
 function shouldBreakTranscriptCaption(
   currentWords: ReturnType<typeof sanitizeTranscriptWord>[],
   nextWord: ReturnType<typeof sanitizeTranscriptWord>,
@@ -164,6 +361,11 @@ function shouldBreakTranscriptCaption(
   const first = currentWords[0]
   const previous = currentWords.at(-1)
   if (!first || !previous) return false
+
+  // Never break inside an unbreakable word boundary (e.g. "4," and "000", "$50", "10 kg", "COVID-19")
+  if (isUnbreakableCaptionBoundary(previous.text, nextWord.text)) {
+    return false
+  }
 
   const nextText = joinTranscriptWords([...currentWords, nextWord].map((word) => word.text))
   const currentDuration = previous.end - first.start
@@ -203,6 +405,9 @@ function transcriptCaptionGroupFitsLimits(
 
   const hasPhraseBreakingGap = words.some((word, index) => {
     const previous = words[index - 1]
+    if (previous !== undefined && isUnbreakableCaptionBoundary(previous.text, word.text)) {
+      return false
+    }
     return (
       previous !== undefined && word.start - previous.end >= TRANSCRIPT_CAPTION_BREAK_GAP_SECONDS
     )
@@ -216,13 +421,15 @@ function transcriptCaptionGroupFitsLimits(
   )
 }
 
+// fallow-ignore-next-line complexity
 function segmentTranscriptForCaptions(segments: TranscriptSegment[]): MediaTranscriptSegment[] {
   const sanitizedBySegment = segments.map((segment) =>
     (segment.words?.map(sanitizeTranscriptWord) ?? []).filter(
       (word) => word.text.length > 0 && word.end > word.start,
     ),
   )
-  const words = sanitizedBySegment.flat().toSorted((left, right) => left.start - right.start)
+  const rawWords = sanitizedBySegment.flat().toSorted((left, right) => left.start - right.start)
+  const words = mergeFragmentedTranscriptWords(rawWords)
 
   if (words.length === 0) {
     return segments.map((segment) => ({
@@ -249,9 +456,16 @@ function segmentTranscriptForCaptions(segments: TranscriptSegment[]): MediaTrans
   const trailingGroup = captionWordGroups.at(-1)
   const previousGroup = captionWordGroups.at(-2)
   if (trailingGroup?.length === 1 && previousGroup) {
-    if (previousGroup.length >= 3) {
+    const candidateWord = previousGroup.at(-1)
+    const secondLastWord = previousGroup.at(-2)
+    const wouldSplitUnbreakable =
+      secondLastWord !== undefined &&
+      candidateWord !== undefined &&
+      isUnbreakableCaptionBoundary(secondLastWord.text, candidateWord.text)
+
+    if (!wouldSplitUnbreakable && previousGroup.length >= 3) {
       const shortenedPreviousGroup = previousGroup.slice(0, -1)
-      const rebalancedTrailingGroup = [previousGroup.at(-1)!, ...trailingGroup]
+      const rebalancedTrailingGroup = [candidateWord!, ...trailingGroup]
       if (
         transcriptCaptionGroupFitsLimits(shortenedPreviousGroup) &&
         transcriptCaptionGroupFitsLimits(rebalancedTrailingGroup)

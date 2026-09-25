@@ -19,6 +19,7 @@ export interface TimelineTemplateDragData {
   itemType: 'text' | 'shape' | 'adjustment'
   label: string
   textStylePresetId?: TextStylePresetId
+  textOverrides?: Partial<TextItem>
   shapeType?: ShapeType
   shapePreset?: 'solid' | 'gradient'
   effects?: VisualEffect[]
@@ -36,44 +37,56 @@ interface VisualLayerPlacement extends LayerPlacement {
   fps?: number
 }
 
-export function isTimelineTemplateDragData(value: unknown): value is TimelineTemplateDragData {
-  if (!value || typeof value !== 'object') return false
+const VALID_SHAPE_PRESETS = new Set(['solid', 'gradient'])
+const VALID_SHAPE_TYPES = new Set<string>([
+  'rectangle',
+  'circle',
+  'triangle',
+  'ellipse',
+  'star',
+  'polygon',
+  'heart',
+  'path',
+])
 
-  const candidate = value as Partial<TimelineTemplateDragData>
-  if (candidate.type !== 'timeline-template') return false
-  if (
-    candidate.itemType !== 'text' &&
-    candidate.itemType !== 'shape' &&
-    candidate.itemType !== 'adjustment'
-  )
-    return false
-  if (typeof candidate.label !== 'string' || candidate.label.trim().length === 0) return false
+function hasValidText(candidate: Partial<TimelineTemplateDragData>): boolean {
   if (
     candidate.textStylePresetId !== undefined &&
     !TEXT_STYLE_PRESETS.some((preset) => preset.id === candidate.textStylePresetId)
   ) {
     return false
   }
-  if (candidate.effects !== undefined && !Array.isArray(candidate.effects)) return false
   if (
-    candidate.shapePreset !== undefined &&
-    candidate.shapePreset !== 'solid' &&
-    candidate.shapePreset !== 'gradient'
+    candidate.textOverrides !== undefined &&
+    (typeof candidate.textOverrides !== 'object' || candidate.textOverrides === null)
   ) {
     return false
   }
+  return true
+}
 
-  return (
-    candidate.itemType !== 'shape' ||
-    candidate.shapeType === 'rectangle' ||
-    candidate.shapeType === 'circle' ||
-    candidate.shapeType === 'triangle' ||
-    candidate.shapeType === 'ellipse' ||
-    candidate.shapeType === 'star' ||
-    candidate.shapeType === 'polygon' ||
-    candidate.shapeType === 'heart' ||
-    candidate.shapeType === 'path'
-  )
+function hasValidShape(candidate: Partial<TimelineTemplateDragData>): boolean {
+  if (candidate.shapePreset !== undefined && !VALID_SHAPE_PRESETS.has(candidate.shapePreset)) {
+    return false
+  }
+  return candidate.shapeType ? VALID_SHAPE_TYPES.has(candidate.shapeType) : true
+}
+
+function isValidTemplateItem(candidate: Partial<TimelineTemplateDragData>): boolean {
+  if (candidate.itemType === 'text') return hasValidText(candidate)
+  if (candidate.itemType === 'shape') return hasValidShape(candidate)
+  return candidate.itemType === 'adjustment'
+}
+
+export function isTimelineTemplateDragData(value: unknown): value is TimelineTemplateDragData {
+  if (!value || typeof value !== 'object') return false
+
+  const candidate = value as Partial<TimelineTemplateDragData>
+  if (candidate.type !== 'timeline-template') return false
+  if (typeof candidate.label !== 'string' || candidate.label.trim().length === 0) return false
+  if (candidate.effects !== undefined && !Array.isArray(candidate.effects)) return false
+
+  return isValidTemplateItem(candidate)
 }
 
 export function getDefaultGeneratedLayerDurationInFrames(fps: number): number {
@@ -284,11 +297,22 @@ export function createTimelineTemplateItem(params: {
   const { template, placement } = params
 
   if (template.itemType === 'text') {
-    return createTextTemplateItem({
+    const baseItem = createTextTemplateItem({
       placement,
       label: template.label,
       textStylePresetId: template.textStylePresetId,
     })
+    if (template.textOverrides) {
+      return {
+        ...baseItem,
+        ...template.textOverrides,
+        id: baseItem.id,
+        trackId: baseItem.trackId,
+        from: baseItem.from,
+        durationInFrames: baseItem.durationInFrames,
+      }
+    }
+    return baseItem
   }
 
   if (template.itemType === 'adjustment') {

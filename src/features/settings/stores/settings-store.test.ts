@@ -46,8 +46,10 @@ describe('settings-store', () => {
       expect(useSettingsStore.getState().defaultWhisperQuantization).toBe('q8')
     })
 
-    it('normalizes legacy tiny model selections back to the default model', () => {
-      useSettingsStore.getState().setSetting('defaultWhisperModel', 'whisper-tiny')
+    it('normalizes invalid model selections back to the default model', () => {
+      useSettingsStore
+        .getState()
+        .setSetting('defaultWhisperModel', 'non-existent-model' as unknown as any)
 
       expect(useSettingsStore.getState().defaultWhisperModel).toBe('parakeet-tdt-v3')
     })

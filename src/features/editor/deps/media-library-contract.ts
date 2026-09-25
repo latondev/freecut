@@ -13,6 +13,7 @@ export {
   getMediaDragData,
   setMediaDragData,
 } from '@/features/media-library/utils/drag-data-cache'
+export type { TimelineTemplateDragData } from '@/features/media-library/utils/drag-data-cache'
 export { MediaLibrary } from '@/features/media-library/components/media-library'
 
 export const importProxyService = () => import('@/features/media-library/services/proxy-service')

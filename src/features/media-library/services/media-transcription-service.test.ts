@@ -1006,6 +1006,45 @@ describe('mediaTranscriptionService.transcribeMedia', () => {
     expect(saved.segments.every((segment) => segment.end - segment.start <= 2.2)).toBe(true)
   })
 
+  it('merges fragmented number tokens and never splits numbers like 4,000 across caption segments', async () => {
+    const sourceFile = new File(['audio'], 'clip.mp3', { type: 'audio/mpeg' })
+    getMediaMock.mockResolvedValue({
+      id: 'media-1',
+      fileName: 'clip.mp3',
+      mimeType: 'audio/mpeg',
+      codec: 'mp3',
+      fileLastModified: 123,
+    })
+    getMediaFileMock.mockResolvedValue(sourceFile)
+    transcribeCollectMock.mockResolvedValue([
+      {
+        text: 'xxxxxxx xxxxxxx xxxxxxxx xx 4,000 người bạn',
+        start: 0,
+        end: 3.5,
+        words: [
+          { text: 'xxxxxxx', start: 0, end: 0.3 },
+          { text: 'xxxxxxx', start: 0.32, end: 0.6 },
+          { text: 'xxxxxxxx', start: 0.62, end: 0.9 },
+          { text: 'xx', start: 0.92, end: 1.1 },
+          { text: '4,', start: 1.12, end: 1.35 },
+          { text: '000', start: 1.37, end: 1.6 },
+          { text: 'người', start: 2.5, end: 2.9 },
+          { text: 'bạn', start: 2.95, end: 3.4 },
+        ],
+      },
+    ])
+
+    await mediaTranscriptionService.transcribeMedia('media-1')
+
+    const saved = saveTranscriptMock.mock.calls[0]?.[0] as MediaTranscript
+    expect(saved.segments.length).toBeGreaterThan(0)
+    // No segment should end with dangling "4," or start with orphaned "000"
+    expect(saved.segments.some((segment) => /4,\s*$/.test(segment.text))).toBe(false)
+    expect(saved.segments.some((segment) => /^\s*000\b/.test(segment.text))).toBe(false)
+    // The number 4,000 must be unified
+    expect(saved.segments.some((segment) => segment.text.includes('4,000'))).toBe(true)
+  })
+
   it('transcribes a conformed wav for custom-decoded codecs like pcm-s16be', async () => {
     const sourceFile = new File(['pcm'], 'clip.aif', { type: 'audio/aiff' })
     const conformedBlob = new Blob(['wav'], { type: 'audio/wav' })
