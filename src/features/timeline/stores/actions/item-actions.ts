@@ -106,18 +106,18 @@ function isInvalidTransformParentUpdate(
   if (!child || !canParticipateInTransformHierarchy(child)) return true
   return Boolean(
     context.parentItemId &&
-      (wouldCreateTransformParentCycle(
-          childItemId,
-          context.parentItemId,
-          context.getItem,
-          context.getKeyframes,
-        ) ||
-        hasRedundantTransformParentLink(
-          childItemId,
-          context.parentItemId,
-          context.getItem,
-          context.getKeyframes,
-        )),
+    (wouldCreateTransformParentCycle(
+      childItemId,
+      context.parentItemId,
+      context.getItem,
+      context.getKeyframes,
+    ) ||
+      hasRedundantTransformParentLink(
+        childItemId,
+        context.parentItemId,
+        context.getItem,
+        context.getKeyframes,
+      )),
   )
 }
 
@@ -1163,6 +1163,47 @@ export function closeAllGapsOnTrack(trackId: string): void {
       useTimelineSettingsStore.getState().markDirty()
     },
     { trackId },
+  )
+}
+
+export function closeAllTimelineGaps(): void {
+  const items = useItemsStore.getState().items
+  if (items.length === 0) return
+
+  const trackIds = Array.from(new Set(items.map((item) => item.trackId)))
+  const baseShiftByItemId = new Map<string, number>()
+
+  for (const trackId of trackIds) {
+    const trackItems = items
+      .filter((item) => item.trackId === trackId)
+      .sort((left, right) => left.from - right.from)
+
+    if (trackItems.every((item) => item.type === 'subtitle')) {
+      continue
+    }
+
+    let cursor = 0
+    for (const item of trackItems) {
+      const newFrom = item.from > cursor ? cursor : item.from
+      const shiftAmount = item.from - newFrom
+      if (shiftAmount > 0) {
+        baseShiftByItemId.set(item.id, shiftAmount)
+      }
+      cursor = newFrom + item.durationInFrames
+    }
+  }
+
+  const updates = buildLinkedLeftShiftUpdates(items, baseShiftByItemId, isLinkedSelectionEnabled())
+  if (updates.length === 0) return
+
+  execute(
+    'CLOSE_ALL_TIMELINE_GAPS',
+    () => {
+      useItemsStore.getState()._moveItems(updates)
+      applyTransitionRepairs(updates.map((update) => update.id))
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    {},
   )
 }
 

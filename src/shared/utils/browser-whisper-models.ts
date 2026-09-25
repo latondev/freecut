@@ -8,16 +8,17 @@ import type { MediaTranscriptModel } from '@/types/storage'
 export const DEFAULT_BROWSER_WHISPER_MODEL: MediaTranscriptModel = 'parakeet-tdt-v3'
 
 export const BROWSER_WHISPER_MODEL_LABELS: Record<MediaTranscriptModel, string> = {
-  'parakeet-tdt-v3': 'Parakeet (fast)',
-  'whisper-tiny': 'Whisper Tiny',
-  'whisper-base': 'Whisper Base',
-  'whisper-small': 'Whisper Small',
-  'whisper-large': 'Whisper Large v3 Turbo',
+  'whisper-tiny': 'Whisper Tiny (Siêu nhẹ 39MB · Nhanh nhất)',
+  'whisper-base': 'Whisper Base (Tiêu chuẩn 140MB · Cân bằng)',
+  'parakeet-tdt-v3': 'Parakeet TDT (Nhanh · Chỉ tiếng Anh/Châu Âu)',
+  'whisper-small': 'Whisper Small (Chính xác cao · Nặng 460MB)',
+  'whisper-large': 'Whisper Large v3 Turbo (Rất nặng · 1.2GB)',
 }
 
 export const BROWSER_WHISPER_MODEL_OPTIONS = [
-  { value: 'parakeet-tdt-v3', label: BROWSER_WHISPER_MODEL_LABELS['parakeet-tdt-v3'] },
+  { value: 'whisper-tiny', label: BROWSER_WHISPER_MODEL_LABELS['whisper-tiny'] },
   { value: 'whisper-base', label: BROWSER_WHISPER_MODEL_LABELS['whisper-base'] },
+  { value: 'parakeet-tdt-v3', label: BROWSER_WHISPER_MODEL_LABELS['parakeet-tdt-v3'] },
   { value: 'whisper-small', label: BROWSER_WHISPER_MODEL_LABELS['whisper-small'] },
   { value: 'whisper-large', label: BROWSER_WHISPER_MODEL_LABELS['whisper-large'] },
 ] as const satisfies ReadonlyArray<{

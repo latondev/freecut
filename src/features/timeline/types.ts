@@ -56,6 +56,7 @@ export interface TimelineState {
   fps: number
   scrollPosition: number
   snapEnabled: boolean
+  autoSnapToStart: boolean
   audioSkimmingEnabled: boolean
   timelineSkimmingEnabled: boolean
   inPoint: number | null
@@ -75,7 +76,9 @@ export interface TimelineActions {
   reverseItems: (ids: string[]) => void
   closeGapAtPosition: (trackId: string, frame: number) => void
   closeAllGapsOnTrack: (trackId: string) => void
+  closeAllTimelineGaps: () => void
   toggleSnap: () => void
+  toggleAutoSnapToStart: () => void
   toggleAudioSkimming: () => void
   toggleTimelineSkimming: () => void
   setScrollPosition: (position: number) => void

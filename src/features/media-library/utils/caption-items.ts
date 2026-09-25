@@ -963,6 +963,98 @@ export function buildSubtitleSegmentForClip(
   }
 }
 
+export function buildIndividualSubtitleSegmentsForClip(
+  options: BuildSubtitleSegmentForClipOptions,
+): import('@/types/timeline').SubtitleSegmentItem[] {
+  const {
+    clip,
+    cues,
+    timelineFps,
+    canvasWidth,
+    canvasHeight,
+    trackId,
+    source,
+    styleTemplate,
+    label,
+  } = options
+  const { sourceStart, sourceEnd, sourceFps, speed } = getClipSourceBounds(clip, timelineFps)
+  const sourceStartSeconds = sourceStart / sourceFps
+  const sourceEndSeconds = sourceEnd / sourceFps
+
+  const segments: import('@/types/timeline').SubtitleSegmentItem[] = []
+
+  const defaultStyle = {
+    fontSize: Math.max(36, Math.round(canvasHeight * 0.045)),
+    fontFamily: 'Inter',
+    fontWeight: 'semibold' as const,
+    fontStyle: 'normal' as const,
+    underline: false,
+    color: '#ffffff',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    textAlign: 'center' as const,
+    verticalAlign: 'middle' as const,
+    lineHeight: 1.15,
+    letterSpacing: 0,
+    textShadow: {
+      offsetX: 0,
+      offsetY: 3,
+      blur: 10,
+      color: 'rgba(0, 0, 0, 0.75)',
+    },
+    transform: {
+      x: 0,
+      y: Math.round(canvasHeight * 0.32),
+      width: canvasWidth * 0.82,
+      height: canvasHeight * 0.16,
+      rotation: 0,
+      opacity: 1,
+    },
+  }
+
+  for (const cue of cues) {
+    const overlapStartSec = Math.max(cue.startSeconds, sourceStartSeconds)
+    const overlapEndSec = Math.min(cue.endSeconds, sourceEndSeconds)
+    if (overlapEndSec <= overlapStartSec) continue
+
+    const cueStartTimeline = (overlapStartSec - sourceStartSeconds) / speed
+    const cueEndTimeline = (overlapEndSec - sourceStartSeconds) / speed
+    const cueStartFrames = Math.floor(cueStartTimeline * timelineFps)
+    const cueEndFrames = Math.ceil(cueEndTimeline * timelineFps)
+    if (cueEndFrames <= cueStartFrames) continue
+
+    const from = clip.from + Math.min(cueStartFrames, clip.durationInFrames - 1)
+    const endFrame =
+      clip.from + Math.min(clip.durationInFrames, Math.max(cueStartFrames + 1, cueEndFrames))
+    const durationInFrames = Math.max(1, endFrame - from)
+    const cueDurationSec = durationInFrames / timelineFps
+
+    const segmentRelativeCue: import('@/types/timeline').SubtitleSegmentCue = {
+      id: cue.id,
+      startSeconds: 0,
+      endSeconds: cueDurationSec,
+      text: cue.text,
+    }
+
+    segments.push({
+      id: crypto.randomUUID(),
+      type: 'subtitle',
+      trackId,
+      from,
+      durationInFrames,
+      label: cue.text.slice(0, 48),
+      mediaId: clip.mediaId,
+      linkedGroupId: clip.linkedGroupId,
+      sourceLabel: label ?? cue.text.slice(0, 48),
+      source,
+      cues: [segmentRelativeCue],
+      ...defaultStyle,
+      ...styleTemplate,
+    })
+  }
+
+  return segments
+}
+
 export function appendVirtualTranscriptCaptionTrack(
   tracks: readonly TimelineTrack[],
   timelineFps: number,
@@ -976,8 +1068,7 @@ export function appendVirtualTranscriptCaptionTrack(
     unfilteredBaseTracks.flatMap((track) =>
       (track.items ?? [])
         .filter(
-          (item) =>
-            (item.type === 'video' || item.type === 'audio') && item.isReversed === true,
+          (item) => (item.type === 'video' || item.type === 'audio') && item.isReversed === true,
         )
         .map((item) => item.id),
     ),

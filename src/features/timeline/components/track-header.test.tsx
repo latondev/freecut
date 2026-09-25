@@ -143,4 +143,43 @@ describe('TrackHeader', () => {
 
     expect(screen.getByRole('button', { name: 'Enable sync lock' })).toBeInTheDocument()
   })
+
+  it('renders a CC badge when track is a caption track or contains subtitle items', () => {
+    const { rerender } = renderTrackHeader(makeTrack({ id: 'track-captions-123', name: 'V2' }))
+    expect(screen.getByTestId('track-header-cc-badge')).toBeInTheDocument()
+
+    // Also when it contains a subtitle item
+    useItemsStore.getState().setItems([
+      {
+        id: 'sub-item-1',
+        type: 'subtitle',
+        trackId: 'track-regular',
+        from: 0,
+        durationInFrames: 30,
+        label: 'Subtitle cue',
+        cues: [],
+      } as unknown as import('@/types/timeline').SubtitleSegmentItem,
+    ])
+
+    rerender(
+      <TrackHeader
+        track={makeTrack({ id: 'track-regular', name: 'V1' })}
+        isActive={false}
+        isSelected={false}
+        canDeleteTrack
+        canDeleteEmptyTracks
+        onToggleLock={() => undefined}
+        onToggleSyncLock={() => undefined}
+        onToggleDisabled={() => undefined}
+        onToggleSolo={() => undefined}
+        onSelect={() => undefined}
+        onCloseGaps={() => undefined}
+        onAddVideoTrack={() => undefined}
+        onAddAudioTrack={() => undefined}
+        onDeleteTrack={() => undefined}
+        onDeleteEmptyTracks={() => undefined}
+      />,
+    )
+    expect(screen.getByTestId('track-header-cc-badge')).toBeInTheDocument()
+  })
 })

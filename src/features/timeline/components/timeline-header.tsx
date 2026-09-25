@@ -14,6 +14,7 @@ import {
   ZoomOut,
   Maximize2,
   Magnet,
+  ArrowLeftToLine,
   Scissors,
   Gauge,
   ArrowRightLeft,
@@ -440,6 +441,7 @@ const TimelineZoomControls = memo(function TimelineZoomControls({
  * - In/Out points, Snap toggle
  * - Zoom controls
  */
+// fallow-ignore-next-line complexity
 export const TimelineHeader = memo(function TimelineHeader({
   onZoomChange,
   onZoomIn,
@@ -450,6 +452,8 @@ export const TimelineHeader = memo(function TimelineHeader({
   const hotkeys = useResolvedHotkeys()
   const snapEnabled = useTimelineStore((s) => s.snapEnabled)
   const toggleSnap = useTimelineStore((s) => s.toggleSnap)
+  const autoSnapToStart = useTimelineStore((s) => s.autoSnapToStart)
+  const toggleAutoSnapToStart = useTimelineStore((s) => s.toggleAutoSnapToStart)
   const audioSkimmingEnabled = useTimelineStore((s) => s.audioSkimmingEnabled)
   const toggleAudioSkimming = useTimelineStore((s) => s.toggleAudioSkimming)
   const timelineSkimmingEnabled = useTimelineStore((s) => s.timelineSkimmingEnabled)
@@ -782,6 +786,30 @@ export const TimelineHeader = memo(function TimelineHeader({
             }
           >
             <Magnet className="w-3.5 h-3.5" />
+          </Button>
+
+          {/* Auto Snap to Start (00:00:00) / Magnetic Timeline Toggle */}
+          <Button
+            variant="ghost"
+            size="icon"
+            style={btnSize}
+            className={
+              autoSnapToStart ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
+            }
+            onClick={toggleAutoSnapToStart}
+            aria-label={
+              autoSnapToStart
+                ? t('timeline.header.disableAutoSnapToStart')
+                : t('timeline.header.enableAutoSnapToStart')
+            }
+            aria-pressed={autoSnapToStart}
+            data-tooltip={
+              autoSnapToStart
+                ? t('timeline.header.autoSnapToStartEnabled')
+                : t('timeline.header.autoSnapToStartDisabled')
+            }
+          >
+            <ArrowLeftToLine className="w-3.5 h-3.5" />
           </Button>
 
           <Button

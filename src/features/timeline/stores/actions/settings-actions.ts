@@ -12,11 +12,24 @@ import { execute } from './shared'
 import { emitUiSound } from '@/shared/ui/ui-sound'
 import { usePlaybackStore } from '@/shared/state/playback'
 
+import { closeAllTimelineGaps } from './item-actions'
+
 export function toggleSnap(): void {
   execute('TOGGLE_SNAP', () => {
     useTimelineSettingsStore.getState().toggleSnap()
   })
   emitUiSound(useTimelineSettingsStore.getState().snapEnabled ? 'toggleOn' : 'toggleOff')
+}
+
+export function toggleAutoSnapToStart(): void {
+  execute('TOGGLE_AUTO_SNAP_TO_START', () => {
+    useTimelineSettingsStore.getState().toggleAutoSnapToStart()
+  })
+  const isEnabled = useTimelineSettingsStore.getState().autoSnapToStart
+  emitUiSound(isEnabled ? 'toggleOn' : 'toggleOff')
+  if (isEnabled) {
+    closeAllTimelineGaps()
+  }
 }
 
 export function toggleAudioSkimming(): void {

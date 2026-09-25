@@ -110,8 +110,12 @@ function LottieCardComponent({
         data-tooltip={actionLabel}
         data-tooltip-side="top"
       >
-        {isIconScout && (
+        {isIconScout ? (
           <span className="absolute left-1.5 top-1.5 z-10 rounded bg-amber-500/90 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wider text-white shadow-xs">
+            Free
+          </span>
+        ) : (
+          <span className="absolute left-1.5 top-1.5 z-10 rounded bg-emerald-600/90 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wider text-white shadow-xs">
             Free
           </span>
         )}
@@ -188,7 +192,7 @@ function LottieCardComponent({
               href={animation.pageUrl}
               target="_blank"
               rel="noopener noreferrer"
-              title="Xem trên IconScout"
+              title={isIconScout ? 'Xem trên IconScout' : 'Xem trên LottieFiles'}
               onClick={(e) => e.stopPropagation()}
               className="text-muted-foreground hover:text-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
             >

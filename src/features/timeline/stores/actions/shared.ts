@@ -24,9 +24,37 @@ export function getLogger() {
   return createLogger('TimelineActions')
 }
 
+function autoSnapTimelineToStartIfEnabled(): void {
+  const items = useItemsStore.getState().items
+  if (items.length === 0) return
+
+  const nonSubtitleItems = items.filter((item) => item.type !== 'subtitle')
+  if (nonSubtitleItems.length === 0) return
+
+  const minFrom = Math.min(...nonSubtitleItems.map((item) => item.from))
+  if (minFrom > 0) {
+    const updates = items.map((item) => ({
+      id: item.id,
+      from: Math.max(0, item.from - minFrom),
+    }))
+    useItemsStore.getState()._moveItems(updates)
+  }
+}
+
 export function execute<T>(type: string, action: () => T, payload?: Record<string, unknown>): T {
   return withPerfMeasure(`tl.action.${type}`, () =>
-    useTimelineCommandStore.getState().execute({ type, payload }, action),
+    useTimelineCommandStore.getState().execute({ type, payload }, () => {
+      const result = action()
+      if (
+        useTimelineSettingsStore.getState().autoSnapToStart &&
+        type !== 'CLOSE_ALL_TIMELINE_GAPS' &&
+        type !== 'TOGGLE_AUTO_SNAP_TO_START' &&
+        type !== 'CLEAR_TIMELINE'
+      ) {
+        autoSnapTimelineToStartIfEnabled()
+      }
+      return result
+    }),
   )
 }
 

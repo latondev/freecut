@@ -14,7 +14,9 @@ import {
   Trash2,
   Loader2,
   CheckCircle2,
+  SlidersHorizontal,
 } from 'lucide-react'
+import { useSettingsStore } from '@/features/editor/deps/settings'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import {
@@ -29,10 +31,11 @@ import {
   TranscribeDialog,
   type TranscribeDialogValues,
 } from '@/features/editor/deps/timeline-contract'
-import type { TimelineItem, ImageItem } from '@/types/timeline'
+import type { TimelineItem } from '@/types/timeline'
 import type { AnimatableProperty, EasingType } from '@/types/keyframe'
 import { useSelectionStore } from '@/shared/state/selection'
 import { useProjectStore } from '@/features/editor/deps/projects'
+import { resolveTransform, getSourceDimensions } from '@/features/editor/deps/composition-runtime'
 import { cn } from '@/shared/ui/cn'
 import { toast } from 'sonner'
 
@@ -112,28 +115,28 @@ function buildImageMotionKeyframes(
   baseH: number,
   baseX: number,
   baseY: number,
-  easingMode: MotionEasingMode = 'ease-in-out',
+  easingMode: MotionEasingMode = 'linear',
 ): KeyframePayload[] {
   const end = Math.max(1, duration - 1)
   const ease = easingMode
 
-  // Safe scale for pan motions: 1.15 gives 7.5% margin on each side to guarantee no black borders
-  const panScale = 1.15
+  // CapCut standard scale: 1.20x gives a 10% margin on each side to guarantee no black borders
+  const panScale = 1.2
   const panW = Math.round(baseW * panScale)
   const panH = Math.round(baseH * panScale)
 
-  // Dynamic safe pan distance proportional to dimensions (4%, safely inside 7.5% margin)
-  const dx = Math.max(24, Math.round(baseW * 0.04))
-  const dy = Math.max(20, Math.round(baseH * 0.04))
+  // Dynamic safe pan distance proportional to dimensions (8%, safely inside 10% margin by 2%)
+  const dx = Math.max(48, Math.round(baseW * 0.08))
+  const dy = Math.max(36, Math.round(baseH * 0.08))
 
-  // Zoom dimensions (1.15x)
-  const zoomW = Math.round(baseW * 1.15)
-  const zoomH = Math.round(baseH * 1.15)
+  // Zoom dimensions (1.20x)
+  const zoomW = Math.round(baseW * 1.2)
+  const zoomH = Math.round(baseH * 1.2)
 
   if (anim === 'zoom-in') {
     return [
-      { itemId, property: 'width', frame: 0, value: baseW, easing: ease },
-      { itemId, property: 'height', frame: 0, value: baseH, easing: ease },
+      { itemId, property: 'width', frame: 0, value: Math.round(baseW * 1.02), easing: ease },
+      { itemId, property: 'height', frame: 0, value: Math.round(baseH * 1.02), easing: ease },
       { itemId, property: 'x', frame: 0, value: baseX, easing: ease },
       { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
       { itemId, property: 'width', frame: end, value: zoomW, easing: 'linear' },
@@ -149,8 +152,8 @@ function buildImageMotionKeyframes(
       { itemId, property: 'height', frame: 0, value: zoomH, easing: ease },
       { itemId, property: 'x', frame: 0, value: baseX, easing: ease },
       { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
-      { itemId, property: 'width', frame: end, value: baseW, easing: 'linear' },
-      { itemId, property: 'height', frame: end, value: baseH, easing: 'linear' },
+      { itemId, property: 'width', frame: end, value: Math.round(baseW * 1.04), easing: 'linear' },
+      { itemId, property: 'height', frame: end, value: Math.round(baseH * 1.04), easing: 'linear' },
       { itemId, property: 'x', frame: end, value: baseX, easing: 'linear' },
       { itemId, property: 'y', frame: end, value: baseY, easing: 'linear' },
     ]
@@ -208,43 +211,46 @@ function buildImageMotionKeyframes(
     ]
   }
 
-  const halfDx = Math.round(dx * 0.7)
+  const zoomPanDx = Math.round(dx * 0.7)
+  const zoomStartOffset = Math.round(baseW * 0.015)
 
   if (anim === 'zoom-in-pan-left') {
     return [
-      { itemId, property: 'width', frame: 0, value: baseW, easing: ease },
-      { itemId, property: 'height', frame: 0, value: baseH, easing: ease },
-      { itemId, property: 'x', frame: 0, value: baseX + halfDx, easing: ease },
+      { itemId, property: 'width', frame: 0, value: Math.round(baseW * 1.04), easing: ease },
+      { itemId, property: 'height', frame: 0, value: Math.round(baseH * 1.04), easing: ease },
+      { itemId, property: 'x', frame: 0, value: baseX + zoomStartOffset, easing: ease },
       { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
       { itemId, property: 'width', frame: end, value: zoomW, easing: 'linear' },
       { itemId, property: 'height', frame: end, value: zoomH, easing: 'linear' },
-      { itemId, property: 'x', frame: end, value: baseX - halfDx, easing: 'linear' },
+      { itemId, property: 'x', frame: end, value: baseX - zoomPanDx, easing: 'linear' },
       { itemId, property: 'y', frame: end, value: baseY, easing: 'linear' },
     ]
   }
 
   if (anim === 'zoom-in-pan-right') {
     return [
-      { itemId, property: 'width', frame: 0, value: baseW, easing: ease },
-      { itemId, property: 'height', frame: 0, value: baseH, easing: ease },
-      { itemId, property: 'x', frame: 0, value: baseX - halfDx, easing: ease },
+      { itemId, property: 'width', frame: 0, value: Math.round(baseW * 1.04), easing: ease },
+      { itemId, property: 'height', frame: 0, value: Math.round(baseH * 1.04), easing: ease },
+      { itemId, property: 'x', frame: 0, value: baseX - zoomStartOffset, easing: ease },
       { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
       { itemId, property: 'width', frame: end, value: zoomW, easing: 'linear' },
       { itemId, property: 'height', frame: end, value: zoomH, easing: 'linear' },
-      { itemId, property: 'x', frame: end, value: baseX + halfDx, easing: 'linear' },
+      { itemId, property: 'x', frame: end, value: baseX + zoomPanDx, easing: 'linear' },
       { itemId, property: 'y', frame: end, value: baseY, easing: 'linear' },
     ]
   }
+
+  const zoomOutEndOffset = Math.round(baseW * 0.018)
 
   if (anim === 'zoom-out-pan-left') {
     return [
       { itemId, property: 'width', frame: 0, value: zoomW, easing: ease },
       { itemId, property: 'height', frame: 0, value: zoomH, easing: ease },
-      { itemId, property: 'x', frame: 0, value: baseX - halfDx, easing: ease },
+      { itemId, property: 'x', frame: 0, value: baseX - zoomPanDx, easing: ease },
       { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
-      { itemId, property: 'width', frame: end, value: Math.round(baseW * 1.05), easing: 'linear' },
-      { itemId, property: 'height', frame: end, value: Math.round(baseH * 1.05), easing: 'linear' },
-      { itemId, property: 'x', frame: end, value: baseX + halfDx, easing: 'linear' },
+      { itemId, property: 'width', frame: end, value: Math.round(baseW * 1.06), easing: 'linear' },
+      { itemId, property: 'height', frame: end, value: Math.round(baseH * 1.06), easing: 'linear' },
+      { itemId, property: 'x', frame: end, value: baseX + zoomOutEndOffset, easing: 'linear' },
       { itemId, property: 'y', frame: end, value: baseY, easing: 'linear' },
     ]
   }
@@ -253,11 +259,11 @@ function buildImageMotionKeyframes(
   return [
     { itemId, property: 'width', frame: 0, value: zoomW, easing: ease },
     { itemId, property: 'height', frame: 0, value: zoomH, easing: ease },
-    { itemId, property: 'x', frame: 0, value: baseX + halfDx, easing: ease },
+    { itemId, property: 'x', frame: 0, value: baseX + zoomPanDx, easing: ease },
     { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
-    { itemId, property: 'width', frame: end, value: Math.round(baseW * 1.05), easing: 'linear' },
-    { itemId, property: 'height', frame: end, value: Math.round(baseH * 1.05), easing: 'linear' },
-    { itemId, property: 'x', frame: end, value: baseX - halfDx, easing: 'linear' },
+    { itemId, property: 'width', frame: end, value: Math.round(baseW * 1.06), easing: 'linear' },
+    { itemId, property: 'height', frame: end, value: Math.round(baseH * 1.06), easing: 'linear' },
+    { itemId, property: 'x', frame: end, value: baseX - zoomOutEndOffset, easing: 'linear' },
     { itemId, property: 'y', frame: end, value: baseY, easing: 'linear' },
   ]
 }
@@ -327,7 +333,7 @@ function getBatchStageLabel(stage?: string): string {
 
 export const ActionPanel = memo(function ActionPanel() {
   const [fillVoiceGaps, setFillVoiceGaps] = useState(true)
-  const [motionEasing, setMotionEasing] = useState<MotionEasingMode>('ease-in-out')
+  const [motionEasing, setMotionEasing] = useState<MotionEasingMode>('linear')
   const [transitionDuration, setTransitionDuration] = useState(15)
   const [transitionCategory, setTransitionCategory] = useState<TransitionCategoryMode>('all')
   const [transcribeDialogOpen, setTranscribeDialogOpen] = useState(false)
@@ -391,6 +397,15 @@ export const ActionPanel = memo(function ActionPanel() {
       setBatchProgress(null)
     }
   }, [])
+
+  const handleFastBatchCaptions = useCallback(() => {
+    const settings = useSettingsStore.getState()
+    void handleStartBatchCaptions({
+      model: 'whisper-tiny',
+      quantization: 'hybrid',
+      language: settings.defaultWhisperLanguage || '',
+    })
+  }, [handleStartBatchCaptions])
 
   const handleCancelBatchCaptions = useCallback(() => {
     cancelBatchCaptionGeneration()
@@ -466,7 +481,7 @@ export const ActionPanel = memo(function ActionPanel() {
     images: TimelineItem[],
     type: ImageAnimType,
     keyframesStore: ReturnType<typeof useKeyframesStore.getState>,
-    easingMode: MotionEasingMode = 'ease-in-out',
+    easingMode: MotionEasingMode = 'linear',
   ): void {
     const payloads: KeyframePayload[] = []
     let lastAnim = ''
@@ -491,11 +506,15 @@ export const ActionPanel = memo(function ActionPanel() {
           : type
       lastAnim = chosen
 
-      const imageItem = img as ImageItem
-      const baseW = img.transform?.width ?? imageItem.sourceWidth ?? defaultW
-      const baseH = img.transform?.height ?? imageItem.sourceHeight ?? defaultH
-      const baseX = img.transform?.x ?? 0
-      const baseY = img.transform?.y ?? 0
+      const resolved = resolveTransform(
+        img,
+        { width: defaultW, height: defaultH, fps: projectMeta?.fps ?? 30 },
+        getSourceDimensions(img),
+      )
+      const baseW = resolved.width
+      const baseH = resolved.height
+      const baseX = resolved.x
+      const baseY = resolved.y
 
       payloads.push(
         ...buildImageMotionKeyframes(
@@ -542,7 +561,7 @@ export const ActionPanel = memo(function ActionPanel() {
       })
 
       const easingLabel =
-        motionEasing === 'ease-in-out' ? 'mượt mà (Ease In-Out)' : 'trôi đều (Linear)'
+        motionEasing === 'linear' ? 'trôi đều 60fps (Linear)' : 'mượt mà (Ease In-Out)'
       toast.success(
         `Đã tạo keyframe animation Ken Burns (${easingLabel}) cho ${targetImages.length} ảnh!`,
       )
@@ -730,7 +749,7 @@ export const ActionPanel = memo(function ActionPanel() {
             </div>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             <div className="flex items-center justify-between text-[11px] text-muted-foreground px-0.5">
               <span>
                 🎯 Tìm thấy:{' '}
@@ -738,19 +757,36 @@ export const ActionPanel = memo(function ActionPanel() {
                   {voiceClipsCount > 0 ? `${voiceClipsCount} đoạn Voice/Audio` : '0 audio'}
                 </strong>
               </span>
-              <span className="text-[10px] text-amber-400/80">⚡ Không lag timeline</span>
+              <span className="text-[10px] text-emerald-400 font-medium">
+                ⚡ Whisper Tiny (39MB · Siêu tốc)
+              </span>
             </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={voiceClipsCount === 0 || isBatchTranscribing}
-              onClick={() => setTranscribeDialogOpen(true)}
-              className="w-full h-9 text-xs font-semibold gap-1.5 border-amber-500/40 bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 hover:border-amber-500/60 shadow-sm transition-all"
-            >
-              <Zap className="w-4 h-4 text-amber-400 fill-amber-400/50" />
-              <span>Tạo Caption cho toàn bộ Audio</span>
-            </Button>
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={voiceClipsCount === 0 || isBatchTranscribing}
+                onClick={handleFastBatchCaptions}
+                className="sm:col-span-3 h-9 text-xs font-semibold gap-1.5 border-amber-500/50 bg-gradient-to-r from-amber-500/25 to-yellow-500/15 hover:from-amber-500/35 hover:to-yellow-500/25 text-amber-200 hover:border-amber-400 shadow-sm transition-all"
+                title="Tạo caption ngay lập tức bằng Whisper Tiny (siêu nhẹ, chỉ 39MB, tốc độ cao nhất)"
+              >
+                <Zap className="w-4 h-4 text-amber-400 fill-amber-400/50 shrink-0" />
+                <span>⚡ Tạo Siêu Nhanh (Tiny)</span>
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={voiceClipsCount === 0 || isBatchTranscribing}
+                onClick={() => setTranscribeDialogOpen(true)}
+                className="sm:col-span-2 h-9 text-xs font-medium gap-1.5 border-border/70 bg-secondary/30 hover:bg-secondary/60 text-foreground/80 hover:text-foreground shadow-sm transition-all"
+                title="Tùy chọn Model Whisper hoặc Ngôn ngữ khác"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                <span>Tùy chọn...</span>
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -817,19 +853,6 @@ export const ActionPanel = memo(function ActionPanel() {
           <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => setMotionEasing('ease-in-out')}
-              className={cn(
-                'px-2 py-0.5 rounded text-[10px] font-medium transition-all',
-                motionEasing === 'ease-in-out'
-                  ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40 shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40 border border-transparent',
-              )}
-              title="Tăng tốc và giảm tốc êm ái, mượt mà chuẩn điện ảnh"
-            >
-              Mượt mà (Ease)
-            </button>
-            <button
-              type="button"
               onClick={() => setMotionEasing('linear')}
               className={cn(
                 'px-2 py-0.5 rounded text-[10px] font-medium transition-all',
@@ -837,9 +860,22 @@ export const ActionPanel = memo(function ActionPanel() {
                   ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40 shadow-sm'
                   : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40 border border-transparent',
               )}
-              title="Chuyển động liên tục, tốc độ đồng đều như camera trượt"
+              title="Chuyển động liên tục 60fps chuẩn CapCut, tốc độ đều đặn không bị khựng"
             >
-              Trôi đều (Linear)
+              Trôi đều 60fps (CapCut)
+            </button>
+            <button
+              type="button"
+              onClick={() => setMotionEasing('ease-in-out')}
+              className={cn(
+                'px-2 py-0.5 rounded text-[10px] font-medium transition-all',
+                motionEasing === 'ease-in-out'
+                  ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40 shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40 border border-transparent',
+              )}
+              title="Tăng tốc và giảm tốc êm ái"
+            >
+              Mượt mà (Ease)
             </button>
           </div>
         </div>

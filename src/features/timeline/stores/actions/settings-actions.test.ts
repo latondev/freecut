@@ -8,7 +8,13 @@ import { useMarkersStore } from '../markers-store'
 import { useTransitionsStore } from '../transitions-store'
 import { useTimelineCommandStore } from '../timeline-command-store'
 import { useTimelineSettingsStore } from '../timeline-settings-store'
-import { clearTimeline, markClean, markDirty, toggleSnap } from './settings-actions'
+import {
+  clearTimeline,
+  markClean,
+  markDirty,
+  toggleSnap,
+  toggleAutoSnapToStart,
+} from './settings-actions'
 
 describe('settings actions', () => {
   beforeEach(() => {
@@ -64,5 +70,52 @@ describe('settings actions', () => {
     expect(useMarkersStore.getState().outPoint).toBeNull()
     expect(useTimelineSettingsStore.getState().isDirty).toBe(false)
     expect(useTimelineCommandStore.getState().undoStack).toHaveLength(0)
+  })
+
+  it('toggleAutoSnapToStart flips the setting with an undo entry and automatically closes gaps across all tracks', () => {
+    useTimelineSettingsStore.setState({ autoSnapToStart: false })
+    useItemsStore
+      .getState()
+      .setTracks([
+        makeTimelineTrack({ id: 'track-v1', name: 'V1', kind: 'video', order: 0 }),
+        makeTimelineTrack({ id: 'track-v2', name: 'V2', kind: 'video', order: 1 }),
+      ])
+    useItemsStore.getState().setItems([
+      makeTimelineVideoItem({
+        id: 'clip-1',
+        trackId: 'track-v1',
+        from: 30,
+        durationInFrames: 60,
+      }),
+      makeTimelineVideoItem({
+        id: 'clip-2',
+        trackId: 'track-v1',
+        from: 120,
+        durationInFrames: 60,
+      }),
+      makeTimelineVideoItem({
+        id: 'overlay-1',
+        trackId: 'track-v2',
+        from: 20,
+        durationInFrames: 50,
+      }),
+    ])
+
+    toggleAutoSnapToStart()
+    expect(useTimelineSettingsStore.getState().autoSnapToStart).toBe(true)
+
+    // Verify clips on all tracks were snapped to 0:0:0
+    const items = useItemsStore.getState().items
+    const clip1 = items.find((i) => i.id === 'clip-1')
+    const clip2 = items.find((i) => i.id === 'clip-2')
+    const overlay1 = items.find((i) => i.id === 'overlay-1')
+
+    expect(clip1?.from).toBe(0)
+    expect(clip2?.from).toBe(60) // Gap between clip 1 and 2 closed
+    expect(overlay1?.from).toBe(0) // Overlay snapped to 0
+
+    // Toggle off
+    toggleAutoSnapToStart()
+    expect(useTimelineSettingsStore.getState().autoSnapToStart).toBe(false)
   })
 })

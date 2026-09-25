@@ -11,6 +11,7 @@ import {
 } from '../deps/media-transcription-service'
 import { useTimelineStore } from '../stores/timeline-store'
 import { useMediaLibraryStore } from '../deps/media-library-store'
+import { importMediaLibraryService } from '../deps/media-library-service'
 
 export interface BatchCaptionProgress {
   currentMediaIndex: number
@@ -50,13 +51,82 @@ function collectTargetMediaMap(targetItemIds?: string[]): Map<string, string[]> 
     }
   }
 
+  // Optimize: Skip clips with muted/inaudible audio to avoid wasting AI inference time
+  targetItems = targetItems.filter((it) => {
+    if (it.type === 'video' && it.embeddedAudioMuted === true) {
+      return false
+    }
+    if (it.volume !== undefined && it.volume <= -60) {
+      return false
+    }
+    return true
+  })
+
   const mediaMap = new Map<string, string[]>()
   for (const it of targetItems) {
     const list = mediaMap.get(it.mediaId) ?? []
-    list.push(it.id)
+    if (!list.includes(it.id)) {
+      list.push(it.id)
+    }
     mediaMap.set(it.mediaId, list)
   }
   return mediaMap
+}
+
+function prefetchMediaBlob(mediaId: string): void {
+  void importMediaLibraryService()
+    .then(({ mediaLibraryService }) => mediaLibraryService.getMediaFile(mediaId))
+    .catch(() => {})
+}
+
+async function applyTranscriptCaptions(mediaId: string, clipIds: string[]): Promise<number> {
+  try {
+    if (typeof mediaTranscriptionService.insertTranscriptAsCaptions === 'function') {
+      const res = await mediaTranscriptionService.insertTranscriptAsCaptions(mediaId, {
+        clipIds,
+        replaceExisting: true,
+        splitPhrases: true,
+      })
+      return res.insertedItemCount
+    }
+
+    const res = await mediaTranscriptionService.enableTranscriptCaptions(mediaId, {
+      clipIds,
+      replaceExisting: true,
+      selectUpdatedClips: false,
+    })
+    return res.updatedClipCount
+  } catch (err) {
+    console.warn(`Failed to insert transcript captions for media ${mediaId}`, err)
+    return 0
+  }
+}
+
+async function transcribeMediaJob(
+  mediaId: string,
+  options: {
+    model: MediaTranscriptModel
+    quantization?: MediaTranscriptQuantization
+    language?: string
+    onProgress?: (stage: string, progress: number) => void
+  },
+): Promise<MediaTranscript | null> {
+  try {
+    activeMediaId = mediaId
+    const jobResult = await runMediaTranscriptionJob(mediaId, {
+      model: options.model,
+      quantization: options.quantization,
+      language: options.language,
+      onProgress: (p) => {
+        options.onProgress?.(p.stage, p.progress)
+      },
+    })
+    return jobResult.status === 'completed' ? jobResult.transcript : null
+  } finally {
+    if (activeMediaId === mediaId) {
+      activeMediaId = null
+    }
+  }
 }
 
 async function processSingleMediaCaption(
@@ -72,45 +142,15 @@ async function processSingleMediaCaption(
 ): Promise<number> {
   if (signal.aborted) return 0
 
-  // 1. Instant cache check: if transcript already exists, don't run Whisper
   let transcript: MediaTranscript | null | undefined =
     await mediaTranscriptionService.getTranscript(mediaId)
 
-  // 2. If not cached, run Whisper transcription in Web Worker
   if (!transcript && !signal.aborted) {
-    try {
-      activeMediaId = mediaId
-      const jobResult = await runMediaTranscriptionJob(mediaId, {
-        model: options.model,
-        quantization: options.quantization,
-        language: options.language,
-        onProgress: (p) => {
-          options.onProgress?.(p.stage, p.progress)
-        },
-      })
-
-      if (jobResult.status === 'completed') {
-        transcript = jobResult.transcript
-      }
-    } finally {
-      if (activeMediaId === mediaId) {
-        activeMediaId = null
-      }
-    }
+    transcript = await transcribeMediaJob(mediaId, options)
   }
 
-  // 3. Enable captions on the timeline clips in real-time
   if (transcript && !signal.aborted) {
-    try {
-      const res = await mediaTranscriptionService.enableTranscriptCaptions(mediaId, {
-        clipIds,
-        replaceExisting: true,
-        selectUpdatedClips: false,
-      })
-      return res.updatedClipCount
-    } catch (err) {
-      console.warn(`Failed to enable transcript captions for media ${mediaId}`, err)
-    }
+    return await applyTranscriptCaptions(mediaId, clipIds)
   }
 
   return 0
@@ -144,6 +184,12 @@ export async function generateTimelineCaptionsBatch(options: {
 
     const [mediaId, clipIds] = mediaEntries[i]!
     const mediaName = mediaLib.mediaById[mediaId]?.fileName ?? `Audio ${i + 1}`
+
+    // Pipelining: prefetch next media blob while current media is processed
+    const nextEntry = mediaEntries[i + 1]
+    if (nextEntry) {
+      prefetchMediaBlob(nextEntry[0])
+    }
 
     options.onProgress?.({
       currentMediaIndex: i + 1,

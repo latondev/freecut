@@ -9,6 +9,7 @@ interface TimelineSettingsState {
   fps: number
   scrollPosition: number
   snapEnabled: boolean
+  autoSnapToStart: boolean
   audioSkimmingEnabled: boolean
   timelineSkimmingEnabled: boolean
   isDirty: boolean
@@ -21,6 +22,8 @@ interface TimelineSettingsActions {
   setScrollPosition: (position: number) => void
   setSnapEnabled: (enabled: boolean) => void
   toggleSnap: () => void
+  setAutoSnapToStart: (enabled: boolean) => void
+  toggleAutoSnapToStart: () => void
   setAudioSkimmingEnabled: (enabled: boolean) => void
   toggleAudioSkimming: () => void
   setTimelineSkimmingEnabled: (enabled: boolean) => void
@@ -37,6 +40,7 @@ export const useTimelineSettingsStore = create<TimelineSettingsState & TimelineS
     fps: 30,
     scrollPosition: 0,
     snapEnabled: true,
+    autoSnapToStart: false,
     audioSkimmingEnabled: true,
     timelineSkimmingEnabled: false,
     isDirty: false,
@@ -47,6 +51,8 @@ export const useTimelineSettingsStore = create<TimelineSettingsState & TimelineS
     setScrollPosition: (position) => set({ scrollPosition: position }),
     setSnapEnabled: (enabled) => set({ snapEnabled: enabled }),
     toggleSnap: () => set((state) => ({ snapEnabled: !state.snapEnabled })),
+    setAutoSnapToStart: (enabled) => set({ autoSnapToStart: enabled }),
+    toggleAutoSnapToStart: () => set((state) => ({ autoSnapToStart: !state.autoSnapToStart })),
     setAudioSkimmingEnabled: (enabled) => set({ audioSkimmingEnabled: enabled }),
     toggleAudioSkimming: () =>
       set((state) => ({ audioSkimmingEnabled: !state.audioSkimmingEnabled })),

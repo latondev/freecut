@@ -84,6 +84,10 @@ export const TrackHeader = memo(function TrackHeader({
   // Use track drag hook (visuals handled centrally by timeline.tsx via DOM)
   const { handleDragStart } = useTrackDrag(track)
   const itemCountLabel = t('timeline.trackHeader.clipCount', { count: itemCount })
+  const isSubtitleTrack =
+    useItemsStore(
+      (s) => s.itemsByTrackId[track.id]?.some((item) => item.type === 'subtitle') ?? false,
+    ) || track.id.startsWith('track-captions')
 
   return (
     <ContextMenu>
@@ -119,6 +123,15 @@ export const TrackHeader = memo(function TrackHeader({
                 <span className="min-w-0 truncate text-xs font-semibold leading-none font-mono">
                   {track.name}
                 </span>
+                {isSubtitleTrack && (
+                  <span
+                    data-testid="track-header-cc-badge"
+                    className="shrink-0 rounded px-1 py-0.5 text-[9px] font-bold leading-none bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                    title="Subtitles"
+                  >
+                    CC
+                  </span>
+                )}
                 <span className="shrink-0 text-[10px] leading-none text-muted-foreground">
                   {itemCountLabel}
                 </span>
@@ -331,6 +344,15 @@ export const TrackHeader = memo(function TrackHeader({
                   <span className="min-w-0 truncate text-xs font-semibold leading-none font-mono">
                     {track.name}
                   </span>
+                  {isSubtitleTrack && (
+                    <span
+                      data-testid="track-header-cc-badge"
+                      className="shrink-0 rounded px-1 py-0.5 text-[9px] font-bold leading-none bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                      title="Subtitles"
+                    >
+                      CC
+                    </span>
+                  )}
                   <span className="shrink-0 text-[10px] leading-none text-muted-foreground">
                     {itemCountLabel}
                   </span>

@@ -316,4 +316,17 @@ describe('TimelineHeader zoom slider', () => {
       'true',
     )
   })
+
+  it('renders and toggles the auto-snap to start button', () => {
+    render(<TimelineHeader />)
+
+    const btn = screen.getByRole('button', { name: 'Enable Auto-Snap to Start (00:00:00)' })
+    expect(btn).toBeInTheDocument()
+
+    fireEvent.click(btn)
+
+    expect(
+      screen.getByRole('button', { name: 'Disable Auto-Snap to Start (00:00:00)' }),
+    ).toBeInTheDocument()
+  })
 })

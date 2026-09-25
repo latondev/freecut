@@ -48,6 +48,7 @@ let lastOutPointRef: unknown = null
 let lastFpsRef: unknown = null
 let lastScrollPositionRef: unknown = null
 let lastSnapEnabledRef: unknown = null
+let lastAutoSnapToStartRef: unknown = null
 let lastAudioSkimmingEnabledRef: unknown = null
 let lastTimelineSkimmingEnabledRef: unknown = null
 let lastIsDirtyRef: unknown = null
@@ -74,6 +75,7 @@ function getSnapshot(): TimelineState & TimelineActions {
     lastFpsRef !== settingsState.fps ||
     lastScrollPositionRef !== settingsState.scrollPosition ||
     lastSnapEnabledRef !== settingsState.snapEnabled ||
+    lastAutoSnapToStartRef !== settingsState.autoSnapToStart ||
     lastAudioSkimmingEnabledRef !== settingsState.audioSkimmingEnabled ||
     lastTimelineSkimmingEnabledRef !== settingsState.timelineSkimmingEnabled ||
     lastIsDirtyRef !== settingsState.isDirty
@@ -90,6 +92,7 @@ function getSnapshot(): TimelineState & TimelineActions {
     lastFpsRef = settingsState.fps
     lastScrollPositionRef = settingsState.scrollPosition
     lastSnapEnabledRef = settingsState.snapEnabled
+    lastAutoSnapToStartRef = settingsState.autoSnapToStart
     lastAudioSkimmingEnabledRef = settingsState.audioSkimmingEnabled
     lastTimelineSkimmingEnabledRef = settingsState.timelineSkimmingEnabled
     lastIsDirtyRef = settingsState.isDirty
@@ -107,6 +110,7 @@ function getSnapshot(): TimelineState & TimelineActions {
       fps: settingsState.fps,
       scrollPosition: settingsState.scrollPosition,
       snapEnabled: settingsState.snapEnabled,
+      autoSnapToStart: settingsState.autoSnapToStart,
       audioSkimmingEnabled: settingsState.audioSkimmingEnabled,
       timelineSkimmingEnabled: settingsState.timelineSkimmingEnabled,
       isDirty: settingsState.isDirty,
@@ -123,7 +127,9 @@ function getSnapshot(): TimelineState & TimelineActions {
       reverseItems: timelineActions.reverseItems,
       closeGapAtPosition: timelineActions.closeGapAtPosition,
       closeAllGapsOnTrack: timelineActions.closeAllGapsOnTrack,
+      closeAllTimelineGaps: timelineActions.closeAllTimelineGaps,
       toggleSnap: timelineActions.toggleSnap,
+      toggleAutoSnapToStart: timelineActions.toggleAutoSnapToStart,
       toggleAudioSkimming: timelineActions.toggleAudioSkimming,
       toggleTimelineSkimming: timelineActions.toggleTimelineSkimming,
       setScrollPosition: timelineActions.setScrollPosition,
@@ -280,6 +286,7 @@ function createTimelineStoreFacade(): TimelineStoreFacade {
   // Static methods
   useTimelineStore.getState = getSnapshot
 
+  // fallow-ignore-next-line complexity
   useTimelineStore.setState = (partial: Partial<TimelineState>) => {
     const nextItems =
       'items' in partial && partial.items !== undefined

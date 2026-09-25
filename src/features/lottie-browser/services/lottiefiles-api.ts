@@ -17,7 +17,12 @@ const ENDPOINT = 'https://graphql.lottiefiles.com/2022-08'
 export const LOTTIEFILES_LICENSE = 'Lottie Simple License (FL 9.13.21)'
 
 /** Browse feeds (used when there is no active search query). */
-export type LottieBrowseCategory = 'featured' | 'popular' | 'recent' | 'free-lottie'
+export type LottieBrowseCategory =
+  | 'featured'
+  | 'popular'
+  | 'recent'
+  | 'free-animations'
+  | 'free-lottie'
 
 export interface LottieFilesAnimation {
   id: string
@@ -113,6 +118,8 @@ function mapNode(node: RawNode): LottieFilesAnimation | null {
     bgColor: node.bgColor ?? null,
     author: node.createdBy?.name?.trim() || null,
     authorPath: node.createdBy?.username ?? null,
+    provider: 'LottieFiles',
+    pageUrl: `https://lottiefiles.com/free-animation/${node.id}`,
   }
 }
 

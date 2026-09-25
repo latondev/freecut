@@ -60,6 +60,7 @@ export {
   addItemOnNewTrack,
   addItemsOnNewTracks,
   closeAllGapsOnTrack,
+  closeAllTimelineGaps,
   duplicateItemsWithTrackChanges,
   moveItems,
   removeItems,

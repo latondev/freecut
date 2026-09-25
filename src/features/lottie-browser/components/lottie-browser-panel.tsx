@@ -13,8 +13,15 @@ import { useMediaLibraryStore } from '../deps/media-library'
 import { LottieCard } from './lottie-card'
 
 import { ICONSCOUNT_SUB_CATEGORIES } from '../services/iconscout-free-lottie'
+import { LOTTIEFILES_FREE_SUB_CATEGORIES } from '../services/lottiefiles-free-animations'
 
-const CATEGORIES: LottieBrowseCategory[] = ['featured', 'popular', 'recent', 'free-lottie']
+const CATEGORIES: LottieBrowseCategory[] = [
+  'featured',
+  'popular',
+  'recent',
+  'free-animations',
+  'free-lottie',
+]
 
 // fallow-ignore-next-line complexity
 function LottieBrowserPanelComponent() {
@@ -141,10 +148,41 @@ function LottieBrowserPanelComponent() {
                       : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
                   )}
                 >
-                  {id === 'free-lottie' ? 'Free Lottie' : t(`lottieBrowser.categories.${id}`)}
+                  {id === 'free-animations'
+                    ? 'Free Animations'
+                    : id === 'free-lottie'
+                      ? 'IconScout Free'
+                      : t(`lottieBrowser.categories.${id}`)}
                 </button>
               ))}
             </div>
+
+            {category === 'free-animations' && (
+              <div className="flex gap-1 overflow-x-auto no-scrollbar py-0.5">
+                {LOTTIEFILES_FREE_SUB_CATEGORIES.map((sub) => {
+                  const active = (sub.id === 'all' && !query) || query === sub.query
+                  return (
+                    <button
+                      key={sub.id}
+                      type="button"
+                      onClick={() => {
+                        const nextQ = sub.query
+                        setInputValue(nextQ)
+                        setQuery(nextQ)
+                      }}
+                      className={cn(
+                        'whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border',
+                        active
+                          ? 'border-emerald-500/60 bg-emerald-500/20 text-emerald-300 font-semibold'
+                          : 'border-border/60 bg-secondary/30 text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {sub.label}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
 
             {category === 'free-lottie' && (
               <div className="flex gap-1 overflow-x-auto no-scrollbar py-0.5">

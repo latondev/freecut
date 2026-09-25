@@ -26,6 +26,7 @@ import {
 import { importMediaLibraryService } from './media-library-service-loader'
 import {
   buildSubtitleSegmentForClip,
+  buildIndividualSubtitleSegmentsForClip,
   getCaptionStyleTemplateFromPreset,
   buildCaptionTrackAbove,
   type CaptionTextItemTemplate,
@@ -73,6 +74,7 @@ interface InsertTranscriptAsCaptionsOptions {
   clipIds?: readonly string[]
   replaceExisting?: boolean
   selectUpdatedClips?: boolean
+  splitPhrases?: boolean
 }
 
 interface InsertTranscriptAsCaptionsResult {
@@ -627,12 +629,7 @@ class MediaTranscriptionService {
     // an older transcript snapshot.
     const compositionsState = useCompositionsStore.getState()
     for (const composition of compositionsState.compositions) {
-      const synced = syncTranscriptCaptionItems(
-        composition.items,
-        mediaId,
-        transcript,
-        sourceCues,
-      )
+      const synced = syncTranscriptCaptionItems(composition.items, mediaId, transcript, sourceCues)
       if (synced.updatedClipCount === 0) continue
       compositionsState.updateComposition(composition.id, { items: synced.items })
       updatedClipCount += synced.updatedClipCount
@@ -649,9 +646,7 @@ class MediaTranscriptionService {
       return synced.updatedClipCount > 0 ? { ...stash, items: synced.items } : stash
     }
     const nextStashStack = navigationState.stashStack.map(syncStash)
-    const nextMainHolder = navigationState.mainHolder
-      ? syncStash(navigationState.mainHolder)
-      : null
+    const nextMainHolder = navigationState.mainHolder ? syncStash(navigationState.mainHolder) : null
     if (updatedStashedClipCount > 0) {
       useCompositionNavigationStore.setState({
         stashStack: nextStashStack,
@@ -760,30 +755,52 @@ class MediaTranscriptionService {
         newTracks.sort((a, b) => a.order - b.order)
       }
 
-      const clipCaptionItem = buildSubtitleSegmentForClip({
-        trackId: targetTrack.id,
-        cues: buildTimelineTranscriptCaptionCues(clip.id, transcript.segments),
-        clip,
-        timelineFps: timeline.fps,
-        canvasWidth,
-        canvasHeight,
-        label: 'Transcript',
-        source: {
-          type: 'transcript',
-          mediaId,
-          clipId: clip.id,
-        },
-        styleTemplate: existingGeneratedCaptions[0]
-          ? getCaptionTextItemTemplate(existingGeneratedCaptions[0])
-          : defaultCaptionTemplate,
-      })
+      if (options.splitPhrases) {
+        const individualItems = buildIndividualSubtitleSegmentsForClip({
+          trackId: targetTrack.id,
+          cues: buildTimelineTranscriptCaptionCues(clip.id, transcript.segments),
+          clip,
+          timelineFps: timeline.fps,
+          canvasWidth,
+          canvasHeight,
+          label: 'Transcript',
+          source: {
+            type: 'transcript',
+            mediaId,
+            clipId: clip.id,
+          },
+          styleTemplate: existingGeneratedCaptions[0]
+            ? getCaptionTextItemTemplate(existingGeneratedCaptions[0])
+            : defaultCaptionTemplate,
+        })
+        insertedItems.push(...individualItems)
+        plannedItems.push(...individualItems)
+      } else {
+        const clipCaptionItem = buildSubtitleSegmentForClip({
+          trackId: targetTrack.id,
+          cues: buildTimelineTranscriptCaptionCues(clip.id, transcript.segments),
+          clip,
+          timelineFps: timeline.fps,
+          canvasWidth,
+          canvasHeight,
+          label: 'Transcript',
+          source: {
+            type: 'transcript',
+            mediaId,
+            clipId: clip.id,
+          },
+          styleTemplate: existingGeneratedCaptions[0]
+            ? getCaptionTextItemTemplate(existingGeneratedCaptions[0])
+            : defaultCaptionTemplate,
+        })
 
-      if (!clipCaptionItem) {
-        continue
+        if (!clipCaptionItem) {
+          continue
+        }
+
+        insertedItems.push(clipCaptionItem)
+        plannedItems.push(clipCaptionItem)
       }
-
-      insertedItems.push(clipCaptionItem)
-      plannedItems.push(clipCaptionItem)
     }
 
     if (insertedItems.length === 0 && generatedCaptionIdsToRemove.size === 0) {
@@ -804,6 +821,18 @@ class MediaTranscriptionService {
     if (insertedItems.length > 0) {
       timeline.addItems(insertedItems)
       useSelectionStore.getState().selectItems(insertedItems.map((item) => item.id))
+
+      // Clean up any virtual transcriptCaptions on targetClips to prevent duplicate rendering
+      for (const clip of targetClips) {
+        if (clip.transcriptCaptions?.enabled) {
+          timeline.updateItem?.(clip.id, {
+            transcriptCaptions: {
+              ...clip.transcriptCaptions,
+              enabled: false,
+            },
+          } as Partial<TimelineItem>)
+        }
+      }
     }
 
     return {
