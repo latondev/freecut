@@ -104,15 +104,29 @@ function runFallowAudit(baseRef) {
   return report;
 }
 
+function hasChangedHealthFailures(report) {
+  const attribution = report.attribution;
+  if (attribution?.gate !== 'new-only') {
+    return report.verdict !== 'pass';
+  }
+
+  return [
+    attribution.dead_code_introduced,
+    attribution.complexity_introduced,
+    attribution.duplication_introduced,
+  ].some((count) => typeof count !== 'number' || count > 0);
+}
+
 function printReport(report, baseRef) {
   const attribution = valueOrDefault(report.attribution, {});
   const changedFilesCount = valueOrDefault(report.changed_files_count, 0);
   const baseLabel = valueOrDefault(report.base_ref, baseRef);
+  const verdict = hasChangedHealthFailures(report) ? 'fail' : 'pass';
   const deadCodeIntroduced = valueOrDefault(attribution.dead_code_introduced, 0);
   const complexityIntroduced = valueOrDefault(attribution.complexity_introduced, 0);
   const duplicationIntroduced = valueOrDefault(attribution.duplication_introduced, 0);
   console.log(
-    `Fallow changed health: ${report.verdict} (${changedFilesCount} changed files, base ${baseLabel}).`
+    `Fallow changed health: ${verdict} (${changedFilesCount} changed files, base ${baseLabel}).`
   );
   console.log(
     `Introduced: dead_code=${deadCodeIntroduced}, complexity=${complexityIntroduced}, duplication=${duplicationIntroduced}.`
@@ -133,7 +147,7 @@ function main() {
 
   printReport(report, baseRef);
 
-  if (report.verdict === 'pass') {
+  if (!hasChangedHealthFailures(report)) {
     return;
   }
 

@@ -62,6 +62,17 @@ import { useLinkedSyncPreview } from './use-linked-sync-preview'
 import { useClipReadoutLabels } from './use-clip-readout-labels'
 import { useTimelineItemPointerHandlers } from './use-timeline-item-pointer-handlers'
 import { ClipFloatingLayer } from './clip-floating-layer'
+
+function isCaptionTimelineItem(item: TimelineItemType): boolean {
+  return (
+    item.type === 'subtitle' ||
+    (item.type === 'text' &&
+      (item.textRole === 'caption' ||
+        item.captionSource !== undefined ||
+        (!!item.mediaId && item.label === item.text.slice(0, 48))))
+  )
+}
+
 const EMPTY_SEGMENT_OVERLAYS = [] as const
 const EMPTY_LINKED_ITEMS: TimelineItemType[] = []
 
@@ -574,14 +585,7 @@ export const TimelineItem = memo(function TimelineItem({
 
   // Captions use one timeline color whether stored as text or subtitle items.
   const itemColorClasses = useMemo(() => {
-    const isCaption =
-      item.type === 'subtitle' ||
-      (item.type === 'text' &&
-        (item.textRole === 'caption' ||
-          item.captionSource !== undefined ||
-          (!!item.mediaId && item.label === item.text.slice(0, 48))))
-
-    if (isCaption) {
+    if (isCaptionTimelineItem(item)) {
       return 'bg-yellow-500 border border-yellow-600/80 text-white'
     }
 

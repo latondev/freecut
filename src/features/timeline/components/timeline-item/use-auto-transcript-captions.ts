@@ -10,6 +10,18 @@ interface UseAutoTranscriptCaptionsParams {
   isBroken: boolean
 }
 
+function getAutoInsertMediaId(
+  item: TimelineItemType,
+  hasGeneratedCaptions: boolean,
+): string | null {
+  const hasVirtualCaptions =
+    item.transcriptCaptions?.type === 'transcript' && item.transcriptCaptions.enabled
+  const isMediaItem = item.type === 'video' || item.type === 'audio'
+
+  if ((hasGeneratedCaptions && !hasVirtualCaptions) || !isMediaItem) return null
+  return item.mediaId ?? null
+}
+
 /**
  * Inserts transcript-backed captions on a visible timeline track the first time
  * a video/audio clip's media has a transcript, or converts its existing virtual
@@ -24,28 +36,19 @@ export function useAutoTranscriptCaptions({
   const attemptRef = useRef<string | null>(null)
 
   useEffect(() => {
-    const hasVirtualCaptions =
-      item.transcriptCaptions?.type === 'transcript' && item.transcriptCaptions.enabled
-
-    if (
-      !caption.canManageCaptions ||
-      !caption.mediaHasTranscript ||
-      (hasGeneratedCaptions && !hasVirtualCaptions) ||
-      isBroken ||
-      (item.type !== 'video' && item.type !== 'audio') ||
-      !item.mediaId
-    ) {
+    const mediaId = getAutoInsertMediaId(item, hasGeneratedCaptions)
+    if (!caption.canManageCaptions || !caption.mediaHasTranscript || isBroken || !mediaId) {
       return
     }
 
-    const attemptKey = `${item.id}:${item.mediaId}`
+    const attemptKey = `${item.id}:${mediaId}`
     if (attemptRef.current === attemptKey) {
       return
     }
     attemptRef.current = attemptKey
 
     void mediaTranscriptionService
-      .insertTranscriptAsCaptions(item.mediaId, {
+      .insertTranscriptAsCaptions(mediaId, {
         clipIds: [item.id],
         replaceExisting: true,
         selectUpdatedClips: false,
@@ -54,14 +57,5 @@ export function useAutoTranscriptCaptions({
       .catch(() => {
         // Keep this silent: the explicit Generate Captions action remains the user-facing fallback.
       })
-  }, [
-    caption.canManageCaptions,
-    caption.mediaHasTranscript,
-    hasGeneratedCaptions,
-    isBroken,
-    item.transcriptCaptions,
-    item.id,
-    item.mediaId,
-    item.type,
-  ])
+  }, [caption.canManageCaptions, caption.mediaHasTranscript, hasGeneratedCaptions, isBroken, item])
 }

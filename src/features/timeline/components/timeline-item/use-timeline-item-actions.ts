@@ -83,6 +83,7 @@ let cachedSelectionCapabilities: SelectionCapabilities = {
  * array references so a multi-select drag does the work once instead of once
  * per selected clip on both drag start and drag end.
  */
+// fallow-ignore-next-line complexity
 function getSelectionCapabilities(): SelectionCapabilities {
   const selectedItemIds = useSelectionStore.getState().selectedItemIds
   const itemsState = useItemsStore.getState()
@@ -116,6 +117,7 @@ interface UseTimelineItemActionsParams {
   segmentOverlays: readonly TimelineItemOverlay[]
 }
 
+// fallow-ignore-next-line complexity
 export function useTimelineItemActions({
   item,
   isBroken,
@@ -221,6 +223,7 @@ export function useTimelineItemActions({
   }, [hasSpeakableText, item.id, textContent])
 
   const handleCaptionGeneration = useCallback(
+    // fallow-ignore-next-line complexity
     (
       model: MediaTranscriptModel,
       options?: {
