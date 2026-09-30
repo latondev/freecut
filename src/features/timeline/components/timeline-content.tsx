@@ -87,7 +87,6 @@ const ACTIVE_TIMELINE_GESTURE_CURSOR_CLASSES = [
 ] as const
 
 const FINE_ZOOM_FACTOR = 1.1
-
 const DENSE_TIMELINE_HOVER_PREVIEW_DELAY_MS = 150
 
 type TrackScrollbarSection = 'video' | 'audio' | 'single'
