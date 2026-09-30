@@ -87,7 +87,7 @@ const ACTIVE_TIMELINE_GESTURE_CURSOR_CLASSES = [
 ] as const
 
 const FINE_ZOOM_FACTOR = 1.1
-const ZOOM_BUTTON_ANIMATION_DURATION_MS = 180
+
 const DENSE_TIMELINE_HOVER_PREVIEW_DELAY_MS = 150
 
 type TrackScrollbarSection = 'video' | 'audio' | 'single'
@@ -904,8 +904,6 @@ export const TimelineContent = memo(function TimelineContent({
   const queuedZoomLevelRef = useRef<number | null>(null)
   const queuedZoomScrollLeftRef = useRef<number | null>(null)
   const zoomApplyRafRef = useRef<number | null>(null)
-  const zoomButtonAnimationRafRef = useRef<number | null>(null)
-  const zoomButtonTargetRef = useRef<number | null>(null)
   // Latest known scrollLeft, kept fresh by the scroll handler. Declared here so
   // scheduleViewportSync can hand it to syncViewportFromContainer instead of
   // reading container.scrollLeft back (a forced reflow after a width write).
@@ -1717,24 +1715,14 @@ export const TimelineContent = memo(function TimelineContent({
   const clearQueuedZoomApply = useCallback(() => {
     queuedZoomLevelRef.current = null
     queuedZoomScrollLeftRef.current = null
-    zoomButtonTargetRef.current = null
     if (zoomApplyRafRef.current !== null) {
       cancelAnimationFrame(zoomApplyRafRef.current)
       zoomApplyRafRef.current = null
     }
-    if (zoomButtonAnimationRafRef.current !== null) {
-      cancelAnimationFrame(zoomButtonAnimationRafRef.current)
-      zoomButtonAnimationRafRef.current = null
-    }
   }, [])
 
   const applyZoomWithAnchor = useCallback(
-    (newZoomLevel: number, anchor: TimelineZoomAnchor, fromButtonAnimation = false) => {
-      if (!fromButtonAnimation && zoomButtonAnimationRafRef.current !== null) {
-        cancelAnimationFrame(zoomButtonAnimationRafRef.current)
-        zoomButtonAnimationRafRef.current = null
-        zoomButtonTargetRef.current = null
-      }
+    (newZoomLevel: number, anchor: TimelineZoomAnchor) => {
       const currentZoom = queuedZoomLevelRef.current ?? useZoomStore.getState().level
       const clampedZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoomLevel))
       if (clampedZoom === currentZoom) return
@@ -1773,7 +1761,7 @@ export const TimelineContent = memo(function TimelineContent({
   )
 
   const applyZoomWithPlayheadAnchor = useCallback(
-    (newZoomLevel: number, fromButtonAnimation = false) => {
+    (newZoomLevel: number) => {
       const container = containerRef.current
       if (!container) return
 
@@ -1790,46 +1778,9 @@ export const TimelineContent = memo(function TimelineContent({
           maxDurationSeconds: actualDurationRef.current,
           scrollLeft: baseScrollLeft,
         }),
-        fromButtonAnimation,
       )
     },
     [applyZoomWithAnchor],
-  )
-
-  const animateZoomButtonTarget = useCallback(
-    (targetZoomLevel: number) => {
-      if (zoomButtonAnimationRafRef.current !== null) {
-        cancelAnimationFrame(zoomButtonAnimationRafRef.current)
-      }
-
-      const startZoomLevel = queuedZoomLevelRef.current ?? useZoomStore.getState().level
-      const target = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, targetZoomLevel))
-      if (target === startZoomLevel) {
-        zoomButtonAnimationRafRef.current = null
-        zoomButtonTargetRef.current = null
-        return
-      }
-
-      zoomButtonTargetRef.current = target
-      const startTime = performance.now()
-      const animate: FrameRequestCallback = (now) => {
-        const progress = Math.min(1, (now - startTime) / ZOOM_BUTTON_ANIMATION_DURATION_MS)
-        const easedProgress = 1 - (1 - progress) ** 3
-        applyZoomWithPlayheadAnchor(
-          startZoomLevel + (target - startZoomLevel) * easedProgress,
-          true,
-        )
-
-        if (progress < 1) {
-          zoomButtonAnimationRafRef.current = requestAnimationFrame(animate)
-        } else {
-          zoomButtonAnimationRafRef.current = null
-          zoomButtonTargetRef.current = null
-        }
-      }
-      zoomButtonAnimationRafRef.current = requestAnimationFrame(animate)
-    },
-    [applyZoomWithPlayheadAnchor],
   )
 
   const handleZoomChange = useCallback(
@@ -1840,16 +1791,16 @@ export const TimelineContent = memo(function TimelineContent({
   )
 
   const handleZoomIn = useCallback(() => {
-    const currentZoomLevel =
-      zoomButtonTargetRef.current ?? queuedZoomLevelRef.current ?? useZoomStore.getState().level
-    animateZoomButtonTarget(Math.min(ZOOM_MAX, currentZoomLevel * FINE_ZOOM_FACTOR))
-  }, [animateZoomButtonTarget])
+    const currentZoomLevel = queuedZoomLevelRef.current ?? useZoomStore.getState().level
+    const newZoomLevel = Math.min(ZOOM_MAX, currentZoomLevel * FINE_ZOOM_FACTOR)
+    applyZoomWithPlayheadAnchor(newZoomLevel)
+  }, [applyZoomWithPlayheadAnchor])
 
   const handleZoomOut = useCallback(() => {
-    const currentZoomLevel =
-      zoomButtonTargetRef.current ?? queuedZoomLevelRef.current ?? useZoomStore.getState().level
-    animateZoomButtonTarget(Math.max(ZOOM_MIN, currentZoomLevel / FINE_ZOOM_FACTOR))
-  }, [animateZoomButtonTarget])
+    const currentZoomLevel = queuedZoomLevelRef.current ?? useZoomStore.getState().level
+    const newZoomLevel = Math.max(ZOOM_MIN, currentZoomLevel / FINE_ZOOM_FACTOR)
+    applyZoomWithPlayheadAnchor(newZoomLevel)
+  }, [applyZoomWithPlayheadAnchor])
 
   // Keep a ref to containerWidth for use in stable callbacks
   const containerWidthRef = useRef(containerWidth)
@@ -2071,9 +2022,6 @@ export const TimelineContent = memo(function TimelineContent({
       }
       if (zoomApplyRafRef.current !== null) {
         cancelAnimationFrame(zoomApplyRafRef.current)
-      }
-      if (zoomButtonAnimationRafRef.current !== null) {
-        cancelAnimationFrame(zoomButtonAnimationRafRef.current)
       }
     }
   }, [])
