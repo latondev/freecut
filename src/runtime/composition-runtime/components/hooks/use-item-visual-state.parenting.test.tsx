@@ -1,11 +1,11 @@
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 import type { ItemKeyframes } from '@/types/keyframe'
-import type { ControllerItem, ShapeItem, TimelineItem } from '@/types/timeline'
+import type { ControllerItem, ImageItem, ShapeItem, TimelineItem } from '@/types/timeline'
 import type { ResolvedTransform } from '@/types/transform'
 import { createTransformParentBinding } from '@/shared/utils/transform-parenting'
-import { VideoConfigProvider, SequenceContext } from '@/runtime/composition-runtime/deps/player'
-import { useGizmoStore } from '@/runtime/composition-runtime/deps/stores'
+import { SequenceContext, VideoConfigProvider } from '@/runtime/composition-runtime/deps/player'
+import { useGizmoStore, usePlaybackStore } from '@/runtime/composition-runtime/deps/stores'
 import { KeyframesProvider } from '../../contexts/keyframes-context'
 import {
   buildItemTransformDependencyPlan,
@@ -66,6 +66,11 @@ function TransformXProbe({ item }: { item: TimelineItem }) {
   return <output data-testid="transform-x">{transform.x}</output>
 }
 
+function ImageTransformStyleProbe({ item }: { item: ImageItem }) {
+  const { transformStyle } = useItemVisualState(item)
+  return <div data-testid="image-transform" style={transformStyle} />
+}
+
 function ImperativeParentTransformXProbe({ item }: { item: TimelineItem }) {
   const transformDependencyPlan = buildItemTransformDependencyPlan(
     item,
@@ -100,6 +105,89 @@ describe('useItemVisualState parenting', () => {
     useGizmoStore.getState().cancelInteraction()
     useGizmoStore.getState().clearPreview()
     useGizmoStore.getState().setSnappingEnabled(true)
+    usePlaybackStore.getState().pause()
+  })
+
+  it('keeps the image layout fixed and scales from its center for Ken Burns zoom', () => {
+    const image: ImageItem = {
+      id: 'ken-burns-image',
+      type: 'image',
+      src: 'image.png',
+      trackId: 'image-track',
+      from: 0,
+      durationInFrames: 60,
+      label: 'Ken Burns image',
+      sourceWidth: 100,
+      sourceHeight: 100,
+      transform: resolvedTransform(),
+    }
+    const imageKeyframes: ItemKeyframes[] = [
+      {
+        itemId: image.id,
+        properties: [
+          {
+            property: 'width',
+            keyframes: [
+              { id: 'width-0', frame: 0, value: 100, easing: 'ease-in-out' },
+              { id: 'width-59', frame: 59, value: 110, easing: 'linear' },
+            ],
+          },
+          {
+            property: 'height',
+            keyframes: [
+              { id: 'height-0', frame: 0, value: 100, easing: 'ease-in-out' },
+              { id: 'height-59', frame: 59, value: 110, easing: 'linear' },
+            ],
+          },
+          {
+            property: 'anchorX',
+            keyframes: [
+              { id: 'anchor-x-0', frame: 0, value: 50, easing: 'ease-in-out' },
+              { id: 'anchor-x-59', frame: 59, value: 55, easing: 'linear' },
+            ],
+          },
+          {
+            property: 'anchorY',
+            keyframes: [
+              { id: 'anchor-y-0', frame: 0, value: 50, easing: 'ease-in-out' },
+              { id: 'anchor-y-59', frame: 59, value: 55, easing: 'linear' },
+            ],
+          },
+        ],
+      },
+    ]
+
+    act(() => usePlaybackStore.setState({ isPlaying: true, playbackRate: 1 }))
+    const previewAtFrame = (frame: number) => (
+      <VideoConfigProvider
+        id="ken-burns-preview"
+        width={canvas.width}
+        height={canvas.height}
+        fps={canvas.fps}
+        durationInFrames={60}
+      >
+        <SequenceContext.Provider
+          value={{ from: 0, parentFrom: 0, localFrame: frame, durationInFrames: 60 }}
+        >
+          <KeyframesProvider keyframes={imageKeyframes} items={[image]} canvas={canvas}>
+            <ImageTransformStyleProbe item={image} />
+          </KeyframesProvider>
+        </SequenceContext.Provider>
+      </VideoConfigProvider>
+    )
+    const { rerender } = render(previewAtFrame(0))
+    const imageElement = screen.getByTestId('image-transform')
+    const initialLeft = imageElement.style.left
+    expect(imageElement.style.width).toBe('100px')
+    expect(imageElement.style.scale).toBe('1 1')
+
+    rerender(previewAtFrame(30))
+    expect(imageElement.style.width).toBe('100px')
+    expect(imageElement.style.height).toBe('100px')
+    expect(imageElement.style.left).toBe(initialLeft)
+    expect(imageElement.style.transformOrigin).toBe('50px 50px')
+    expect(imageElement.style.scale).not.toBe('1 1')
+    expect(imageElement.style.transition).toBe('scale 33.333333333333336ms linear')
   })
 
   it('moves a child during its parent Null pointer drag before mouseup', () => {
@@ -402,16 +490,8 @@ describe('useItemVisualState parenting', () => {
         <SequenceContext.Provider
           value={{ from: 0, parentFrom: 0, localFrame: 0, durationInFrames: 120 }}
         >
-          <KeyframesProvider
-            keyframes={[targetKeyframes]}
-            items={items}
-            canvas={canvas}
-          >
-            <PlannedTransformXProbe
-              item={target}
-              items={items}
-              keyframes={[targetKeyframes]}
-            />
+          <KeyframesProvider keyframes={[targetKeyframes]} items={items} canvas={canvas}>
+            <PlannedTransformXProbe item={target} items={items} keyframes={[targetKeyframes]} />
           </KeyframesProvider>
         </SequenceContext.Provider>
       </VideoConfigProvider>,
@@ -422,11 +502,7 @@ describe('useItemVisualState parenting', () => {
     act(() => {
       const gizmo = useGizmoStore.getState()
       gizmo.setSnappingEnabled(false)
-      gizmo.startTranslate(
-        source.id,
-        { x: 110, y: 0 },
-        resolvedTransform({ x: 110 }),
-      )
+      gizmo.startTranslate(source.id, { x: 110, y: 0 }, resolvedTransform({ x: 110 }))
       gizmo.updateInteraction({ x: 130, y: 0 }, false)
     })
 

@@ -5,6 +5,7 @@ import {
   buildRemovalRangesByMediaId,
   buildTranscriptTokens,
   findActiveTokenIndex,
+  getTranscriptSourceItem,
   getSelectedTokenSlice,
 } from './transcript-edit-model'
 
@@ -41,6 +42,25 @@ function makeTranscript(
 }
 
 const FPS = 30
+
+describe('getTranscriptSourceItem', () => {
+  it('resolves a selected transcript caption to its source clip', () => {
+    const sourceClip = makeItem({ id: 'clip-1', mediaId: 'm1' })
+    const caption = {
+      id: 'caption-1',
+      type: 'subtitle',
+      trackId: 'captions',
+      from: 0,
+      durationInFrames: 30,
+      label: 'Hello',
+      color: '#ffffff',
+      source: { type: 'transcript', mediaId: 'm1', clipId: 'clip-1' },
+      cues: [{ id: 'cue-1', startSeconds: 0, endSeconds: 1, text: 'Hello' }],
+    } as TimelineItem
+
+    expect(getTranscriptSourceItem(caption, { 'clip-1': sourceClip })).toBe(sourceClip)
+  })
+})
 
 describe('buildTranscriptTokens', () => {
   it('maps words to timeline frames in document order', () => {

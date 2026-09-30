@@ -62,6 +62,7 @@ import {
   buildTranscriptTokens,
   findActiveTokenIndex,
   getSelectedTokenSlice,
+  getTranscriptSourceItem,
   isTranscriptableItem,
   type TranscriptToken,
 } from '../../utils/transcript-edit-model'
@@ -311,12 +312,32 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
 
   useEffect(() => () => setTranscriptShortcutScope(false), [setTranscriptShortcutScope])
 
+  const selectedTimelineItems = useMemo(
+    () => selectedItemIds.map((id) => itemById[id]).filter((item) => item !== undefined),
+    [selectedItemIds, itemById],
+  )
+  const selectedTranscriptCaptions = useMemo(
+    () =>
+      selectedTimelineItems.filter(
+        (item) =>
+          (item.type === 'subtitle' && item.source.type === 'transcript') ||
+          (item.type === 'text' && item.captionSource?.type === 'transcript'),
+      ),
+    [selectedTimelineItems],
+  )
   const transcriptableItems = useMemo(() => {
     if (scope === 'project') {
       return allItems.filter(isTranscriptableItem).toSorted((a, b) => a.from - b.from)
     }
-    return selectedItemIds.map((id) => itemById[id]).filter(isTranscriptableItem)
-  }, [scope, allItems, selectedItemIds, itemById])
+
+    const seen = new Set<string>()
+    return selectedTimelineItems.flatMap((item) => {
+      const sourceItem = getTranscriptSourceItem(item, itemById)
+      if (!sourceItem || seen.has(sourceItem.id)) return []
+      seen.add(sourceItem.id)
+      return [sourceItem]
+    })
+  }, [scope, allItems, selectedTimelineItems, itemById])
 
   const uniqueMediaIds = useMemo(
     () => Array.from(new Set(transcriptableItems.map((item) => item.mediaId))).sort(),
@@ -712,61 +733,64 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
     return status === 'loading' || status === 'transcribing'
   })
 
-  const handleTranscribe = useCallback((values: TranscribeDialogValues) => {
-    const targets = uniqueMediaIds.filter((id) => {
-      const status = mediaState[id]?.status
-      return status === 'needs' || status === 'error'
-    })
-    if (targets.length === 0) return
+  const handleTranscribe = useCallback(
+    (values: TranscribeDialogValues) => {
+      const targets = uniqueMediaIds.filter((id) => {
+        const status = mediaState[id]?.status
+        return status === 'needs' || status === 'error'
+      })
+      if (targets.length === 0) return
 
-    setTranscribeDialogOpen(false)
+      setTranscribeDialogOpen(false)
 
-    for (const id of targets) requestedRef.current.add(id)
-    setMediaState((prev) => {
-      const next = { ...prev }
-      for (const id of targets) next[id] = { status: 'transcribing' }
-      return next
-    })
+      for (const id of targets) requestedRef.current.add(id)
+      setMediaState((prev) => {
+        const next = { ...prev }
+        for (const id of targets) next[id] = { status: 'transcribing' }
+        return next
+      })
 
-    void Promise.all(
-      targets.map(async (mediaId) => {
-        try {
-          const result = await runMediaTranscriptionJob(mediaId, {
-            ...values,
-            onModelFallback: () => {
-              toast.info(t('transcript.largeTurboFallback'))
-            },
-          })
-          if (!mountedRef.current) return
-          if (result.status === 'cancelled') {
-            setMediaState((prev) => ({ ...prev, [mediaId]: { status: 'needs' } }))
-            return
-          }
-          const { transcript } = result
-          setMediaState((prev) => ({
-            ...prev,
-            [mediaId]: hasWordTimings(transcript)
-              ? { status: 'ready', transcript }
-              : { status: 'needs' },
-          }))
-        } catch (error) {
-          logger.warn('Transcription failed', { mediaId, error })
-          const errorMessage = isTranscriptionOutOfMemoryError(error)
-            ? TRANSCRIPTION_OOM_HINT
-            : error instanceof Error && error.message.trim().length > 0
-              ? error.message
-              : t('transcript.toastTranscribeFailed')
-          if (mountedRef.current) {
+      void Promise.all(
+        targets.map(async (mediaId) => {
+          try {
+            const result = await runMediaTranscriptionJob(mediaId, {
+              ...values,
+              onModelFallback: () => {
+                toast.info(t('transcript.largeTurboFallback'))
+              },
+            })
+            if (!mountedRef.current) return
+            if (result.status === 'cancelled') {
+              setMediaState((prev) => ({ ...prev, [mediaId]: { status: 'needs' } }))
+              return
+            }
+            const { transcript } = result
             setMediaState((prev) => ({
               ...prev,
-              [mediaId]: { status: 'error', errorMessage },
+              [mediaId]: hasWordTimings(transcript)
+                ? { status: 'ready', transcript }
+                : { status: 'needs' },
             }))
+          } catch (error) {
+            logger.warn('Transcription failed', { mediaId, error })
+            const errorMessage = isTranscriptionOutOfMemoryError(error)
+              ? TRANSCRIPTION_OOM_HINT
+              : error instanceof Error && error.message.trim().length > 0
+                ? error.message
+                : t('transcript.toastTranscribeFailed')
+            if (mountedRef.current) {
+              setMediaState((prev) => ({
+                ...prev,
+                [mediaId]: { status: 'error', errorMessage },
+              }))
+            }
+            toast.error(errorMessage)
           }
-          toast.error(errorMessage)
-        }
-      }),
-    )
-  }, [uniqueMediaIds, mediaState, t])
+        }),
+      )
+    },
+    [uniqueMediaIds, mediaState, t],
+  )
 
   const transcriptionError = useMemo(
     () =>
@@ -892,17 +916,35 @@ export function TranscriptEditorPanel({ active }: TranscriptEditorPanelProps) {
         onPointerMove={handlePointerMove}
         className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-2"
       >
-        {transcriptableItems.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-            <Captions className="h-8 w-8 text-muted-foreground/60" />
-            <p className="text-sm text-muted-foreground">
-              {scope === 'project'
-                ? t('transcript.emptyProject', {
-                    defaultValue: 'No video or audio clips in this project yet.',
-                  })
-                : t('transcript.emptySelection')}
+        {selectedTranscriptCaptions.length > 0 && (
+          <div className="mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+              {t('transcript.selectedCaption', { defaultValue: 'Selected caption' })}
             </p>
+            {selectedTranscriptCaptions.map((item) => (
+              <p key={item.id} className="text-sm leading-5 text-foreground">
+                {item.type === 'subtitle'
+                  ? item.cues.map((cue) => cue.text).join('\n')
+                  : item.type === 'text'
+                    ? item.text
+                    : ''}
+              </p>
+            ))}
           </div>
+        )}
+        {transcriptableItems.length === 0 ? (
+          selectedTranscriptCaptions.length > 0 ? null : (
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+              <Captions className="h-8 w-8 text-muted-foreground/60" />
+              <p className="text-sm text-muted-foreground">
+                {scope === 'project'
+                  ? t('transcript.emptyProject', {
+                      defaultValue: 'No video or audio clips in this project yet.',
+                    })
+                  : t('transcript.emptySelection')}
+              </p>
+            </div>
+          )
         ) : needsTranscription.length > 0 && tokens.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
             <Captions className="h-8 w-8 text-muted-foreground/60" />

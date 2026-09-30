@@ -260,14 +260,15 @@ export function useTimelineItemActions({
             store.setTranscriptStatus(mediaId, 'ready')
             store.clearTranscriptProgress(mediaId)
           }
-          const result = await mediaTranscriptionService.enableTranscriptCaptions(mediaId, {
+          const result = await mediaTranscriptionService.insertTranscriptAsCaptions(mediaId, {
             clipIds: [clipId],
             replaceExisting,
+            splitPhrases: true,
           })
 
           const modelLabel = getMediaTranscriptionModelLabel(model)
           const successMessage = replaceExisting
-            ? result.updatedClipCount > 0
+            ? result.insertedItemCount > 0
               ? result.removedItemCount > 0
                 ? i18n.t('timeline.captions.updatedWithModel', { model: modelLabel })
                 : i18n.t('timeline.captions.refreshedWithModel', { model: modelLabel })
@@ -313,8 +314,7 @@ export function useTimelineItemActions({
       onError?: (error: unknown) => void,
     ) => {
       handleCaptionGeneration(values.model, {
-        // The dialog path is always "generate fresh captions". Existing
-        // transcripts are auto-enabled as virtual captions when clips load.
+        // The dialog path regenerates captions and inserts them on a visible timeline track.
         forceTranscription: true,
         replaceExisting: hasExistingCaptions,
         quantization: values.quantization,

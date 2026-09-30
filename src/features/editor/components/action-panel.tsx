@@ -38,6 +38,7 @@ import { useProjectStore } from '@/features/editor/deps/projects'
 import { resolveTransform, getSourceDimensions } from '@/features/editor/deps/composition-runtime'
 import { cn } from '@/shared/ui/cn'
 import { toast } from 'sonner'
+import { buildZoomAnchorKeyframes } from '../utils/zoom-anchor-keyframes'
 
 const RANDOM_TRANSITIONS = [
   { id: 'fade', label: 'Fade' },
@@ -115,7 +116,7 @@ function buildImageMotionKeyframes(
   baseH: number,
   baseX: number,
   baseY: number,
-  easingMode: MotionEasingMode = 'linear',
+  easingMode: MotionEasingMode = 'ease-in-out',
 ): KeyframePayload[] {
   const end = Math.max(1, duration - 1)
   const ease = easingMode
@@ -129,18 +130,18 @@ function buildImageMotionKeyframes(
   const dx = Math.max(48, Math.round(baseW * 0.08))
   const dy = Math.max(36, Math.round(baseH * 0.08))
 
-  // Zoom dimensions (1.20x)
+  // Zoom dimensions (1.20x) for pan and combined presets.
   const zoomW = Math.round(baseW * 1.2)
   const zoomH = Math.round(baseH * 1.2)
 
   if (anim === 'zoom-in') {
     return [
-      { itemId, property: 'width', frame: 0, value: Math.round(baseW * 1.02), easing: ease },
-      { itemId, property: 'height', frame: 0, value: Math.round(baseH * 1.02), easing: ease },
+      { itemId, property: 'width', frame: 0, value: baseW, easing: ease },
+      { itemId, property: 'height', frame: 0, value: baseH, easing: ease },
       { itemId, property: 'x', frame: 0, value: baseX, easing: ease },
       { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
-      { itemId, property: 'width', frame: end, value: zoomW, easing: 'linear' },
-      { itemId, property: 'height', frame: end, value: zoomH, easing: 'linear' },
+      { itemId, property: 'width', frame: end, value: baseW * 1.1, easing: 'linear' },
+      { itemId, property: 'height', frame: end, value: baseH * 1.1, easing: 'linear' },
       { itemId, property: 'x', frame: end, value: baseX, easing: 'linear' },
       { itemId, property: 'y', frame: end, value: baseY, easing: 'linear' },
     ]
@@ -148,12 +149,12 @@ function buildImageMotionKeyframes(
 
   if (anim === 'zoom-out') {
     return [
-      { itemId, property: 'width', frame: 0, value: zoomW, easing: ease },
-      { itemId, property: 'height', frame: 0, value: zoomH, easing: ease },
+      { itemId, property: 'width', frame: 0, value: baseW * 1.1, easing: ease },
+      { itemId, property: 'height', frame: 0, value: baseH * 1.1, easing: ease },
       { itemId, property: 'x', frame: 0, value: baseX, easing: ease },
       { itemId, property: 'y', frame: 0, value: baseY, easing: ease },
-      { itemId, property: 'width', frame: end, value: Math.round(baseW * 1.04), easing: 'linear' },
-      { itemId, property: 'height', frame: end, value: Math.round(baseH * 1.04), easing: 'linear' },
+      { itemId, property: 'width', frame: end, value: baseW, easing: 'linear' },
+      { itemId, property: 'height', frame: end, value: baseH, easing: 'linear' },
       { itemId, property: 'x', frame: end, value: baseX, easing: 'linear' },
       { itemId, property: 'y', frame: end, value: baseY, easing: 'linear' },
     ]
@@ -333,7 +334,7 @@ function getBatchStageLabel(stage?: string): string {
 
 export const ActionPanel = memo(function ActionPanel() {
   const [fillVoiceGaps, setFillVoiceGaps] = useState(true)
-  const [motionEasing, setMotionEasing] = useState<MotionEasingMode>('linear')
+  const [motionEasing, setMotionEasing] = useState<MotionEasingMode>('ease-in-out')
   const [transitionDuration, setTransitionDuration] = useState(15)
   const [transitionCategory, setTransitionCategory] = useState<TransitionCategoryMode>('all')
   const [transcribeDialogOpen, setTranscribeDialogOpen] = useState(false)
@@ -481,7 +482,7 @@ export const ActionPanel = memo(function ActionPanel() {
     images: TimelineItem[],
     type: ImageAnimType,
     keyframesStore: ReturnType<typeof useKeyframesStore.getState>,
-    easingMode: MotionEasingMode = 'linear',
+    easingMode: MotionEasingMode = 'ease-in-out',
   ): void {
     const payloads: KeyframePayload[] = []
     let lastAnim = ''
@@ -493,11 +494,6 @@ export const ActionPanel = memo(function ActionPanel() {
     for (const img of images) {
       if (img.durationInFrames < 2) continue
 
-      keyframesStore._removeKeyframesForProperty(img.id, 'width')
-      keyframesStore._removeKeyframesForProperty(img.id, 'height')
-      keyframesStore._removeKeyframesForProperty(img.id, 'x')
-      keyframesStore._removeKeyframesForProperty(img.id, 'y')
-
       const chosen =
         type === 'random'
           ? (ANIM_POOL.filter((a) => a !== lastAnim)[
@@ -505,6 +501,13 @@ export const ActionPanel = memo(function ActionPanel() {
             ] ?? ANIM_POOL[0]!)
           : type
       lastAnim = chosen
+
+      keyframesStore._removeKeyframesForProperty(img.id, 'width')
+      keyframesStore._removeKeyframesForProperty(img.id, 'height')
+      keyframesStore._removeKeyframesForProperty(img.id, 'x')
+      keyframesStore._removeKeyframesForProperty(img.id, 'y')
+      keyframesStore._removeKeyframesForProperty(img.id, 'anchorX')
+      keyframesStore._removeKeyframesForProperty(img.id, 'anchorY')
 
       const resolved = resolveTransform(
         img,
@@ -516,18 +519,25 @@ export const ActionPanel = memo(function ActionPanel() {
       const baseX = resolved.x
       const baseY = resolved.y
 
-      payloads.push(
-        ...buildImageMotionKeyframes(
-          img.id,
-          img.durationInFrames,
-          chosen,
-          baseW,
-          baseH,
-          baseX,
-          baseY,
-          easingMode,
-        ),
+      const imageKeyframes = buildImageMotionKeyframes(
+        img.id,
+        img.durationInFrames,
+        chosen,
+        baseW,
+        baseH,
+        baseX,
+        baseY,
+        easingMode,
       )
+      payloads.push(...imageKeyframes)
+
+      if (chosen.startsWith('zoom-')) {
+        const dimensionKeyframes = imageKeyframes.filter(
+          (keyframe): keyframe is KeyframePayload & { property: 'width' | 'height' } =>
+            keyframe.property === 'width' || keyframe.property === 'height',
+        )
+        payloads.push(...buildZoomAnchorKeyframes(dimensionKeyframes))
+      }
     }
 
     if (payloads.length > 0) {
@@ -561,7 +571,7 @@ export const ActionPanel = memo(function ActionPanel() {
       })
 
       const easingLabel =
-        motionEasing === 'linear' ? 'trôi đều 60fps (Linear)' : 'mượt mà (Ease In-Out)'
+        motionEasing === 'linear' ? 'tốc độ đều (Linear)' : 'mượt mà (Ease In-Out)'
       toast.success(
         `Đã tạo keyframe animation Ken Burns (${easingLabel}) cho ${targetImages.length} ảnh!`,
       )
@@ -591,6 +601,8 @@ export const ActionPanel = memo(function ActionPanel() {
         keyframesStore._removeKeyframesForProperty(img.id, 'height')
         keyframesStore._removeKeyframesForProperty(img.id, 'x')
         keyframesStore._removeKeyframesForProperty(img.id, 'y')
+        keyframesStore._removeKeyframesForProperty(img.id, 'anchorX')
+        keyframesStore._removeKeyframesForProperty(img.id, 'anchorY')
         keyframesStore._removeKeyframesForProperty(img.id, 'rotation')
         keyframesStore._removeKeyframesForProperty(img.id, 'opacity')
       }
@@ -860,9 +872,9 @@ export const ActionPanel = memo(function ActionPanel() {
                   ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40 shadow-sm'
                   : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40 border border-transparent',
               )}
-              title="Chuyển động liên tục 60fps chuẩn CapCut, tốc độ đều đặn không bị khựng"
+              title="Chuyển động tốc độ đều theo tốc độ khung hình của dự án"
             >
-              Trôi đều 60fps (CapCut)
+              Tốc độ đều (Linear)
             </button>
             <button
               type="button"
@@ -896,7 +908,7 @@ export const ActionPanel = memo(function ActionPanel() {
             size="sm"
             onClick={() => handleApplyImageAnimation('zoom-in')}
             className="h-7 text-[11px] justify-start gap-1.5 px-2 border border-border/50 bg-background/40 hover:bg-secondary"
-            title="Từ từ phóng to nhẹ (100% -> 115%)"
+            title="Từ từ phóng to nhẹ (100% -> 110%)"
           >
             <ZoomIn className="w-3 h-3 text-emerald-400 shrink-0" />
             <span>Zoom In nhẹ</span>
@@ -907,7 +919,7 @@ export const ActionPanel = memo(function ActionPanel() {
             size="sm"
             onClick={() => handleApplyImageAnimation('zoom-out')}
             className="h-7 text-[11px] justify-start gap-1.5 px-2 border border-border/50 bg-background/40 hover:bg-secondary"
-            title="Từ từ thu nhỏ (115% -> 100%)"
+            title="Từ từ thu nhỏ (110% -> 100%)"
           >
             <ZoomOut className="w-3 h-3 text-amber-400 shrink-0" />
             <span>Zoom Out nhẹ</span>

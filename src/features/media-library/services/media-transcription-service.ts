@@ -1034,7 +1034,9 @@ class MediaTranscriptionService {
 
     if (insertedItems.length > 0) {
       timeline.addItems(insertedItems)
-      useSelectionStore.getState().selectItems(insertedItems.map((item) => item.id))
+      if (options.selectUpdatedClips !== false) {
+        useSelectionStore.getState().selectItems(insertedItems.map((item) => item.id))
+      }
 
       // Clean up any virtual transcriptCaptions on targetClips to prevent duplicate rendering
       for (const clip of targetClips) {

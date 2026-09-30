@@ -572,8 +572,19 @@ export const TimelineItem = memo(function TimelineItem({
                 }
               : null
 
-  // Get color based on item type - memoized
+  // Captions use one timeline color whether stored as text or subtitle items.
   const itemColorClasses = useMemo(() => {
+    const isCaption =
+      item.type === 'subtitle' ||
+      (item.type === 'text' &&
+        (item.textRole === 'caption' ||
+          item.captionSource !== undefined ||
+          (!!item.mediaId && item.label === item.text.slice(0, 48))))
+
+    if (isCaption) {
+      return 'bg-yellow-500 border border-yellow-600/80 text-white'
+    }
+
     switch (item.type) {
       case 'video':
         return 'bg-timeline-video border border-slate-700/80 text-white'
@@ -583,8 +594,7 @@ export const TimelineItem = memo(function TimelineItem({
         return 'bg-slate-900 border border-slate-700/80 text-white'
       case 'text':
         return 'bg-orange-500 border border-orange-600/80 text-white'
-      case 'subtitle':
-        return 'bg-amber-600 border border-amber-700/80 text-white'
+
       case 'shape':
         return 'bg-rose-500/40 border border-rose-400/60 text-white'
       case 'adjustment':
@@ -594,7 +604,7 @@ export const TimelineItem = memo(function TimelineItem({
       default:
         return 'bg-timeline-video border border-slate-700/80 text-white'
     }
-  }, [item.type])
+  }, [item])
 
   const { handleClick, handleDoubleClick, handleMouseDown, handleSmartTrimStart } =
     useTimelineItemPointerHandlers({

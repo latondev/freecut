@@ -11,10 +11,9 @@ interface UseAutoTranscriptCaptionsParams {
 }
 
 /**
- * Auto-enables transcript-backed captions for a video/audio clip the first time
- * its media has a transcript and no captions yet. Runs once per item+media pair
- * (tracked by a ref) and stays silent on failure — the explicit "Generate
- * Captions" action remains the user-facing fallback.
+ * Inserts transcript-backed captions on a visible timeline track the first time
+ * a video/audio clip's media has a transcript, or converts its existing virtual
+ * captions. Runs once per item+media pair and stays silent on failure.
  */
 export function useAutoTranscriptCaptions({
   item,
@@ -25,10 +24,13 @@ export function useAutoTranscriptCaptions({
   const attemptRef = useRef<string | null>(null)
 
   useEffect(() => {
+    const hasVirtualCaptions =
+      item.transcriptCaptions?.type === 'transcript' && item.transcriptCaptions.enabled
+
     if (
       !caption.canManageCaptions ||
       !caption.mediaHasTranscript ||
-      hasGeneratedCaptions ||
+      (hasGeneratedCaptions && !hasVirtualCaptions) ||
       isBroken ||
       (item.type !== 'video' && item.type !== 'audio') ||
       !item.mediaId
@@ -43,10 +45,11 @@ export function useAutoTranscriptCaptions({
     attemptRef.current = attemptKey
 
     void mediaTranscriptionService
-      .enableTranscriptCaptions(item.mediaId, {
+      .insertTranscriptAsCaptions(item.mediaId, {
         clipIds: [item.id],
-        replaceExisting: false,
+        replaceExisting: true,
         selectUpdatedClips: false,
+        splitPhrases: true,
       })
       .catch(() => {
         // Keep this silent: the explicit Generate Captions action remains the user-facing fallback.
@@ -56,6 +59,7 @@ export function useAutoTranscriptCaptions({
     caption.mediaHasTranscript,
     hasGeneratedCaptions,
     isBroken,
+    item.transcriptCaptions,
     item.id,
     item.mediaId,
     item.type,

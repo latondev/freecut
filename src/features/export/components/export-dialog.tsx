@@ -82,6 +82,9 @@ import { ExportPreviewPlayer } from './export-preview-player'
 import { useBrokenMediaIds, useMediaMetadataById } from '../deps/media-library'
 import { assessSmartCopyEligibility } from '../utils/smart-copy'
 import { resolveVideoBitrate } from '../utils/video-bitrate'
+import { convertTimelineToComposition } from '../utils/timeline-to-composition'
+import { buildTranscriptSubtitleCues } from '../utils/embedded-subtitle-export'
+import { serializeSrt } from '@/shared/utils/subtitles'
 
 export interface ExportDialogProps {
   open: boolean
@@ -394,8 +397,7 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
     const reversedClipIds = new Set(
       items
         .filter(
-          (item) =>
-            (item.type === 'video' || item.type === 'audio') && item.isReversed === true,
+          (item) => (item.type === 'video' || item.type === 'audio') && item.isReversed === true,
         )
         .map((item) => item.id),
     )
@@ -640,6 +642,45 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
     subtitleMode: exportMode === 'video' ? effectiveSubtitleMode : undefined,
     renderWholeProject,
   })
+
+  const handleExportSrtOnly = () => {
+    if (!hasTranscriptSubtitles) return
+
+    try {
+      const exportInPoint = renderWholeProject || !hasInOutPoints ? null : inPoint
+      const exportOutPoint = renderWholeProject || !hasInOutPoints ? null : outPoint
+      const composition = convertTimelineToComposition(
+        tracks,
+        items,
+        transitions,
+        fps,
+        projectWidth,
+        projectHeight,
+        exportInPoint,
+        exportOutPoint,
+        keyframes,
+      )
+      const cues = buildTranscriptSubtitleCues(composition)
+      if (cues.length === 0) {
+        toast.warning('No caption cues found in the selected export range.')
+        return
+      }
+
+      const url = URL.createObjectURL(
+        new Blob([serializeSrt(cues)], { type: 'application/x-subrip;charset=utf-8' }),
+      )
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = 'captions.srt'
+      document.body.appendChild(anchor)
+      anchor.click()
+      document.body.removeChild(anchor)
+      requestIdleCallback(() => URL.revokeObjectURL(url))
+      toast.success('Downloaded captions.srt to your browser’s configured Downloads folder.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to export SRT.')
+    }
+  }
 
   // Start export
   const handleStartExport = async () => {
@@ -1454,6 +1495,22 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
                             ? t(`export.settings.subtitleMode.${effectiveSubtitleMode}Description`)
                             : t('export.settings.noTranscriptSegments')}
                         </p>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-xs text-muted-foreground">
+                            Downloads go to your browser’s configured Downloads folder. Enable “Ask
+                            where to save each file” in browser settings to choose a location.
+                          </p>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={handleExportSrtOnly}
+                            disabled={!hasTranscriptSubtitles}
+                          >
+                            <Download className="mr-2 h-3.5 w-3.5" />
+                            Download SRT only
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </>
@@ -1574,8 +1631,7 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
                 </div>
                 <div className="flex items-center justify-between text-sm gap-2">
                   <span className="text-muted-foreground truncate">
-                    {status === 'preparing' &&
-                      (progressMessage ?? t('export.progress.preparing'))}
+                    {status === 'preparing' && (progressMessage ?? t('export.progress.preparing'))}
                     {status === 'rendering' && t('export.progress.rendering')}
                     {status === 'encoding' && t('export.progress.encoding')}
                     {status === 'finalizing' && t('export.progress.finalizing')}
@@ -1633,6 +1689,10 @@ export function ExportDialog({ open, onClose, onOpenRenderQueue }: ExportDialogP
                   : t('export.complete.videoSuccess')}
               </AlertDescription>
             </Alert>
+            <p className="text-xs text-muted-foreground">
+              Downloaded files are in your browser’s configured Downloads folder. Check the
+              browser’s download list for the exact filename and status.
+            </p>
 
             <div className="flex flex-wrap gap-x-6 gap-y-2">
               {fileSize && (

@@ -44,6 +44,22 @@ export function isTranscriptableItem(item: TimelineItem | undefined): item is Tr
   )
 }
 
+export function getTranscriptSourceItem(
+  item: TimelineItem | undefined,
+  itemById: Readonly<Record<string, TimelineItem | undefined>>,
+): TranscriptableItem | null {
+  if (isTranscriptableItem(item)) return item
+
+  const clipId =
+    item?.type === 'subtitle' && item.source.type === 'transcript'
+      ? item.source.clipId
+      : item?.type === 'text' && item.captionSource?.type === 'transcript'
+        ? item.captionSource.clipId
+        : undefined
+  const sourceItem = clipId ? itemById[clipId] : undefined
+  return isTranscriptableItem(sourceItem) ? sourceItem : null
+}
+
 function collectWords(transcript: MediaTranscript): MediaTranscriptWord[] {
   return transcript.segments
     .flatMap((segment) => segment.words ?? [])

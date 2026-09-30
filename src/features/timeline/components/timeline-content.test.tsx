@@ -323,9 +323,21 @@ describe('TimelineContent playback selection behavior', () => {
         return frameCallbacks.length
       })
 
+    let frameTime = performance.now()
+    const advanceZoomFrames = (count: number) => {
+      for (let frame = 0; frame < count; frame++) {
+        frameTime += 16
+        const callbacks = frameCallbacks.splice(0)
+        act(() => callbacks.forEach((callback) => callback(frameTime)))
+      }
+    }
+
     act(() => zoomHandlers?.handleZoomIn())
     expect(frameCallbacks).toHaveLength(1)
-    act(() => frameCallbacks.shift()?.(performance.now()))
+    advanceZoomFrames(5)
+    expect(useZoomStore.getState().level).toBeGreaterThan(ZOOM_MIN)
+    expect(useZoomStore.getState().level).toBeLessThan(0.011)
+    advanceZoomFrames(9)
 
     expect(useZoomStore.getState().level).toBeCloseTo(0.011)
     expect(useZoomStore.getState().level).not.toBeCloseTo(0.11)
@@ -333,7 +345,7 @@ describe('TimelineContent playback selection behavior', () => {
 
     act(() => zoomHandlers?.handleZoomOut())
     expect(frameCallbacks).toHaveLength(1)
-    act(() => frameCallbacks.shift()?.(performance.now()))
+    advanceZoomFrames(14)
 
     expect(useZoomStore.getState().level).toBeCloseTo(ZOOM_MIN)
     expect(scrollContainer.scrollLeft).toBeCloseTo(2)

@@ -235,6 +235,7 @@ describe('mediaTranscriptionService.insertTranscriptAsCaptions', () => {
 
     const result = await mediaTranscriptionService.insertTranscriptAsCaptions('media-1', {
       clipIds: ['clip-1'],
+      selectUpdatedClips: false,
     })
 
     expect(result).toEqual({
@@ -268,6 +269,7 @@ describe('mediaTranscriptionService.insertTranscriptAsCaptions', () => {
     expect(insertedCue?.startSeconds).toBeCloseTo(0)
     expect(insertedCue?.endSeconds).toBeCloseTo(2)
     expect(removeItems).not.toHaveBeenCalled()
+    expect(selectItemsMock).not.toHaveBeenCalled()
   })
 
   it('does not reuse an audio track when regenerating transcript captions', async () => {

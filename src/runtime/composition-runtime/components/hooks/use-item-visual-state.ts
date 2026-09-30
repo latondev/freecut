@@ -4,12 +4,17 @@ import { interpolate, useSequenceContext } from '@/runtime/composition-runtime/d
 import {
   useGizmoStore,
   useItemGizmoPreview,
+  usePlaybackStore,
   type ItemPropertiesPreview,
 } from '@/runtime/composition-runtime/deps/stores'
 import { useMaskEditorStore } from '@/runtime/composition-runtime/deps/stores'
 import type { TimelineItem } from '@/types/timeline'
 import type { ResolvedTransform, CanvasSettings, CropSettings } from '@/types/transform'
-import { toTransformStyle, getSourceDimensions } from '../../utils/transform-resolver'
+import {
+  getSourceDimensions,
+  resolveTransform,
+  toTransformStyle,
+} from '../../utils/transform-resolver'
 import { getShapePath, rotatePath } from '../../utils/shape-path'
 import { hasCornerPin } from '../../utils/corner-pin'
 import { useCompositionSpace } from '../../contexts/composition-space-context'
@@ -96,6 +101,8 @@ export function useItemVisualState(
   options: { transformDependencyPlan?: ItemTransformDependencyPlan } = {},
 ): ItemVisualState {
   const { width: renderWidth, height: renderHeight, fps } = useVideoConfig()
+  const isPlaying = usePlaybackStore((state) => state.isPlaying)
+  const playbackRate = usePlaybackStore((state) => state.playbackRate)
   const compositionSpace = useCompositionSpace()
   const projectWidth = compositionSpace?.projectWidth ?? renderWidth
   const projectHeight = compositionSpace?.projectHeight ?? renderHeight
@@ -112,6 +119,13 @@ export function useItemVisualState(
   const renderCanvas = useMemo<CanvasSettings>(
     () => ({ width: renderWidth, height: renderHeight, fps }),
     [renderWidth, renderHeight, fps],
+  )
+  const baseImageTransform = useMemo(
+    () =>
+      item.type === 'image' && !item.transformParent
+        ? resolveTransform(item, logicalCanvas, getSourceDimensions(item))
+        : null,
+    [item, logicalCanvas],
   )
 
   // Calculate frame relative to item start for keyframe interpolation.
@@ -152,6 +166,13 @@ export function useItemVisualState(
   const allItemPreviews = useGizmoStore((state) => state.preview)
 
   const itemKeyframes = useRuntimeItemKeyframes(item.id)
+  const hasAnimatedImageDimensions =
+    item.type === 'image' &&
+    !!itemKeyframes?.properties.some(
+      ({ property, keyframes }) =>
+        keyframes.length > 1 && (property === 'width' || property === 'height'),
+    )
+
   const keyframesContext = useContext(KeyframesContext)
   const liveTransformDependencySignature = useLiveTransformDependencySignature(
     item,
@@ -173,12 +194,8 @@ export function useItemVisualState(
       y: exactDependencyWorldPreview.y,
       width: exactDependencyWorldPreview.width,
       height: exactDependencyWorldPreview.height,
-      anchorX:
-        exactDependencyWorldPreview.anchorX ??
-        exactDependencyWorldPreview.width / 2,
-      anchorY:
-        exactDependencyWorldPreview.anchorY ??
-        exactDependencyWorldPreview.height / 2,
+      anchorX: exactDependencyWorldPreview.anchorX ?? exactDependencyWorldPreview.width / 2,
+      anchorY: exactDependencyWorldPreview.anchorY ?? exactDependencyWorldPreview.height / 2,
       rotation: exactDependencyWorldPreview.rotation,
       opacity: exactDependencyWorldPreview.opacity,
       cornerRadius: exactDependencyWorldPreview.cornerRadius ?? 0,
@@ -192,16 +209,11 @@ export function useItemVisualState(
           keyframes: keyframesContext.getItemKeyframes(parent.id),
           getItem: keyframesContext.getItem,
           getKeyframes: keyframesContext.getItemKeyframes,
-          getPreviewTransform: (candidateId) =>
-            allItemPreviews?.[candidateId]?.transform,
+          getPreviewTransform: (candidateId) => allItemPreviews?.[candidateId]?.transform,
         })
       : undefined
 
-    return worldToLocalTransform(
-      worldPreview,
-      sourceItem.transformParent,
-      parentWorld,
-    )
+    return worldToLocalTransform(worldPreview, sourceItem.transformParent, parentWorld)
   }, [
     allItemPreviews,
     exactDependencyPreviewItemId,
@@ -363,11 +375,35 @@ export function useItemVisualState(
       opacity: computedFinalOpacity,
     }
     const previewTransformFlags = itemPreview?.transform
-    const style = toTransformStyle(scaledResolved, renderCanvas, {
+    const zoomScaleX = baseImageTransform ? resolved.width / baseImageTransform.width : 1
+    const zoomScaleY = baseImageTransform ? resolved.height / baseImageTransform.height : 1
+    const useImageScale =
+      hasAnimatedImageDimensions &&
+      baseImageTransform !== null &&
+      baseImageTransform.width > 0 &&
+      baseImageTransform.height > 0 &&
+      Math.abs(zoomScaleX - zoomScaleY) < 0.000001 &&
+      !hasCornerPin(item.cornerPin)
+    const transformForStyle = useImageScale
+      ? {
+          ...scaledResolved,
+          width: baseImageTransform.width * scaleX,
+          height: baseImageTransform.height * scaleY,
+          anchorX: (baseImageTransform.width * scaleX) / 2,
+          anchorY: (baseImageTransform.height * scaleY) / 2,
+        }
+      : scaledResolved
+    const style = toTransformStyle(transformForStyle, renderCanvas, {
       ...item.transform,
       flipHorizontal: previewTransformFlags?.flipHorizontal ?? item.transform?.flipHorizontal,
       flipVertical: previewTransformFlags?.flipVertical ?? item.transform?.flipVertical,
     })
+    if (useImageScale) {
+      style.scale = `${zoomScaleX} ${zoomScaleY}`
+      if (isPlaying) {
+        style.transition = `scale ${1000 / (fps * Math.abs(playbackRate))}ms linear`
+      }
+    }
 
     return {
       transform: resolved,
@@ -388,6 +424,10 @@ export function useItemVisualState(
     renderCanvas,
     itemKeyframes,
     keyframesContext,
+    hasAnimatedImageDimensions,
+    baseImageTransform,
+    isPlaying,
+    playbackRate,
     liveTransformDependencySignature,
     visualFrame,
     fps,
@@ -432,8 +472,7 @@ export function useItemVisualState(
     // older item data still carries a persisted maskFeather value.
     const maskFeather = maskType === 'alpha' ? (firstMaskShape.maskFeather ?? 0) * uniformScale : 0
     const maskOpacity =
-      Math.max(0, Math.min(100, firstMaskShape.maskOpacity ?? 100)) /
-      100 *
+      (Math.max(0, Math.min(100, firstMaskShape.maskOpacity ?? 100)) / 100) *
       Math.max(0, Math.min(1, firstMask.transform.opacity ?? 1))
     const maskInvert = firstMaskShape.maskInvert ?? false
     const getPreviewPathVertices = (shapeId: string) =>
