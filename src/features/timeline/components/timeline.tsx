@@ -132,7 +132,9 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
   )
   const keyframePanelOpen = useSelectionStore((s) => s.editKeyframePanelOpen)
   const setKeyframePanelOpen = useSelectionStore((s) => s.setEditKeyframePanelOpen)
-  const hasTrackSections = videoTracks.length > 0 && audioTracks.length > 0
+  // Keep video and audio in one continuous track list. Separate A/V panes make
+  // it difficult to see and manage the whole timeline at once.
+  const hasTrackSections = false
 
   // Refs for syncing scroll between track headers and timeline content
   const trackHeadersViewportRef = useRef<HTMLDivElement>(null)
@@ -288,11 +290,8 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
   useEffect(() => {
     zoomHandlersRef.current = zoomHandlers
   }, [zoomHandlers])
-  useEffect(() => {
-    const el = trackHeadersViewportRef.current
-    if (!el) return
-
-    const handler = (event: WheelEvent) => {
+  const handleTrackHeadersWheel = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault()
         const z = zoomHandlersRef.current
@@ -319,21 +318,28 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
         return
       }
 
-      if (event.shiftKey) {
+      // Wheel over a track header scrolls the unified track list directly.
+      // Keep the Shift fallback for horizontal layouts and older input devices.
+      if (zone) {
         event.preventDefault()
+        const headerScroll = hasTrackSections
+          ? zone === 'audio'
+            ? audioTrackHeadersScrollRef.current
+            : videoTrackHeadersScrollRef.current
+          : allTrackHeadersScrollRef.current
         const contentScroll = hasTrackSections
           ? zone === 'audio'
             ? audioTrackContentScrollRef.current
             : videoTrackContentScrollRef.current
           : allTrackContentScrollRef.current
-        if (!contentScroll) return
-        contentScroll.scrollTop += event.deltaY || event.deltaX
+        const delta = event.deltaY || event.deltaX
+        const nextScrollTop = (headerScroll?.scrollTop ?? contentScroll?.scrollTop ?? 0) + delta
+        if (headerScroll) headerScroll.scrollTop = nextScrollTop
+        if (contentScroll) contentScroll.scrollTop = nextScrollTop
       }
-    }
-
-    el.addEventListener('wheel', handler, { passive: false })
-    return () => el.removeEventListener('wheel', handler)
-  }, [hasTrackSections])
+    },
+    [hasTrackSections],
+  )
 
   const handleSectionDividerMouseDown = useCallback(
     (event: React.MouseEvent) => {
@@ -785,10 +791,12 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
     dropIndicatorIndex <= visibleTracks.length
       ? dropIndicatorIndex - videoTracks.length
       : -1
-  const singleSectionKind = videoTracks.length > 0 ? 'video' : 'audio'
-  const singleSectionTracks = videoTracks.length > 0 ? videoTracks : audioTracks
-  const singleSectionHeight = videoTracks.length > 0 ? videoPaneHeight : audioPaneHeight
-  const singleSectionZoneHeight = videoTracks.length > 0 ? videoZoneHeight : audioZoneHeight
+  const singleSectionKind = 'video' as const
+  const singleSectionTracks = visibleTracks
+  const singleSectionHeight = videoPaneHeight + audioPaneHeight
+  // Keep the drop affordance compact; it must not consume the unused pane
+  // height and push the first track down.
+  const singleSectionZoneHeight = 24
   const singleDropIndicatorIndex =
     !hasTrackSections &&
     isTrackDragging &&
@@ -1015,16 +1023,20 @@ export const Timeline = memo(function Timeline({ duration }: TimelineProps) {
           </div>
 
           {/* Track labels - synced scroll (no scrollbar) */}
-          <div ref={trackHeadersViewportRef} className="flex-1 overflow-hidden relative">
+          <div
+            ref={trackHeadersViewportRef}
+            className="flex-1 overflow-hidden relative"
+            onWheelCapture={handleTrackHeadersWheel}
+          >
             <div
               ref={trackHeadersRootRef}
               className="flex h-full min-h-0 flex-col"
               style={
                 {
-                  '--timeline-video-pane-height': `${videoPaneHeight}px`,
-                  '--timeline-audio-pane-height': `${audioPaneHeight}px`,
-                  '--timeline-video-zone-height': `${videoZoneHeight}px`,
-                  '--timeline-audio-zone-height': `${audioZoneHeight}px`,
+                  '--timeline-video-pane-height': `${singleSectionHeight}px`,
+                  '--timeline-audio-pane-height': `${singleSectionHeight}px`,
+                  '--timeline-video-zone-height': `${singleSectionZoneHeight}px`,
+                  '--timeline-audio-zone-height': `${singleSectionZoneHeight}px`,
                 } as React.CSSProperties
               }
             >

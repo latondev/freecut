@@ -1,12 +1,7 @@
 import { memo } from 'react'
 import { AiPanel } from './ai-panel'
 
-/**
- * Container for the AI sidebar tab. The on-device assistant (agent that edits
- * the timeline) is hidden for now while it's still in progress — only the
- * generation tools (TTS / music) are exposed. To restore the agent, bring back
- * the segmented Assistant/Generate switcher and render `AgentChatPanel`.
- */
+/** Audio-generation tab for TTS and music; timeline editing lives in AI Editor. */
 export const AiTab = memo(function AiTab() {
   return (
     <div className="flex h-full min-h-0 flex-col">

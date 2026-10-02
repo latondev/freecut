@@ -135,28 +135,22 @@ export function ProjectCard({
     onEdit?.(project)
   }
 
-  const handleClick = (e: React.MouseEvent) => {
-    onCardClick?.(e, project)
-  }
-
   const openProject = () => {
     navigate({ to: '/editor/$projectId', params: { projectId: project.id } })
   }
 
-  const handleDoubleClick = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
+  const handleClick = (e: React.MouseEvent) => {
+    // Keep modifier-click available for multi-selection; a normal click opens
+    // the project directly so the user does not need a second Open action.
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      onCardClick?.(e, project)
+      return
+    }
     openProject()
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'Enter' && e.key !== ' ') return
-    e.preventDefault()
-    e.stopPropagation()
-    openProject()
-  }
-
-  const handleOpenClick = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
     openProject()
@@ -190,7 +184,6 @@ export function ProjectCard({
       data-project-id={project.id}
       onMouseDown={handleMouseDown}
       onClick={handleClick}
-      onDoubleClick={handleDoubleClick}
       onKeyDown={handleKeyDown}
       role="button"
       tabIndex={0}
@@ -223,14 +216,6 @@ export function ProjectCard({
             <PlayCircle className="w-12 h-12 text-muted-foreground/40" />
           </div>
         )}
-
-        {/* Hover overlay */}
-        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex items-center justify-center">
-          <Button size="sm" className="gap-2" onClick={handleOpenClick}>
-            <PlayCircle className="w-4 h-4" />
-            {t('projects.card.openProject')}
-          </Button>
-        </div>
 
         {/* Resolution badge */}
         <div className="absolute top-2 right-2 px-2 py-1 bg-black/80 backdrop-blur-sm rounded text-xs font-mono text-white pointer-events-none">

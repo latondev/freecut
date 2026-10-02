@@ -1,18 +1,17 @@
 /**
- * Registry of local LLM adapters. This is the swap point: to move the agent to
- * a stronger on-device WebGPU model, implement {@link LlmAdapter}, register it
- * here, and (optionally) change the default id. Callers resolve adapters by id
- * and never import a concrete implementation directly.
+ * Registry of LLM adapters. Callers resolve adapters by id and never import a
+ * concrete implementation directly.
  */
 
 import { ProviderRegistry } from '@/shared/utils/provider-registry'
 import { gemmaLlmAdapter } from './gemma-llm-adapter'
+import { openAiCompatibleLlmAdapter } from './openai-compatible-llm-adapter'
 import type { LlmAdapter } from './types'
 
 export const DEFAULT_LLM_ADAPTER_ID = 'gemma'
 
 const llmAdapterRegistry = new ProviderRegistry<LlmAdapter>(
-  [gemmaLlmAdapter],
+  [gemmaLlmAdapter, openAiCompatibleLlmAdapter],
   DEFAULT_LLM_ADAPTER_ID,
 )
 

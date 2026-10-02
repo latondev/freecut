@@ -242,6 +242,61 @@ const addTitle = defineTool({
 
 // --- edit tools -------------------------------------------------------------
 
+const splitRange = defineTool({
+  name: 'split_range',
+  title: 'Split clip range',
+  description:
+    'Split clips at both ends of a time range so the selected interval becomes its own segment. Targets the given clips, else the selection, else all clips spanning the full range.',
+  inputSchema: objSchema(
+    {
+      clips: CLIPS_PROP,
+      startSeconds: { type: 'number', minimum: 0, description: 'Start of the segment.' },
+      endSeconds: { type: 'number', minimum: 0, description: 'End of the segment.' },
+    },
+    ['startSeconds', 'endSeconds'],
+  ),
+  destructive: true,
+  schema: z
+    .object({
+      clips: clipsField,
+      startSeconds: z.number().min(0),
+      endSeconds: z.number().min(0),
+    })
+    .refine((args) => args.endSeconds > args.startSeconds, {
+      message: 'End time must be after start time.',
+      path: ['endSeconds'],
+    }),
+  summarize: (args) =>
+    `Split clips from ${args.startSeconds.toFixed(1)}s to ${args.endSeconds.toFixed(1)}s`,
+  execute: (args) => {
+    const { items, fps, splitItemAtFrames } = useTimelineStore.getState()
+    const selectedIds = useSelectionStore.getState().selectedItemIds
+    const targets = args.clips
+      ? resolveTargetItems(args.clips)
+      : selectedIds.length > 0
+        ? items.filter((item) => selectedIds.includes(item.id))
+        : items
+    const startFrame = Math.round(args.startSeconds * fps)
+    const endFrame = Math.round(args.endSeconds * fps)
+    const eligible = targets.filter(
+      (item) => startFrame >= item.from && endFrame <= item.from + item.durationInFrames,
+    )
+    if (eligible.length === 0) {
+      throw new Error('No selected clips contain the full time range.')
+    }
+
+    let splitCount = 0
+    for (const item of eligible) {
+      splitCount += splitItemAtFrames(item.id, [startFrame, endFrame])
+    }
+    if (splitCount === 0) throw new Error('The selected range does not cross a clip interior.')
+    return {
+      ok: true,
+      message: `Split ${eligible.length} clip${eligible.length === 1 ? '' : 's'} around the selected range.`,
+    }
+  },
+})
+
 const split = defineTool({
   name: 'split',
   title: 'Split clips',
@@ -336,6 +391,53 @@ const setVolume = defineTool({
     return {
       ok: true,
       message: `Set ${media.length} clip${media.length === 1 ? '' : 's'} to ${Math.round(args.volume * 100)}% volume.`,
+    }
+  },
+})
+
+const setImageRange = defineTool({
+  name: 'set_image_range',
+  title: 'Set image timeline range',
+  description:
+    'Place an image clip at exact absolute timeline start and end times. Use this when the user specifies a range such as 0–30 seconds; do not use trim_clip for absolute times.',
+  inputSchema: objSchema(
+    {
+      clip: { type: 'string', description: 'Image clip ref, e.g. "c2".' },
+      startSeconds: { type: 'number', minimum: 0, description: 'Absolute timeline start time.' },
+      endSeconds: { type: 'number', minimum: 0, description: 'Absolute timeline end time.' },
+    },
+    ['clip', 'startSeconds', 'endSeconds'],
+  ),
+  destructive: true,
+  schema: z
+    .object({
+      clip: z.string().min(1),
+      startSeconds: z.number().min(0),
+      endSeconds: z.number().min(0),
+    })
+    .refine((args) => args.endSeconds > args.startSeconds, {
+      message: 'End time must be after start time.',
+      path: ['endSeconds'],
+    }),
+  summarize: (args) =>
+    `Set ${args.clip} from ${args.startSeconds.toFixed(1)}s to ${args.endSeconds.toFixed(1)}s`,
+  execute: (args) => {
+    const [item] = resolveTargetItems([args.clip])
+    if (!item) throw new Error(`Clip ${args.clip} does not exist.`)
+    if (item.type !== 'image') throw new Error('This action only supports image clips.')
+
+    const fps = Math.max(1, getFps())
+    const from = Math.round(args.startSeconds * fps)
+    const end = Math.round(args.endSeconds * fps)
+    if (end <= from) throw new Error('The selected range is shorter than one frame.')
+
+    useTimelineStore.getState().updateItem(item.id, {
+      from,
+      durationInFrames: end - from,
+    })
+    return {
+      ok: true,
+      message: `Set ${args.clip} to ${args.startSeconds.toFixed(1)}–${args.endSeconds.toFixed(1)}s.`,
     }
   },
 })
@@ -462,9 +564,11 @@ export const EDITOR_TOOLS: readonly EditorAgentTool[] = [
   seekTo,
   addTitle,
   split,
+  splitRange,
   deleteClips,
   setSpeed,
   setVolume,
+  setImageRange,
   trimClip,
   addTransition,
   removeSilence,

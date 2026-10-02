@@ -20,6 +20,7 @@ import {
   Captions,
   Sticker,
   WandSparkles,
+  Bot,
   Zap,
 } from 'lucide-react'
 import { ActionPanel } from './action-panel'
@@ -60,6 +61,9 @@ import { createLogger } from '@/shared/logging/logger'
 import { useSettingsStore } from '@/features/editor/deps/settings'
 import { resolveGeneratedLayerCanvasSize } from '../utils/generated-layer-canvas-size'
 const LazyAiPanel = lazy(() => import('./ai-tab').then((m) => ({ default: m.AiTab })))
+const LazyAiEditorPanel = lazy(() =>
+  import('./ai-editor-tab').then((m) => ({ default: m.AiEditorTab })),
+)
 const LazyTranscriptEditorPanel = lazy(() =>
   importTranscriptEditorPanel().then(({ TranscriptEditorPanel }) => ({
     default: TranscriptEditorPanel,
@@ -90,11 +94,13 @@ export const MediaSidebar = memo(function MediaSidebar() {
   const prefersReducedMotion = useReducedMotion()
 
   const [aiTabActivated, setAiTabActivated] = useState(activeTab === 'ai')
+  const [aiEditorTabActivated, setAiEditorTabActivated] = useState(activeTab === 'ai-editor')
   // The Lottie panel hits an external API on mount, so keep it unmounted until
   // the tab is first opened; it then stays mounted (state preserved).
   const [lottieTabActivated, setLottieTabActivated] = useState(activeTab === 'lottie')
   useEffect(() => {
     if (activeTab === 'ai') setAiTabActivated(true)
+    if (activeTab === 'ai-editor') setAiEditorTabActivated(true)
     if (activeTab === 'lottie') setLottieTabActivated(true)
   }, [activeTab])
 
@@ -271,6 +277,11 @@ export const MediaSidebar = memo(function MediaSidebar() {
     { id: 'lottie' as const, icon: Sticker, label: t('lottieBrowser.tabLabel') },
     { id: 'transcript' as const, icon: Captions, label: t('transcript.tabLabel') },
     { id: 'ai' as const, icon: WandSparkles, label: t('editor.mediaSidebar.ai') },
+    {
+      id: 'ai-editor' as const,
+      icon: Bot,
+      label: t('editor.mediaSidebar.aiEditor', { defaultValue: 'AI Editor' }),
+    },
     { id: 'action' as const, icon: Zap, label: 'Action' },
   ]
 
@@ -822,6 +833,17 @@ export const MediaSidebar = memo(function MediaSidebar() {
               {aiTabActivated && (
                 <Suspense fallback={null}>
                   <LazyAiPanel />
+                </Suspense>
+              )}
+            </div>
+
+            {/* AI Editor Tab */}
+            <div
+              className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'ai-editor' ? 'block' : 'hidden'}`}
+            >
+              {aiEditorTabActivated && (
+                <Suspense fallback={null}>
+                  <LazyAiEditorPanel />
                 </Suspense>
               )}
             </div>

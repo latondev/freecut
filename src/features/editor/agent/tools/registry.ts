@@ -1,7 +1,4 @@
-/**
- * Editor tool registry — the single source of truth consumed by the local
- * harness, the prompt catalog, and (via `mcp.ts`) a future MCP server.
- */
+/** Single source of truth for the AI Editor action catalog and MCP tool API. */
 
 import { EDITOR_TOOLS } from './definitions'
 import type { EditorAgentTool, JsonSchema } from './types'
@@ -21,12 +18,13 @@ function argHint(schema: JsonSchema): string {
   const entries = Object.entries(schema.properties)
   if (entries.length === 0) return '{}'
   const parts = entries.map(([key, raw]) => {
-    const value = raw as { type?: string; enum?: string[] }
+    const value = raw as { type?: string; enum?: string[]; description?: string }
     const required = schema.required?.includes(key) ?? false
     const type = value.enum
       ? value.enum.map((option) => `"${option}"`).join('|')
       : (value.type ?? 'any')
-    return `${key}${required ? '' : '?'}: ${type}`
+    const description = value.description ? ` — ${value.description}` : ''
+    return `${key}${required ? '' : '?'}: ${type}${description}`
   })
   return `{ ${parts.join(', ')} }`
 }
@@ -35,7 +33,11 @@ function argHint(schema: JsonSchema): string {
 export function buildToolCatalog(): string {
   return listEditorTools()
     .map((tool) => {
-      const tag = tool.readOnly ? ' [read-only]' : tool.handoff ? ' [opens review]' : ''
+      const tag = tool.readOnly
+        ? ' [read-only]'
+        : tool.handoff
+          ? ' [opens review]'
+          : ' [mutation; requires confirmation]'
       return `- ${tool.name}${tag}: ${tool.description}\n  args: ${argHint(tool.inputSchema)}`
     })
     .join('\n')

@@ -1,3 +1,4 @@
+import type { TextMotionInPresetId } from './text-motion/text-motion-preset-ids'
 import type { TextItem } from '@/types/timeline'
 
 export type TextTemplateCategory =
@@ -49,6 +50,7 @@ export interface TextTemplateCardItem {
   label: string
   category: Exclude<TextTemplateCategory, 'all'>
   badge?: string
+  motionPresetId?: TextMotionInPresetId
   icon?:
     | 'sparkle'
     | 'music'

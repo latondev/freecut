@@ -17,9 +17,32 @@ function formatSeconds(value: number): string {
 
 export interface TimelineContextSnapshot {
   text: string
+  version: string
   fps: number
   selectedCount: number
   clipCount: number
+}
+
+export function getTimelineVersion(): string {
+  const { items, fps } = useTimelineStore.getState()
+  const { currentFrame } = usePlaybackStore.getState()
+  const { selectedItemIds } = useSelectionStore.getState()
+  return JSON.stringify({
+    fps,
+    currentFrame,
+    selectedItemIds: [...selectedItemIds].sort(),
+    items: items.map((item) => [
+      item.id,
+      item.type,
+      item.label,
+      item.trackId,
+      item.from,
+      item.durationInFrames,
+      item.sourceStart,
+      item.sourceEnd,
+      item.speed,
+    ]),
+  })
 }
 
 export function buildTimelineContext(): TimelineContextSnapshot {
@@ -51,6 +74,7 @@ export function buildTimelineContext(): TimelineContextSnapshot {
 
   return {
     text: lines.join('\n'),
+    version: getTimelineVersion(),
     fps,
     selectedCount: selectedItemIds.length,
     clipCount: clips.length,

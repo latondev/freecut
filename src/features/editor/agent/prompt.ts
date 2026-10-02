@@ -1,12 +1,11 @@
 /**
  * Prompt construction and plan parsing for the editing agent.
  *
- * The on-device model is small, so we use a single-shot, structured-output
- * strategy: given the tool catalog (generated from the registry) and a grounded
+ * The agent uses a single-shot, structured-output strategy: given the tool
+ * catalog (generated from the registry) and a grounded
  * timeline snapshot, it returns one JSON object with a short reply plus an
- * ordered list of tool calls. The agent service adds a validation-feedback retry
- * on top, which together are far more reliable on a 4B local model than
- * multi-turn ReAct tool use.
+ * ordered list of tool calls. The agent service validates every call and retries
+ * once before rejecting any plan that still contains invalid actions.
  */
 
 import type { LlmMessage } from '@/infrastructure/llm'
@@ -33,8 +32,11 @@ Respond with ONLY a single JSON object and nothing else:
 Rules:
 - Use ONLY the tools listed below, with the exact args shapes shown.
 - Target clips by their ref (e.g. "clips": ["c2","c3"]) using the timeline list.
-  Omit "clips" to act on the user's current selection.
+  Omit a target only when that specific tool says it uses the selection or a default; never assume it means all clips.
 - Put steps in the order they should run.
+- When the user gives absolute timeline start/end times for an image (e.g. image 1 from 0s to 30s), use "set_image_range" with those exact startSeconds/endSeconds. Never convert absolute end times into trim amounts.
+- Use "trim_clip" only when the user explicitly asks to remove a duration from a clip's start or end. Use "split_range" to create segment boundaries; use "split" for a single split point.
+- If the target clip or time meaning is ambiguous, ask one clarification and return "steps": []. Never guess a clip ref or whether a time is absolute vs a trim amount.
 - If the user is only chatting or asking a question, return "steps": [] and answer in "reply".
 - If the request is impossible with these tools, return "steps": [] and explain briefly in "reply".
 - Keep "reply" under 20 words. Output the JSON only — no prose, no code fences.
@@ -49,6 +51,9 @@ User: cut the silences
 User: delete the second clip and speed up the first one
 { "reply": "Deleting c2 and speeding up c1.", "steps": [ { "tool": "delete_clips", "args": { "clips": ["c2"] } }, { "tool": "set_speed", "args": { "clips": ["c1"], "speed": 2 } } ] }
 
+User: place image 1 from 0 to 30 seconds and image 2 from 31 to 90 seconds
+{ "reply": "Setting the image timeline ranges.", "steps": [ { "tool": "set_image_range", "args": { "clip": "c1", "startSeconds": 0, "endSeconds": 30 } }, { "tool": "set_image_range", "args": { "clip": "c2", "startSeconds": 31, "endSeconds": 90 } } ] }
+
 User: add a title that says Welcome
 { "reply": "Adding the title.", "steps": [ { "tool": "add_title", "args": { "text": "Welcome" } } ] }
 
@@ -57,7 +62,7 @@ User: delete the part where I talk about pricing
 { "reply": "Finding where you mention pricing.", "steps": [ { "tool": "search_transcript", "args": { "query": "pricing" } } ] }
 
 User: what can you do?
-{ "reply": "I can cut silences/fillers, add titles, split, delete, trim, change speed/volume, and add transitions.", "steps": [] }`
+{ "reply": "I can cut silences/fillers, add titles, split a time range, delete, trim, change speed/volume, and add transitions.", "steps": [] }`
 }
 
 export function buildMessages(

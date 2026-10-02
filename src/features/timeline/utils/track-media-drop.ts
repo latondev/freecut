@@ -149,24 +149,18 @@ export function planTrackMediaDropPlacements<T>(params: {
     const isVideoWithAudio = entry.mediaType === 'video' && !!entry.hasLinkedAudio
     const isVisualMedia =
       entry.mediaType === 'video' || entry.mediaType === 'image' || entry.mediaType === 'lottie'
-    const targetTrackKind = getTrackKind(targetTrack)
-    const requiredPrimaryKind: TrackKind = isVisualMedia ? 'video' : 'audio'
 
-    const allowsLinkedAudioDrop = isVideoWithAudio && targetTrackKind === 'audio'
-
-    if (targetTrackKind && targetTrackKind !== requiredPrimaryKind && !allowsLinkedAudioDrop) {
-      continue
-    }
-
+    const primaryKind = isVisualMedia ? 'video' : 'audio'
     const primaryTrackState = ensureTrackForKind(
       workingTracks,
       targetTrack,
-      isVisualMedia ? 'video' : 'audio',
+      primaryKind,
       isVisualMedia ? 'above' : 'below',
       getTrackKind(targetTrack) === null,
     )
     workingTracks = primaryTrackState.tracks
 
+    let primaryTrackId = primaryTrackState.trackId
     let placements: TrackMediaDropPlacement[]
 
     if (isVideoWithAudio) {
@@ -209,11 +203,34 @@ export function planTrackMediaDropPlacements<T>(params: {
         },
       ]
     } else {
-      const finalPosition = findNearestAvailableSpaceInTrackItems(
+      let finalPosition = findNearestAvailableSpaceInTrackItems(
         currentPosition,
         entry.durationInFrames,
-        getTrackItemsToCheck(primaryTrackState.trackId),
+        getTrackItemsToCheck(primaryTrackId),
       )
+
+      // A compatible track may be full at the drop time. Match editor
+      // behavior users expect from modern editors: create another track of
+      // the required kind instead of rejecting the drop.
+      if (finalPosition === null) {
+        const fallbackTrack = createClassicTrack({
+          tracks: workingTracks,
+          kind: primaryKind,
+          order: getAdjacentTrackOrder(
+            workingTracks,
+            targetTrack,
+            primaryKind === 'video' ? 'above' : 'below',
+          ),
+          height: targetTrack.height,
+        })
+        workingTracks = [...workingTracks, fallbackTrack]
+        primaryTrackId = fallbackTrack.id
+        finalPosition = findNearestAvailableSpaceInTrackItems(
+          currentPosition,
+          entry.durationInFrames,
+          getTrackItemsToCheck(primaryTrackId),
+        )
+      }
 
       if (finalPosition === null) {
         continue
@@ -221,7 +238,7 @@ export function planTrackMediaDropPlacements<T>(params: {
 
       placements = [
         {
-          trackId: primaryTrackState.trackId,
+          trackId: primaryTrackId,
           from: finalPosition,
           durationInFrames: entry.durationInFrames,
           mediaType: entry.mediaType,

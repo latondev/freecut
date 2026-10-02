@@ -9,11 +9,12 @@
 
 import { create } from 'zustand'
 import type { LlmMessage } from '@/infrastructure/llm'
+import { getTimelineVersion } from './timeline-context'
 import { getAgentAdapter, planRequest, runStep, type PlannedStep } from './agent-service'
 
 export type ModelStatus = 'idle' | 'loading' | 'ready' | 'error'
 export type AgentPhase = 'idle' | 'planning' | 'awaiting-confirm' | 'running'
-export type PlanStepStatus = 'pending' | 'running' | 'done' | 'error'
+export type PlanStepStatus = 'pending' | 'running' | 'done' | 'error' | 'skipped'
 
 export interface ChatMessage {
   id: string
@@ -36,6 +37,7 @@ interface AgentState {
   phase: AgentPhase
   streamingText: string
   plan: PlanStepState[] | null
+  planVersion: string | null
 
   loadModel: () => Promise<void>
   submit: (text: string) => Promise<void>
@@ -43,6 +45,7 @@ interface AgentState {
   dismissPlan: () => void
   cancel: () => void
   clearChat: () => void
+  refreshAdapter: () => void
 }
 
 let activeController: AbortController | null = null
@@ -66,6 +69,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   phase: 'idle',
   streamingText: '',
   plan: null,
+  planVersion: null,
 
   loadModel: async () => {
     const adapter = getAgentAdapter()
@@ -98,6 +102,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       phase: 'planning',
       streamingText: '',
       plan: null,
+      planVersion: null,
     }))
 
     try {
@@ -130,6 +135,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         plan: hasSteps
           ? result.steps.map((step) => ({ ...step, status: 'pending' as const }))
           : null,
+        planVersion: hasSteps ? result.timelineVersion : null,
       }))
     } catch (error) {
       if (controller.signal.aborted) {
@@ -151,8 +157,25 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   runPlan: async () => {
-    const plan = get().plan
+    const { plan, planVersion } = get()
     if (!plan || get().phase !== 'awaiting-confirm') return
+    if (!planVersion || planVersion !== getTimelineVersion()) {
+      set((state) => ({
+        messages: [
+          ...state.messages,
+          {
+            id: newId(),
+            role: 'assistant',
+            content:
+              'The timeline changed after this plan was made. Please ask again to avoid editing stale clip references.',
+          },
+        ],
+        phase: 'idle',
+        plan: null,
+        planVersion: null,
+      }))
+      return
+    }
     set({ phase: 'running' })
 
     const results: string[] = []
@@ -165,7 +188,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }))
       const step = plan[index]
       if (!step) continue
-      const result = await runStep(step)
+      const result = await runStep(step, true)
       results.push(`${result.ok ? '✓' : '✕'} ${result.message}`)
       set((state) => ({
         plan:
@@ -176,9 +199,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                   status: result.ok ? ('done' as const) : ('error' as const),
                   result: result.message,
                 }
-              : s,
+              : !result.ok && i > index
+                ? {
+                    ...s,
+                    status: 'skipped' as const,
+                    result: 'Not run because an earlier action failed.',
+                  }
+                : s,
           ) ?? null,
       }))
+      if (!result.ok) {
+        results.push('Stopped after the failed action; remaining steps were not run.')
+        break
+      }
     }
 
     set((state) => ({
@@ -187,12 +220,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         { id: newId(), role: 'assistant', content: results.join('\n') },
       ],
       phase: 'idle',
+      planVersion: null,
     }))
   },
 
   dismissPlan: () => {
     if (get().phase === 'running') return
-    set({ plan: null, phase: 'idle' })
+    set({ plan: null, planVersion: null, phase: 'idle' })
   },
 
   cancel: () => {
@@ -204,6 +238,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   clearChat: () => {
     activeController?.abort()
     activeController = null
-    set({ messages: [], plan: null, phase: 'idle', streamingText: '' })
+    set({ messages: [], plan: null, planVersion: null, phase: 'idle', streamingText: '' })
+  },
+
+  refreshAdapter: () => {
+    if (get().phase !== 'idle') return
+    const adapter = getAgentAdapter()
+    set({
+      supported: adapter.isSupported(),
+      modelStatus: 'idle',
+      loadPercent: 0,
+      loadError: null,
+    })
   },
 }))

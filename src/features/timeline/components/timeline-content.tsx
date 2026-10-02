@@ -604,6 +604,7 @@ const TimelineTrackSectionsSurface = memo(function TimelineTrackSectionsSurface(
       anchorTrackId: string | null
       firstTrackFrame: 'with-top-divider' | 'regular'
       scrollRef?: React.RefObject<HTMLDivElement | null>
+      audioAnchorTrackId?: string | null
     },
   ) => (
     <div
@@ -648,6 +649,13 @@ const TimelineTrackSectionsSurface = memo(function TimelineTrackSectionsSurface(
             height={options.zoneHeight}
             zone="audio"
             anchorTrackId={options.anchorTrackId}
+          />
+        )}
+        {options.section === 'video' && options.audioAnchorTrackId && (
+          <TimelineMediaDropZone
+            height={options.zoneHeight}
+            zone="audio"
+            anchorTrackId={options.audioAnchorTrackId}
           />
         )}
         {options.section === 'audio' && !options.anchorTrackId && (
@@ -714,6 +722,7 @@ const TimelineTrackSectionsSurface = memo(function TimelineTrackSectionsSurface(
             height: singleSectionHeight,
             zoneHeight: singleSectionZoneHeight,
             anchorTrackId: singleSectionAnchorTrackId,
+            audioAnchorTrackId: bottomZoneAnchorTrackId,
             firstTrackFrame: 'with-top-divider',
             scrollRef: allTracksScrollRef,
           })
@@ -766,7 +775,9 @@ export const TimelineContent = memo(function TimelineContent({
     () => tracks.filter((track) => getTrackKind(track) === 'audio'),
     [tracks],
   )
-  const hasTrackSections = videoTracks.length > 0 && audioTracks.length > 0
+  // Render all track kinds in one vertically scrollable list instead of
+  // splitting video and audio into independent panes.
+  const hasTrackSections = false
   const firstTrackId = tracks[0]?.id ?? null
   const lastTrackId = tracks[tracks.length - 1]?.id ?? null
   const topZoneAnchorTrackId =
@@ -1332,10 +1343,22 @@ export const TimelineContent = memo(function TimelineContent({
       return
     }
 
-    // Deselect items and markers if NOT clicking on a timeline item
+    // Clicking an empty track area should also seek the playhead. Item clicks
+    // keep their existing selection behavior; ruler clicks are handled by the
+    // scrubber path above.
     const clickedOnItem = target.closest('[data-item-id]')
 
     if (!clickedOnItem) {
+      const container = containerRef.current
+      if (container) {
+        const rect = container.getBoundingClientRect()
+        const timelineX = e.clientX - rect.left + container.scrollLeft
+        const frame = Math.max(
+          0,
+          Math.min(Math.round(pixelsToFrameRef.current(timelineX)), maxTimelineFrameRef.current),
+        )
+        usePlaybackStore.getState().setCurrentFrame(frame)
+      }
       clearItemSelection()
       selectMarker(null) // Also clear marker selection
     }
@@ -2143,7 +2166,8 @@ export const TimelineContent = memo(function TimelineContent({
       velocityZoomRef.current = 0
       const smoothingFactor = 1 - SCROLL_SMOOTHING
 
-      // Shift + scroll = vertical scroll ONLY
+      // The timeline canvas is the horizontal-scroll region. Vertical track
+      // scrolling is handled by the track-header gutter in Timeline.
       if (event.shiftKey) {
         verticalScrollTargetRef.current = getVerticalScrollTarget(event.target)
         velocityXRef.current = 0
@@ -2151,7 +2175,6 @@ export const TimelineContent = memo(function TimelineContent({
         velocityYRef.current = velocityYRef.current * smoothingFactor + delta * SCROLL_SMOOTHING
       } else {
         verticalScrollTargetRef.current = null
-        // Default scroll = horizontal scroll ONLY
         velocityYRef.current = 0
         const delta = (event.deltaY || event.deltaX) * SCROLL_SENSITIVITY
         velocityXRef.current = velocityXRef.current * smoothingFactor + delta * SCROLL_SMOOTHING
@@ -2175,12 +2198,13 @@ export const TimelineContent = memo(function TimelineContent({
     startMomentumScroll,
   ])
 
-  const singleSectionTracks = videoTracks.length > 0 ? videoTracks : audioTracks
-  const singleSectionKind = videoTracks.length > 0 ? 'video' : 'audio'
-  const singleSectionHeight = videoTracks.length > 0 ? videoPaneHeight : audioPaneHeight
-  const singleSectionZoneHeight = videoTracks.length > 0 ? videoZoneHeight : audioZoneHeight
-  const singleSectionAnchorTrackId =
-    videoTracks.length > 0 ? topZoneAnchorTrackId : bottomZoneAnchorTrackId
+  const singleSectionTracks = tracks
+  const singleSectionKind = 'video' as const
+  const singleSectionHeight = videoPaneHeight + audioPaneHeight
+  // Keep the drop affordance compact so tracks start immediately below the
+  // ruler instead of being pushed down by unused pane height.
+  const singleSectionZoneHeight = 24
+  const singleSectionAnchorTrackId = firstTrackId
   const videoSectionHasOverflow = useTrackSectionHasOverflow(
     videoTracksScrollRef,
     hasTrackSections,
@@ -2223,10 +2247,10 @@ export const TimelineContent = memo(function TimelineContent({
       className="flex flex-1 min-h-0 min-w-0 bg-background/30"
       style={
         {
-          '--timeline-video-pane-height': `${videoPaneHeight}px`,
-          '--timeline-audio-pane-height': `${audioPaneHeight}px`,
-          '--timeline-video-zone-height': `${videoZoneHeight}px`,
-          '--timeline-audio-zone-height': `${audioZoneHeight}px`,
+          '--timeline-video-pane-height': `${singleSectionHeight}px`,
+          '--timeline-audio-pane-height': `${singleSectionHeight}px`,
+          '--timeline-video-zone-height': `${singleSectionZoneHeight}px`,
+          '--timeline-audio-zone-height': `${singleSectionZoneHeight}px`,
         } as React.CSSProperties
       }
     >

@@ -1,18 +1,8 @@
 /**
- * MCP adapter for the editor tool registry.
- *
- * This is the future-facing seam. The Model Context Protocol describes tools as
- * `{ name, description, inputSchema }` (listing) and `tools/call` → content
- * blocks (invocation) — which is exactly the shape our registry already has. The
- * two functions here are everything an MCP *server* would delegate to; standing
- * one up later is just choosing a transport:
- *
- *   • in-browser: a `postMessage` / `WebSocket` / WebRTC transport so an external
- *     MCP client (or our own cloud agent) can drive this editor tab;
- *   • headless: the edit CLI wraps the same `callTool` over stdio.
- *
- * Keeping this mapping in-tree (and tested) guarantees the registry stays
- * MCP-compatible as tools are added, without yet shipping a server.
+ * In-process MCP-compatible API for editor tools. `listMcpTools` and
+ * `callMcpTool` are the stable tool boundary used by the agent and can be wrapped
+ * by a host transport later. This module does not open a network or stdio server;
+ * a transport must add authentication and preserve the editor's plan/confirm gate.
  */
 
 import { getEditorTool, listEditorTools } from './registry'
@@ -50,8 +40,12 @@ export function listMcpTools(): McpToolDescriptor[] {
   }))
 }
 
-/** MCP `tools/call`. */
-export async function callMcpTool(name: string, args: unknown): Promise<McpCallResult> {
+/** MCP `tools/call`; mutations require an explicit editor approval from the caller. */
+export async function callMcpTool(
+  name: string,
+  args: unknown,
+  options: { confirmedByUser?: boolean } = {},
+): Promise<McpCallResult> {
   const tool = getEditorTool(name)
   if (!tool) {
     return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true }
@@ -61,6 +55,14 @@ export async function callMcpTool(name: string, args: unknown): Promise<McpCallR
   if (!validation.ok) {
     return {
       content: [{ type: 'text', text: `Invalid arguments — ${validation.error}` }],
+      isError: true,
+    }
+  }
+  if (!tool.readOnly && !options.confirmedByUser) {
+    return {
+      content: [
+        { type: 'text', text: 'This editor action requires user approval in the plan preview.' },
+      ],
       isError: true,
     }
   }

@@ -1,12 +1,8 @@
 /**
- * Local LLM adapter contract.
- *
- * FreeCut runs language models fully on-device (WebGPU/WASM) to stay
- * privacy-first and offline-capable. The {@link LlmAdapter} interface is the
- * single seam every consumer (the editing agent, future features) talks to, so
- * the concrete model — today Gemma via transformers.js — can be swapped for a
- * stronger local WebGPU model without touching callers. Register new adapters
- * in `llm-registry.ts`.
+ * LLM adapter contract shared by on-device and remote providers. The
+ * {@link LlmAdapter} interface is the seam consumers use so the concrete model
+ * can change without coupling editor features to its transport. Register new
+ * adapters in `llm-registry.ts`.
  */
 
 export type LlmRole = 'system' | 'user' | 'assistant'

@@ -86,7 +86,7 @@ describe('planTrackMediaDropPlacements', () => {
     ])
   })
 
-  it('rejects visual media dropped on an audio track', () => {
+  it('routes visual media dropped on an audio track to a video track', () => {
     const tracks = createDefaultClassicTracks(80)
 
     const result = planTrackMediaDropPlacements({
@@ -104,10 +104,12 @@ describe('planTrackMediaDropPlacements', () => {
       dropTargetTrackId: 'track-2',
     })
 
-    expect(result.plannedItems).toEqual([])
+    expect(result.plannedItems[0]!.placements).toEqual([
+      expect.objectContaining({ trackId: 'track-1', mediaType: 'image', from: 12 }),
+    ])
   })
 
-  it('rejects audio media dropped on a video track', () => {
+  it('routes audio media dropped on a video track to an audio track', () => {
     const tracks = createDefaultClassicTracks(80)
 
     const result = planTrackMediaDropPlacements({
@@ -125,7 +127,32 @@ describe('planTrackMediaDropPlacements', () => {
       dropTargetTrackId: 'track-1',
     })
 
-    expect(result.plannedItems).toEqual([])
+    expect(result.plannedItems[0]!.placements).toEqual([
+      expect.objectContaining({ trackId: 'track-2', mediaType: 'audio', from: 12 }),
+    ])
+  })
+
+  it('places media after an occupied range on the compatible target track', () => {
+    const tracks = createDefaultClassicTracks(80)
+    const result = planTrackMediaDropPlacements({
+      entries: [
+        {
+          payload: { id: 'media-3' },
+          label: 'full-track.mp4',
+          mediaType: 'video',
+          durationInFrames: 60,
+        },
+      ],
+      dropFrame: 10,
+      tracks,
+      existingItems: [{ trackId: 'track-1', from: 0, durationInFrames: 120 }],
+      dropTargetTrackId: 'track-1',
+    })
+
+    expect(result.plannedItems[0]!.placements[0]).toEqual(
+      expect.objectContaining({ trackId: 'track-1', mediaType: 'video', from: 120 }),
+    )
+    expect(result.tracks).toHaveLength(tracks.length)
   })
 })
 

@@ -1,19 +1,17 @@
 /**
- * Orchestration glue between the UI store, the local LLM adapter, and the tool
- * registry. Pure functions + a thin façade — no React, no Zustand here.
+ * Orchestration glue between the UI store, the configured LLM adapter, and the
+ * tool registry. Pure functions + a thin façade — no React, no Zustand here.
  *
- * The key reliability mechanism for a small local model is the
- * **validation-feedback retry**: when the model emits non-JSON or calls a tool
- * that doesn't exist / with bad args, we feed the exact problem back and let it
- * correct itself once before giving up. Combined with clip-ref grounding, this
- * is what makes Gemma's tool calls usable.
+ * The key reliability mechanism is the **validation-feedback retry**: when the
+ * model emits non-JSON or calls a tool that doesn't exist / with bad args, we
+ * feed the exact problem back and let it correct itself once before giving up.
  */
 
-import { getDefaultLlmAdapter, type LlmAdapter, type LlmMessage } from '@/infrastructure/llm'
+import { getLlmAdapter, type LlmAdapter, type LlmMessage } from '@/infrastructure/llm'
 import { createLogger } from '@/shared/logging/logger'
 import { buildTimelineContext } from './timeline-context'
 import { buildMessages, parsePlan } from './prompt'
-import { getEditorTool } from './tools'
+import { callMcpTool, getEditorTool } from './tools'
 
 const logger = createLogger('AgentService')
 
@@ -35,6 +33,7 @@ export interface PlanResult {
   /** Tool names the model asked for that were invalid (dropped after retry). */
   dropped: string[]
   raw: string
+  timelineVersion: string
 }
 
 interface DroppedStep {
@@ -43,7 +42,7 @@ interface DroppedStep {
 }
 
 export function getAgentAdapter(): LlmAdapter {
-  return getDefaultLlmAdapter()
+  return getLlmAdapter('openai-compatible')
 }
 
 /** Validate raw model steps against the registry, dropping anything invalid. */
@@ -167,8 +166,25 @@ export async function planRequest(
     }
   }
 
+  if (dropped.length > 0) {
+    return {
+      reply:
+        'I could not safely map every requested edit to a valid FreeCut action. Please clarify the target clip and exact timing.',
+      steps: [],
+      dropped: dropped.map((entry) => entry.tool),
+      raw,
+      timelineVersion: context.version,
+    }
+  }
+
   const finalReply = reply || (actionSteps.length > 0 ? 'Here is the plan.' : raw.trim())
-  return { reply: finalReply, steps: actionSteps, dropped: dropped.map((entry) => entry.tool), raw }
+  return {
+    reply: finalReply,
+    steps: actionSteps,
+    dropped: [],
+    raw,
+    timelineVersion: context.version,
+  }
 }
 
 /** Partition planned steps into read-only "gather" steps and mutating actions. */
@@ -187,13 +203,10 @@ export interface StepRunResult {
   message: string
 }
 
-export async function runStep(step: PlannedStep): Promise<StepRunResult> {
-  const tool = getEditorTool(step.tool)
-  if (!tool) return { ok: false, message: `Unknown tool: ${step.tool}` }
-  try {
-    const result = await tool.execute(step.args)
-    return { ok: result.ok, message: result.message }
-  } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : 'Step failed.' }
+export async function runStep(step: PlannedStep, confirmedByUser = false): Promise<StepRunResult> {
+  const result = await callMcpTool(step.tool, step.args, { confirmedByUser })
+  return {
+    ok: !result.isError,
+    message: result.content.map((content) => content.text).join('\n'),
   }
 }

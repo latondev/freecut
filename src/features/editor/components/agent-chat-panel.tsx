@@ -15,6 +15,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/shared/ui/cn'
+
 import { useAgentStore, type PlanStepState } from '../agent'
 
 const SUGGESTIONS: { key: string; text: string }[] = [
@@ -61,8 +62,15 @@ const PlanCard = memo(function PlanCard() {
             <StepIcon status={step.status} />
             <div className="min-w-0">
               <span className="text-foreground">{step.summary}</span>
-              {step.status === 'error' && step.result && (
-                <span className="block text-[11px] text-destructive">{step.result}</span>
+              {(step.status === 'error' || step.status === 'skipped') && step.result && (
+                <span
+                  className={cn(
+                    'block text-[11px]',
+                    step.status === 'error' ? 'text-destructive' : 'text-muted-foreground',
+                  )}
+                >
+                  {step.result}
+                </span>
               )}
             </div>
           </li>
@@ -104,7 +112,11 @@ const PlanCard = memo(function PlanCard() {
   )
 })
 
-export const AgentChatPanel = memo(function AgentChatPanel() {
+export const AgentChatPanel = memo(function AgentChatPanel({
+  enabled = true,
+}: {
+  enabled?: boolean
+}) {
   const { t } = useTranslation()
   const supported = useAgentStore((s) => s.supported)
   const messages = useAgentStore((s) => s.messages)
@@ -144,7 +156,7 @@ export const AgentChatPanel = memo(function AgentChatPanel() {
     [busy, input, send],
   )
 
-  if (!supported) {
+  if (!enabled || !supported) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <Sparkles className="h-6 w-6 text-muted-foreground" />
@@ -153,8 +165,9 @@ export const AgentChatPanel = memo(function AgentChatPanel() {
         </p>
         <p className="text-xs text-muted-foreground">
           {t('agent.unsupported.body', {
-            defaultValue:
-              'The on-device assistant needs WebGPU. Try a recent Chrome or Edge browser.',
+            defaultValue: enabled
+              ? 'Enter a valid base URL and model in AI Editor settings, then save.'
+              : 'Save AI Editor settings before chatting.',
           })}
         </p>
       </div>
@@ -247,7 +260,7 @@ export const AgentChatPanel = memo(function AgentChatPanel() {
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {t('agent.empty.intro', {
                   defaultValue:
-                    'Ask me to edit your timeline in plain language. I run fully on-device — nothing leaves your computer. I propose a plan first; you confirm before anything changes.',
+                    'Ask me to edit your timeline in plain language. Your configured AI endpoint receives your request and timeline context. I propose a plan first; you confirm before anything changes.',
                 })}
               </p>
             </PopoverContent>

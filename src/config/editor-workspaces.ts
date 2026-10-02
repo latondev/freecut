@@ -18,6 +18,7 @@ export type EditorSidebarTab =
   | 'lottie'
   | 'transcript'
   | 'ai'
+  | 'ai-editor'
   | 'action'
 export type EditorClipInspectorTab = 'video' | 'motion' | 'audio' | 'effects'
 
@@ -84,6 +85,7 @@ const SIDEBAR_TABS: readonly EditorSidebarTab[] = [
   'lottie',
   'transcript',
   'ai',
+  'ai-editor',
   'action',
 ]
 const CLIP_INSPECTOR_TABS: readonly EditorClipInspectorTab[] = [

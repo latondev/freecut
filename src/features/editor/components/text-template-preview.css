@@ -1,0 +1,158 @@
+.capcut-template-preview {
+  background-image: radial-gradient(ellipse at center, rgb(255 255 255 / 8%), transparent 70%);
+}
+
+.capcut-template-preview__copy {
+  transform: translateZ(0);
+}
+
+.group:hover .capcut-template-preview__copy[data-template-motion='pop'],
+.group:focus-visible .capcut-template-preview__copy[data-template-motion='pop'] {
+  animation: capcut-template-pop 620ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.group:hover .capcut-template-preview__copy[data-template-motion='fade-up'],
+.group:focus-visible .capcut-template-preview__copy[data-template-motion='fade-up'] {
+  animation: capcut-template-fade-up 650ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.group:hover .capcut-template-preview__copy[data-template-motion='rise'],
+.group:focus-visible .capcut-template-preview__copy[data-template-motion='rise'] {
+  animation: capcut-template-rise 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.group:hover .capcut-template-preview__copy[data-template-motion='cascade'],
+.group:focus-visible .capcut-template-preview__copy[data-template-motion='cascade'] {
+  animation: capcut-template-cascade 720ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.group:hover .capcut-template-preview__copy[data-template-motion='typewriter'],
+.group:focus-visible .capcut-template-preview__copy[data-template-motion='typewriter'] {
+  animation: capcut-template-typewriter 700ms steps(12, end) both;
+}
+
+.group:hover .capcut-template-preview__copy[data-template-motion='slide-mask'],
+.group:focus-visible .capcut-template-preview__copy[data-template-motion='slide-mask'] {
+  animation: capcut-template-slide-mask 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.group:hover .capcut-template-preview__copy[data-template-motion='blur-in'],
+.group:focus-visible .capcut-template-preview__copy[data-template-motion='blur-in'] {
+  animation: capcut-template-blur-in 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.group:hover .capcut-template-preview__copy[data-template-motion='wave-in'],
+.group:focus-visible .capcut-template-preview__copy[data-template-motion='wave-in'] {
+  animation: capcut-template-wave-in 720ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes capcut-template-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.72) translateY(8px);
+  }
+  72% {
+    opacity: 1;
+    transform: scale(1.08) translateY(-1px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes capcut-template-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes capcut-template-rise {
+  from {
+    filter: blur(4px);
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+  }
+  to {
+    filter: blur(0);
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes capcut-template-cascade {
+  from {
+    opacity: 0;
+    transform: translateY(10px) rotate(-2deg) scale(0.96);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(-2px) rotate(0.5deg) scale(1.02);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(0) scale(1);
+  }
+}
+
+@keyframes capcut-template-typewriter {
+  from {
+    clip-path: inset(0 100% 0 0);
+    opacity: 0.4;
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+  }
+}
+
+@keyframes capcut-template-slide-mask {
+  from {
+    clip-path: inset(0 100% 0 0);
+    transform: translateX(-14px);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    transform: translateX(0);
+  }
+}
+
+@keyframes capcut-template-blur-in {
+  from {
+    filter: blur(9px);
+    opacity: 0;
+    transform: scale(1.04);
+  }
+  to {
+    filter: blur(0);
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes capcut-template-wave-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) rotate(-5deg) scale(0.9);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(-2px) rotate(2deg) scale(1.04);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group:hover .capcut-template-preview__copy,
+  .group:focus-visible .capcut-template-preview__copy {
+    animation: none;
+  }
+}

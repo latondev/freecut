@@ -55,6 +55,11 @@ import {
   type TextTemplateCategory,
   type TextTemplateCardItem,
 } from '@/shared/typography/text-templates-catalog'
+import {
+  createTextTemplateMotion,
+  getTextTemplateMotionPresetId,
+} from '@/shared/typography/text-template-motion'
+import './text-template-preview.css'
 
 type MainTextTab = 'templates' | 'effects'
 
@@ -124,39 +129,59 @@ function renderCardIcon(icon?: TextTemplateCardItem['icon']): React.ReactNode {
   return (icon && CARD_ICONS[icon]) || CARD_ICONS.sparkle
 }
 
-function renderTemplateCssPreview(template: TextTemplateCardItem) {
+function renderTemplatePreview(template: TextTemplateCardItem) {
   const { stroke, textShadow } = template.patch
-  const webkitStroke = stroke ? `${stroke.width * 0.8}px ${stroke.color}` : undefined
+  const fontSize = Math.max(12, Math.min(20, (template.patch.fontSize ?? 60) * 0.25))
+  const webkitStroke = stroke ? `${Math.min(1.2, stroke.width * 0.4)}px ${stroke.color}` : undefined
   const shadow = textShadow
-    ? `${textShadow.offsetX}px ${textShadow.offsetY}px ${textShadow.blur * 0.6}px ${textShadow.color}`
+    ? `${textShadow.offsetX * 0.5}px ${textShadow.offsetY * 0.5}px ${textShadow.blur * 0.45}px ${textShadow.color}`
     : undefined
 
   return (
-    <div className="flex-1 flex flex-col justify-center items-center py-2 px-1 text-center w-full">
-      {template.sample.tag && (
-        <div className="flex items-center gap-1 mb-1">
-          {!template.badge && renderCardIcon(template.icon)}
-          <span className="text-[8px] font-bold tracking-widest text-zinc-400 uppercase">
-            {template.sample.tag}
-          </span>
-        </div>
+    <div className="capcut-template-preview relative flex min-h-18 flex-1 items-center justify-center overflow-hidden rounded-md p-2">
+      {template.previewImage && (
+        <img
+          src={template.previewImage}
+          alt=""
+          className="absolute inset-0 h-full w-full object-contain opacity-55 transition-opacity duration-200 group-hover:opacity-35"
+          draggable={false}
+          loading="lazy"
+        />
       )}
-      <span
-        className="text-[13px] font-extrabold leading-snug truncate max-w-full drop-shadow-md select-none"
-        style={{
-          color: template.patch.color,
-          fontFamily: template.patch.fontFamily,
-          WebkitTextStroke: webkitStroke,
-          textShadow: shadow,
-        }}
+      <div className="absolute inset-0 bg-linear-to-b from-black/10 via-black/15 to-black/60" />
+      <div
+        className="capcut-template-preview__copy relative z-1 flex max-w-full flex-col items-center text-center"
+        data-template-motion={getTextTemplateMotionPresetId(template)}
       >
-        {template.sample.title}
-      </span>
-      {template.sample.subtitle && (
-        <span className="text-[8px] text-zinc-400 font-medium truncate max-w-full mt-1 select-none">
-          {template.sample.subtitle}
+        {template.sample.tag && (
+          <div className="mb-1 flex items-center gap-1">
+            {!template.badge && renderCardIcon(template.icon)}
+            <span className="text-[8px] font-bold uppercase tracking-widest text-zinc-200/90">
+              {template.sample.tag}
+            </span>
+          </div>
+        )}
+        <span
+          className="line-clamp-2 max-w-full text-balance font-extrabold leading-snug drop-shadow-md antialiased"
+          style={{
+            color: template.patch.color,
+            fontFamily: `"${template.patch.fontFamily}", "CapCut Sans Text", sans-serif`,
+            fontSize: `${fontSize}px`,
+            fontWeight: template.patch.fontWeight,
+            fontStyle: template.patch.fontStyle,
+            letterSpacing: `${(template.patch.letterSpacing ?? 0) * 0.3}px`,
+            WebkitTextStroke: webkitStroke,
+            textShadow: shadow,
+          }}
+        >
+          {template.sample.title}
         </span>
-      )}
+        {template.sample.subtitle && (
+          <span className="mt-1 max-w-full truncate text-[8px] font-medium text-white/80 drop-shadow">
+            {template.sample.subtitle}
+          </span>
+        )}
+      </div>
     </div>
   )
 }
@@ -199,20 +224,7 @@ const TextTemplateCard = memo(function TextTemplateCard({
         </span>
       )}
 
-      {/* Main Poster Preview Area */}
-      {template.previewImage ? (
-        <div className="flex-1 flex items-center justify-center p-1 w-full overflow-hidden min-h-[72px]">
-          <img
-            src={template.previewImage}
-            alt={template.label}
-            className="w-full h-auto max-h-[78px] object-contain rounded-md select-none group-hover:scale-105 transition-transform duration-200"
-            draggable={false}
-            loading="lazy"
-          />
-        </div>
-      ) : (
-        renderTemplateCssPreview(template)
-      )}
+      {renderTemplatePreview(template)}
 
       {/* Card Footer Bar */}
       <div className="pt-1.5 border-t border-zinc-800/60 flex items-center justify-between text-[9px] text-zinc-400 group-hover:text-zinc-200">
@@ -423,6 +435,7 @@ export const TextTabPanel = memo(function TextTabPanel({ onSuppressClick }: Text
         {
           text: template.defaultText,
           ...template.patch,
+          textMotion: createTextTemplateMotion(template),
         },
         template.label,
       )
@@ -440,6 +453,7 @@ export const TextTabPanel = memo(function TextTabPanel({ onSuppressClick }: Text
         textOverrides: {
           text: template.defaultText,
           ...template.patch,
+          textMotion: createTextTemplateMotion(template),
         },
       }
       event.dataTransfer.setData('application/json', JSON.stringify(dragData))
