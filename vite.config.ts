@@ -106,6 +106,13 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    proxy: {
+      '/api/genmax': {
+        target: 'https://api.genmax.io',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/genmax/, ''),
+      },
+    },
     headers: {
       'Cross-Origin-Embedder-Policy': 'require-corp',
       'Cross-Origin-Opener-Policy': 'same-origin',

@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, shell, session, screen, ipcMain } = require('e
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const https = require('https');
 
 // 1. Single Instance Lock - Ensure only one instance of FreeCut runs
 const gotTheLock = app.requestSingleInstanceLock();
@@ -118,6 +119,36 @@ function startLocalServer(distDir) {
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
       try {
+        if (req.url && req.url.startsWith('/api/genmax')) {
+          const targetPath = req.url.replace(/^\/api\/genmax/, '');
+          const proxyReq = https.request(
+            `https://api.genmax.io${targetPath}`,
+            {
+              method: req.method,
+              headers: {
+                ...req.headers,
+                host: 'api.genmax.io',
+              },
+            },
+            (proxyRes) => {
+              const headers = { ...proxyRes.headers };
+              headers['access-control-allow-origin'] = '*';
+              headers['access-control-allow-headers'] = '*';
+              headers['access-control-allow-methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+              headers['cross-origin-resource-policy'] = 'cross-origin';
+              res.writeHead(proxyRes.statusCode || 200, headers);
+              proxyRes.pipe(res);
+            },
+          );
+          proxyReq.on('error', (err) => {
+            console.error('[Desktop] GenMax proxy error:', err);
+            res.writeHead(502, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'GenMax proxy connection error' }));
+          });
+          req.pipe(proxyReq);
+          return;
+        }
+
         const decodedUrl = decodeURI((req.url || '/').split('?')[0]);
         const ext = path.extname(decodedUrl).toLowerCase();
         let filePath = path.join(distDir, decodedUrl);
@@ -393,8 +424,15 @@ app.whenReady().then(async () => {
   // Ensure headers for any internal interceptor
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const responseHeaders = { ...details.responseHeaders };
-    responseHeaders['Cross-Origin-Opener-Policy'] = ['same-origin'];
-    responseHeaders['Cross-Origin-Embedder-Policy'] = ['require-corp'];
+    if (details.url.includes('genmax.io')) {
+      responseHeaders['Access-Control-Allow-Origin'] = ['*'];
+      responseHeaders['Access-Control-Allow-Headers'] = ['*'];
+      responseHeaders['Access-Control-Allow-Methods'] = ['GET, POST, PUT, DELETE, OPTIONS'];
+      responseHeaders['Cross-Origin-Resource-Policy'] = ['cross-origin'];
+    } else {
+      responseHeaders['Cross-Origin-Opener-Policy'] = ['same-origin'];
+      responseHeaders['Cross-Origin-Embedder-Policy'] = ['require-corp'];
+    }
     callback({ responseHeaders });
   });
 

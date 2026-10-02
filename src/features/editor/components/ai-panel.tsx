@@ -83,31 +83,14 @@ import {
 import { insertGeneratedAudioOnNewTrack } from '../utils/insert-generated-audio'
 import { getLanguageDisplayName, insertTextAtCursor } from '../utils/tts-ui-helpers'
 import {
+  DEFAULT_AUDIO_GEN_VOICES,
   getCachedGenMaxVoiceCatalog,
   loadGenMaxVoiceCatalog,
+  generateGenMaxSpeechFile,
   type AudioGenProvider,
   type AudioGenVoice,
   type AudioGenVoiceCatalog,
 } from '../services/audio-gen-voices-service'
-
-const AUDIO_GEN_VOICES: Record<AudioGenProvider, AudioGenVoice[]> = {
-  elevenlabs: [
-    { id: 'rachel', label: 'Rachel — Calm, Clear' },
-    { id: 'adam', label: 'Adam — Deep, Narration' },
-    { id: 'antoni', label: 'Antoni — Warm, Conversational' },
-  ],
-  minimax: [
-    { id: 'English_expressive_narrator', label: 'Expressive Narrator' },
-    { id: 'English_radiant_girl', label: 'Radiant Girl' },
-    { id: 'English_magnetic_voiced_man', label: 'Magnetic-voiced Male' },
-    { id: 'English_SereneWoman', label: 'Serene Woman' },
-  ],
-  capcut: [
-    { id: 'serene-man', label: 'Serene Man — Solemn, Cinematic, Captivating' },
-    { id: 'radiant-girl', label: 'Radiant Girl — Bright, Friendly' },
-    { id: 'deep-narrator', label: 'Deep Narrator — Documentary' },
-  ],
-}
 
 const AUDIO_GEN_PROVIDER_LABELS: Record<AudioGenProvider, string> = {
   elevenlabs: 'ElevenLabs',
@@ -259,16 +242,28 @@ export const AiPanel = memo(function AiPanel() {
   const showNotification = useMediaLibraryStore((state) => state.showNotification)
 
   const [audioGenProvider, setAudioGenProvider] = useState<AudioGenProvider>('minimax')
-  const [audioGenVoice, setAudioGenVoice] = useState('English_expressive_narrator')
-  const [genMaxApiKey, setGenMaxApiKey] = useState('')
-  const [genMaxVoiceCatalog, setGenMaxVoiceCatalog] = useState<AudioGenVoiceCatalog>({
-    elevenlabs: AUDIO_GEN_VOICES.elevenlabs,
-    minimax: AUDIO_GEN_VOICES.minimax,
-    capcut: AUDIO_GEN_VOICES.capcut,
+  const [genMaxApiKey, setGenMaxApiKey] = useState(() => {
+    try {
+      return localStorage.getItem('freecut:genmax-api-key') || ''
+    } catch {
+      return ''
+    }
   })
+  const [genMaxVoiceCatalog, setGenMaxVoiceCatalog] = useState<AudioGenVoiceCatalog>(() => ({
+    elevenlabs: [...DEFAULT_AUDIO_GEN_VOICES.elevenlabs],
+    minimax: [...DEFAULT_AUDIO_GEN_VOICES.minimax],
+    capcut: [...DEFAULT_AUDIO_GEN_VOICES.capcut],
+  }))
+  const [audioGenVoice, setAudioGenVoice] = useState(
+    () => DEFAULT_AUDIO_GEN_VOICES.minimax[0]?.id || '',
+  )
   const [audioGenVoiceSearch, setAudioGenVoiceSearch] = useState('')
   const [isLoadingAudioGenVoices, setIsLoadingAudioGenVoices] = useState(false)
+  const [audioGenVoiceLoadProgress, setAudioGenVoiceLoadProgress] = useState<string | null>(null)
   const [audioGenVoiceError, setAudioGenVoiceError] = useState<string | null>(null)
+  const [audioGenVoiceSuccess, setAudioGenVoiceSuccess] = useState<string | null>(null)
+  const [audioGenPreviewPlayingId, setAudioGenPreviewPlayingId] = useState<string | null>(null)
+  const audioGenPreviewAudioRef = useRef<HTMLAudioElement | null>(null)
   const [ttsText, setTtsText] = useState(() => t('editor.aiPanel.defaultTtsPrompt'))
   const [ttsEngine, setTtsEngine] = useState<StoredTtsEngine>(() => getStoredTtsEngine())
   const [ttsKokoroVoice, setTtsKokoroVoice] = useState<KokoroTtsVoice>('af_heart')
@@ -316,6 +311,8 @@ export const AiPanel = memo(function AiPanel() {
     return () => {
       musicAbortRef.current?.abort()
       musicAbortRef.current = null
+      audioGenPreviewAudioRef.current?.pause()
+      audioGenPreviewAudioRef.current = null
       for (const url of urls) {
         URL.revokeObjectURL(url)
       }
@@ -341,10 +338,38 @@ export const AiPanel = memo(function AiPanel() {
     }
   }, [])
 
+  const handleApiKeyChange = (key: string) => {
+    setGenMaxApiKey(key)
+    try {
+      localStorage.setItem('freecut:genmax-api-key', key)
+    } catch {}
+  }
+
+  const togglePlayVoicePreview = useCallback(
+    (voiceItem?: AudioGenVoice) => {
+      if (!voiceItem?.previewUrl) return
+      if (audioGenPreviewPlayingId === voiceItem.id) {
+        audioGenPreviewAudioRef.current?.pause()
+        setAudioGenPreviewPlayingId(null)
+        return
+      }
+      if (!audioGenPreviewAudioRef.current) {
+        audioGenPreviewAudioRef.current = new Audio()
+        audioGenPreviewAudioRef.current.onended = () => setAudioGenPreviewPlayingId(null)
+        audioGenPreviewAudioRef.current.onerror = () => setAudioGenPreviewPlayingId(null)
+      }
+      audioGenPreviewAudioRef.current.src = voiceItem.previewUrl
+      audioGenPreviewAudioRef.current.play().catch(() => setAudioGenPreviewPlayingId(null))
+      setAudioGenPreviewPlayingId(voiceItem.id)
+    },
+    [audioGenPreviewPlayingId],
+  )
+
   const isKokoroSupported = kokoroTtsService.isSupported()
   const isMossSupported = mossTtsService.isSupported()
   const isSupertonicSupported = supertonicTtsService.isSupported()
-  const supportsNativeTtsSpeed = ttsEngine === 'kokoro' || ttsEngine === 'supertonic'
+  const supportsNativeTtsSpeed =
+    ttsEngine === 'kokoro' || ttsEngine === 'supertonic' || ttsEngine === 'genmax'
   const ttsSpeedMin = ttsEngine === 'supertonic' ? 0.8 : 0.5
   const ttsSpeedMax = ttsEngine === 'supertonic' ? 1.3 : 2
 
@@ -358,7 +383,9 @@ export const AiPanel = memo(function AiPanel() {
       ? isKokoroSupported
       : ttsEngine === 'moss'
         ? isMossSupported
-        : isSupertonicSupported
+        : ttsEngine === 'supertonic'
+          ? isSupertonicSupported
+          : Boolean(genMaxApiKey.trim())
   const isMusicSupported = musicgenService.isSupported()
   const trimmedTtsText = ttsText.trim()
   const audioGenVoiceOptions = genMaxVoiceCatalog[audioGenProvider]
@@ -371,32 +398,45 @@ export const AiPanel = memo(function AiPanel() {
         .some((value) => value!.toLowerCase().includes(query)),
     )
   }, [audioGenVoiceOptions, audioGenVoiceSearch])
-  const selectedAudioGenVoice =
-    audioGenVoiceOptions.find((voiceOption) => voiceOption.id === audioGenVoice) ??
-    audioGenVoiceOptions[0] ??
-    ({ id: '', label: 'No voices available' } satisfies AudioGenVoice)
+  const selectedAudioGenVoice = useMemo(
+    () =>
+      audioGenVoiceOptions.find((voiceOption) => voiceOption.id === audioGenVoice) ??
+      audioGenVoiceOptions[0] ??
+      ({ id: '', label: 'No voices available' } satisfies AudioGenVoice),
+    [audioGenVoiceOptions, audioGenVoice],
+  )
   const trimmedMusicPrompt = musicPrompt.trim()
 
   const loadAllGenMaxVoices = async () => {
     const apiKey = genMaxApiKey.trim()
     if (!apiKey) {
-      setAudioGenVoiceError('Enter a GenMax API key to load all provider catalogs.')
+      setAudioGenVoiceError('Enter a GenMax API key to load provider catalogs.')
       return
     }
 
     setIsLoadingAudioGenVoices(true)
     setAudioGenVoiceError(null)
+    setAudioGenVoiceSuccess(null)
+    setAudioGenVoiceLoadProgress('Connecting to GenMax...')
     try {
-      const catalog = await loadGenMaxVoiceCatalog(apiKey, { forceRefresh: true })
+      const catalog = await loadGenMaxVoiceCatalog(apiKey, {
+        forceRefresh: true,
+        onProgress: (stage) => setAudioGenVoiceLoadProgress(stage),
+      })
       setGenMaxVoiceCatalog(catalog)
-      setAudioGenVoice(catalog[audioGenProvider][0]?.id ?? '')
-      setGenMaxApiKey('')
+      if (catalog[audioGenProvider]?.length > 0) {
+        setAudioGenVoice(catalog[audioGenProvider][0]!.id)
+      }
+      setAudioGenVoiceSuccess(
+        `Loaded ${catalog.minimax.length} MiniMax, ${catalog.elevenlabs.length} ElevenLabs, and ${catalog.capcut.length} CapCut voices!`,
+      )
     } catch (error) {
       setAudioGenVoiceError(
-        error instanceof Error ? error.message : 'Could not load voice catalogs.',
+        error instanceof Error ? error.message : 'Could not load voice catalogs from GenMax.',
       )
     } finally {
       setIsLoadingAudioGenVoices(false)
+      setAudioGenVoiceLoadProgress(null)
     }
   }
 
@@ -430,9 +470,21 @@ export const AiPanel = memo(function AiPanel() {
   const anySaving = anyTtsSaving
   const trimmedText = trimmedTtsText
   const currentTtsBackendLabel =
-    ttsEngine === 'kokoro' ? 'WebGPU' : ttsEngine === 'moss' ? 'CPU' : 'WebGPU/WASM'
+    ttsEngine === 'kokoro'
+      ? 'WebGPU'
+      : ttsEngine === 'moss'
+        ? 'CPU'
+        : ttsEngine === 'supertonic'
+          ? 'WebGPU/WASM'
+          : 'GenMax Cloud API'
   const currentTtsRuntimeLabel =
-    ttsEngine === 'kokoro' ? 'Kokoro TTS Best' : ttsEngine === 'moss' ? 'MOSS Nano' : 'Supertonic 3'
+    ttsEngine === 'kokoro'
+      ? 'Kokoro TTS Best'
+      : ttsEngine === 'moss'
+        ? 'MOSS Nano'
+        : ttsEngine === 'supertonic'
+          ? 'Supertonic 3'
+          : `GenMax (${AUDIO_GEN_PROVIDER_LABELS[audioGenProvider]})`
 
   // --- actions ---
 
@@ -445,16 +497,23 @@ export const AiPanel = memo(function AiPanel() {
       setTtsError(t('editor.tts.errors.enterText'))
       return
     }
+    if (ttsEngine === 'genmax' && !genMaxApiKey.trim()) {
+      setAudioGenVoiceError('Please enter your GenMax API key in Audio Gen.')
+      setTtsError('Please enter your GenMax API key (xi-api-key).')
+      return
+    }
     if (!isTtsSupported) {
       setTtsError(
         ttsEngine === 'kokoro'
           ? t('editor.tts.errors.kokoroUnsupported')
           : ttsEngine === 'moss'
             ? t('editor.tts.errors.mossUnsupported')
-            : t('editor.tts.errors.supertonicUnsupported', {
-                defaultValue:
-                  'This browser cannot run the local Supertonic TTS runtime. Try a recent Chrome or Edge browser.',
-              }),
+            : ttsEngine === 'supertonic'
+              ? t('editor.tts.errors.supertonicUnsupported', {
+                  defaultValue:
+                    'This browser cannot run the local Supertonic TTS runtime. Try a recent Chrome or Edge browser.',
+                })
+              : 'GenMax API key is required.',
       )
       return
     }
@@ -480,13 +539,23 @@ export const AiPanel = memo(function AiPanel() {
                 speed: effectiveTtsSpeed,
                 onProgress: setTtsProgress,
               })
-            : await supertonicTtsService.generateSpeechFile({
-                text: trimmedTtsText,
-                voice: ttsSupertonicVoice,
-                language: ttsSupertonicLanguage,
-                speed: effectiveTtsSpeed,
-                onProgress: setTtsProgress,
-              })
+            : ttsEngine === 'supertonic'
+              ? await supertonicTtsService.generateSpeechFile({
+                  text: trimmedTtsText,
+                  voice: ttsSupertonicVoice,
+                  language: ttsSupertonicLanguage,
+                  speed: effectiveTtsSpeed,
+                  onProgress: setTtsProgress,
+                })
+              : await generateGenMaxSpeechFile({
+                  apiKey: genMaxApiKey,
+                  provider: audioGenProvider,
+                  voiceId: selectedAudioGenVoice.id,
+                  voiceName: selectedAudioGenVoice.label,
+                  text: trimmedTtsText,
+                  speed: effectiveTtsSpeed,
+                  onProgress: setTtsProgress,
+                })
 
       const { blob, file, duration } = result
 
@@ -497,14 +566,18 @@ export const AiPanel = memo(function AiPanel() {
           ? getKokoroTtsVoiceOption(ttsKokoroVoice).label
           : ttsEngine === 'moss'
             ? getMossTtsVoiceOption(ttsMossVoice).label
-            : (SUPERTONIC_TTS_VOICE_OPTIONS.find((option) => option.value === ttsSupertonicVoice)
-                ?.label ?? ttsSupertonicVoice)
+            : ttsEngine === 'supertonic'
+              ? (SUPERTONIC_TTS_VOICE_OPTIONS.find((option) => option.value === ttsSupertonicVoice)
+                  ?.label ?? ttsSupertonicVoice)
+              : selectedAudioGenVoice.label
       const modelLabel =
         ttsEngine === 'kokoro'
           ? getKokoroTtsModelOption(ttsModel).label
           : ttsEngine === 'moss'
             ? 'Multilingual Nano'
-            : 'Supertonic 3'
+            : ttsEngine === 'supertonic'
+              ? 'Supertonic 3'
+              : `${AUDIO_GEN_PROVIDER_LABELS[audioGenProvider]} (GenMax)`
       const engineTags =
         ttsEngine === 'kokoro'
           ? [
@@ -516,12 +589,20 @@ export const AiPanel = memo(function AiPanel() {
             ]
           : ttsEngine === 'moss'
             ? ['ai-generated', 'moss-tts', 'tts-engine:moss', `moss-voice:${ttsMossVoice}`]
-            : [
-                'ai-generated',
-                'supertonic-tts',
-                'tts-engine:supertonic',
-                `supertonic-voice:${ttsSupertonicVoice}`,
-              ]
+            : ttsEngine === 'supertonic'
+              ? [
+                  'ai-generated',
+                  'supertonic-tts',
+                  'tts-engine:supertonic',
+                  `supertonic-voice:${ttsSupertonicVoice}`,
+                ]
+              : [
+                  'ai-generated',
+                  'genmax-tts',
+                  'tts-engine:genmax',
+                  `genmax-provider:${audioGenProvider}`,
+                  `genmax-voice:${selectedAudioGenVoice.id}`,
+                ]
 
       const generation: AudioGeneration = {
         id: crypto.randomUUID(),
@@ -552,9 +633,12 @@ export const AiPanel = memo(function AiPanel() {
       setIsTtsGenerating(false)
     }
   }, [
+    audioGenProvider,
     currentProjectId,
     effectiveTtsSpeed,
+    genMaxApiKey,
     isTtsSupported,
+    selectedAudioGenVoice,
     trimmedTtsText,
     ttsEngine,
     ttsKokoroVoice,
@@ -798,13 +882,14 @@ export const AiPanel = memo(function AiPanel() {
             <div>
               <h2 className="text-sm font-medium">Audio Gen</h2>
               <p className="text-[11px] text-muted-foreground">
-                Choose a provider and voice for generated audio.
+                AI voice generation via GenMax API (ElevenLabs, MiniMax, CapCut).
               </p>
             </div>
             <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
-              Preview setup
+              {AUDIO_GEN_PROVIDER_LABELS[audioGenProvider]}
             </span>
           </div>
+
           <div className="grid grid-cols-3 gap-1.5">
             {(Object.keys(AUDIO_GEN_PROVIDER_LABELS) as AudioGenProvider[]).map((provider) => (
               <Button
@@ -815,81 +900,150 @@ export const AiPanel = memo(function AiPanel() {
                 className="h-8 px-2 text-[11px]"
                 onClick={() => {
                   setAudioGenProvider(provider)
-                  setAudioGenVoice(AUDIO_GEN_VOICES[provider][0]!.id)
+                  const firstVoice = genMaxVoiceCatalog[provider][0]
+                  if (firstVoice) {
+                    setAudioGenVoice(firstVoice.id)
+                  }
                 }}
               >
                 {AUDIO_GEN_PROVIDER_LABELS[provider]}
               </Button>
             ))}
           </div>
-          <div className="mt-2 space-y-1">
-            <Label htmlFor="ai-genmax-api-key" className="text-[11px]">
-              Load all provider voice catalogs
-            </Label>
+
+          <div className="mt-2.5 space-y-1">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="ai-genmax-api-key" className="text-[11px]">
+                GenMax API Key (xi-api-key)
+              </Label>
+              <a
+                href="https://genmax.io/docs"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80"
+              >
+                genmax.io/docs
+              </a>
+            </div>
             <div className="flex gap-1.5">
               <input
                 id="ai-genmax-api-key"
                 type="password"
                 value={genMaxApiKey}
-                onChange={(event) => setGenMaxApiKey(event.target.value)}
-                placeholder="GenMax API key (xi-api-key)"
+                onChange={(event) => handleApiKeyChange(event.target.value)}
+                placeholder="sk_..."
                 autoComplete="off"
                 className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground"
               />
               <Button
                 type="button"
                 size="sm"
-                className="h-8 shrink-0 px-2 text-[11px]"
+                className="h-8 shrink-0 px-2.5 text-[11px]"
                 onClick={() => void loadAllGenMaxVoices()}
                 disabled={isLoadingAudioGenVoices}
               >
                 {isLoadingAudioGenVoices ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  'Load'
+                  'Load Voices'
                 )}
               </Button>
             </div>
-            <p className="text-[10px] text-muted-foreground">
-              One GenMax key loads ElevenLabs, MiniMax and CapCut. The key is cleared after use;
-              only compact metadata is cached locally in IndexedDB.
-            </p>
+            {audioGenVoiceLoadProgress && (
+              <p className="flex items-center gap-1.5 text-[11px] text-primary">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {audioGenVoiceLoadProgress}
+              </p>
+            )}
+            {audioGenVoiceSuccess && (
+              <p className="text-[10px] text-emerald-400">{audioGenVoiceSuccess}</p>
+            )}
+            {audioGenVoiceError && (
+              <p className="text-[10px] text-destructive">{audioGenVoiceError}</p>
+            )}
           </div>
-          <div className="mt-2 space-y-1">
+
+          <div className="mt-2.5 space-y-1">
             <Label htmlFor="ai-audio-gen-voice-search" className="text-[11px]">
-              Search voice ({audioGenVoiceOptions.length})
+              Search {AUDIO_GEN_PROVIDER_LABELS[audioGenProvider]} Voices (
+              {audioGenVoiceOptions.length} available)
             </Label>
             <input
               id="ai-audio-gen-voice-search"
               value={audioGenVoiceSearch}
               onChange={(event) => setAudioGenVoiceSearch(event.target.value)}
-              placeholder="Search by name, ID, language..."
+              placeholder="Filter by name, ID, language (e.g. Vietnamese, English)..."
               className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground"
             />
           </div>
-          <div className="mt-2 space-y-1">
+
+          <div className="mt-2 space-y-1.5">
             <Label htmlFor="ai-audio-gen-voice" className="text-[11px]">
               Voice ({filteredAudioGenVoiceOptions.length} matches)
             </Label>
-            <select
-              id="ai-audio-gen-voice"
-              value={selectedAudioGenVoice.id}
-              onChange={(event) => setAudioGenVoice(event.target.value)}
-              className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground"
-            >
-              {filteredAudioGenVoiceOptions.map((voiceOption) => (
-                <option key={voiceOption.id} value={voiceOption.id}>
-                  {voiceOption.label} {voiceOption.language ? `— ${voiceOption.language}` : ''}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-1.5">
+              <select
+                id="ai-audio-gen-voice"
+                value={selectedAudioGenVoice.id}
+                onChange={(event) => setAudioGenVoice(event.target.value)}
+                className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground"
+              >
+                {filteredAudioGenVoiceOptions.map((voiceOption) => (
+                  <option key={voiceOption.id} value={voiceOption.id}>
+                    {voiceOption.label} {voiceOption.language ? `[${voiceOption.language}]` : ''}
+                  </option>
+                ))}
+              </select>
+              {selectedAudioGenVoice.previewUrl && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 shrink-0 gap-1 px-2 text-[11px]"
+                  onClick={() => togglePlayVoicePreview(selectedAudioGenVoice)}
+                  title="Play voice preview sample"
+                >
+                  {audioGenPreviewPlayingId === selectedAudioGenVoice.id ? (
+                    <>
+                      <Pause className="h-3 w-3 text-primary" />
+                      <span className="text-[10px]">Stop</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-3 w-3 text-primary ml-px" />
+                      <span className="text-[10px]">Preview</span>
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+            {selectedAudioGenVoice.description && (
+              <p className="rounded bg-secondary/30 p-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                {selectedAudioGenVoice.description}
+              </p>
+            )}
           </div>
-          {audioGenVoiceError && (
-            <p className="mt-2 text-[10px] text-destructive">{audioGenVoiceError}</p>
-          )}
-          <p className="mt-2 text-[10px] text-muted-foreground">
-            Full catalogs are loaded on demand from GenMax and cached locally for faster startup.
-          </p>
+
+          <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/40 pt-2.5">
+            <span className="text-[10px] text-muted-foreground">Uses prompt text below</span>
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              onClick={() => {
+                setTtsEngine('genmax')
+                void handleGenerate()
+              }}
+              disabled={isGenerating || !trimmedText || !currentProjectId || !genMaxApiKey.trim()}
+            >
+              {isGenerating && ttsEngine === 'genmax' ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <WandSparkles className="h-3.5 w-3.5" />
+              )}
+              {isGenerating && ttsEngine === 'genmax' ? 'Generating...' : 'Generate with Audio Gen'}
+            </Button>
+          </div>
         </section>
         <Collapsible open={ttsSectionOpen} onOpenChange={setTtsSectionOpen}>
           <div className="-mx-3 -mt-3 bg-secondary/50 px-3 py-2">
@@ -991,6 +1145,9 @@ export const AiPanel = memo(function AiPanel() {
                         defaultValue: 'Supertonic 3 (31 languages, local ONNX)',
                       })}
                     </SelectItem>
+                    <SelectItem value="genmax" className="text-xs">
+                      Audio Gen (ElevenLabs, MiniMax, CapCut via GenMax)
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -998,35 +1155,72 @@ export const AiPanel = memo(function AiPanel() {
               <div className="grid grid-cols-1 gap-3">
                 <div className="space-y-1.5">
                   <Label>{t('editor.tts.voice')}</Label>
-                  <Select
-                    value={voice}
-                    onValueChange={(value) => {
-                      if (ttsEngine === 'kokoro') {
-                        setTtsKokoroVoice(value as KokoroTtsVoice)
-                      } else if (ttsEngine === 'moss') {
-                        setTtsMossVoice(value as MossTtsVoice)
-                      } else {
-                        setTtsSupertonicVoice(value as SupertonicTtsVoice)
-                      }
-                    }}
-                    disabled={isGenerating}
-                  >
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-72">
-                      {(ttsEngine === 'kokoro'
-                        ? KOKORO_TTS_VOICE_OPTIONS
-                        : ttsEngine === 'moss'
-                          ? MOSS_TTS_VOICE_OPTIONS
-                          : SUPERTONIC_TTS_VOICE_OPTIONS
-                      ).map((option) => (
-                        <SelectItem key={option.value} value={option.value} className="text-xs">
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {ttsEngine === 'genmax' ? (
+                    <div className="flex items-center gap-1.5">
+                      <Select
+                        value={selectedAudioGenVoice.id}
+                        onValueChange={(val) => setAudioGenVoice(val)}
+                        disabled={isGenerating}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-72">
+                          {filteredAudioGenVoiceOptions.map((v) => (
+                            <SelectItem key={v.id} value={v.id} className="text-xs">
+                              {v.label} {v.language ? `[${v.language}]` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {selectedAudioGenVoice.previewUrl && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 w-8 shrink-0 p-0"
+                          onClick={() => togglePlayVoicePreview(selectedAudioGenVoice)}
+                          title="Preview Voice Sample"
+                        >
+                          {audioGenPreviewPlayingId === selectedAudioGenVoice.id ? (
+                            <Pause className="h-3.5 w-3.5 text-primary" />
+                          ) : (
+                            <Play className="h-3.5 w-3.5 text-primary ml-px" />
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <Select
+                      value={voice}
+                      onValueChange={(value) => {
+                        if (ttsEngine === 'kokoro') {
+                          setTtsKokoroVoice(value as KokoroTtsVoice)
+                        } else if (ttsEngine === 'moss') {
+                          setTtsMossVoice(value as MossTtsVoice)
+                        } else {
+                          setTtsSupertonicVoice(value as SupertonicTtsVoice)
+                        }
+                      }}
+                      disabled={isGenerating}
+                    >
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-72">
+                        {(ttsEngine === 'kokoro'
+                          ? KOKORO_TTS_VOICE_OPTIONS
+                          : ttsEngine === 'moss'
+                            ? MOSS_TTS_VOICE_OPTIONS
+                            : SUPERTONIC_TTS_VOICE_OPTIONS
+                        ).map((option) => (
+                          <SelectItem key={option.value} value={option.value} className="text-xs">
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
                 {ttsEngine === 'supertonic' && (
                   <div className="space-y-1.5">
