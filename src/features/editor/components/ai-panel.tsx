@@ -82,6 +82,38 @@ import {
 } from '../services/musicgen-service'
 import { insertGeneratedAudioOnNewTrack } from '../utils/insert-generated-audio'
 import { getLanguageDisplayName, insertTextAtCursor } from '../utils/tts-ui-helpers'
+import {
+  getCachedGenMaxVoiceCatalog,
+  loadGenMaxVoiceCatalog,
+  type AudioGenProvider,
+  type AudioGenVoice,
+  type AudioGenVoiceCatalog,
+} from '../services/audio-gen-voices-service'
+
+const AUDIO_GEN_VOICES: Record<AudioGenProvider, AudioGenVoice[]> = {
+  elevenlabs: [
+    { id: 'rachel', label: 'Rachel — Calm, Clear' },
+    { id: 'adam', label: 'Adam — Deep, Narration' },
+    { id: 'antoni', label: 'Antoni — Warm, Conversational' },
+  ],
+  minimax: [
+    { id: 'English_expressive_narrator', label: 'Expressive Narrator' },
+    { id: 'English_radiant_girl', label: 'Radiant Girl' },
+    { id: 'English_magnetic_voiced_man', label: 'Magnetic-voiced Male' },
+    { id: 'English_SereneWoman', label: 'Serene Woman' },
+  ],
+  capcut: [
+    { id: 'serene-man', label: 'Serene Man — Solemn, Cinematic, Captivating' },
+    { id: 'radiant-girl', label: 'Radiant Girl — Bright, Friendly' },
+    { id: 'deep-narrator', label: 'Deep Narrator — Documentary' },
+  ],
+}
+
+const AUDIO_GEN_PROVIDER_LABELS: Record<AudioGenProvider, string> = {
+  elevenlabs: 'ElevenLabs',
+  minimax: 'MiniMax',
+  capcut: 'CapCut',
+}
 
 const MUSIC_PROMPT_PRESETS = [
   {
@@ -218,6 +250,7 @@ const MiniAudioPlayer = memo(function MiniAudioPlayer({ src }: { src: string }) 
   )
 })
 
+// fallow-ignore-next-line complexity
 export const AiPanel = memo(function AiPanel() {
   const { t } = useTranslation()
   const currentProjectId = useMediaLibraryStore((state) => state.currentProjectId)
@@ -225,6 +258,17 @@ export const AiPanel = memo(function AiPanel() {
   const selectMedia = useMediaLibraryStore((state) => state.selectMedia)
   const showNotification = useMediaLibraryStore((state) => state.showNotification)
 
+  const [audioGenProvider, setAudioGenProvider] = useState<AudioGenProvider>('minimax')
+  const [audioGenVoice, setAudioGenVoice] = useState('English_expressive_narrator')
+  const [genMaxApiKey, setGenMaxApiKey] = useState('')
+  const [genMaxVoiceCatalog, setGenMaxVoiceCatalog] = useState<AudioGenVoiceCatalog>({
+    elevenlabs: AUDIO_GEN_VOICES.elevenlabs,
+    minimax: AUDIO_GEN_VOICES.minimax,
+    capcut: AUDIO_GEN_VOICES.capcut,
+  })
+  const [audioGenVoiceSearch, setAudioGenVoiceSearch] = useState('')
+  const [isLoadingAudioGenVoices, setIsLoadingAudioGenVoices] = useState(false)
+  const [audioGenVoiceError, setAudioGenVoiceError] = useState<string | null>(null)
   const [ttsText, setTtsText] = useState(() => t('editor.aiPanel.defaultTtsPrompt'))
   const [ttsEngine, setTtsEngine] = useState<StoredTtsEngine>(() => getStoredTtsEngine())
   const [ttsKokoroVoice, setTtsKokoroVoice] = useState<KokoroTtsVoice>('af_heart')
@@ -282,6 +326,21 @@ export const AiPanel = memo(function AiPanel() {
     setStoredTtsEngine(ttsEngine)
   }, [ttsEngine])
 
+  useEffect(() => {
+    let cancelled = false
+    void getCachedGenMaxVoiceCatalog().then((catalog) => {
+      if (cancelled) return
+      setGenMaxVoiceCatalog((current) => ({
+        elevenlabs: catalog.elevenlabs.length > 0 ? catalog.elevenlabs : current.elevenlabs,
+        minimax: catalog.minimax.length > 0 ? catalog.minimax : current.minimax,
+        capcut: catalog.capcut.length > 0 ? catalog.capcut : current.capcut,
+      }))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const isKokoroSupported = kokoroTtsService.isSupported()
   const isMossSupported = mossTtsService.isSupported()
   const isSupertonicSupported = supertonicTtsService.isSupported()
@@ -302,7 +361,44 @@ export const AiPanel = memo(function AiPanel() {
         : isSupertonicSupported
   const isMusicSupported = musicgenService.isSupported()
   const trimmedTtsText = ttsText.trim()
+  const audioGenVoiceOptions = genMaxVoiceCatalog[audioGenProvider]
+  const filteredAudioGenVoiceOptions = useMemo(() => {
+    const query = audioGenVoiceSearch.trim().toLowerCase()
+    if (!query) return audioGenVoiceOptions
+    return audioGenVoiceOptions.filter((voiceOption) =>
+      [voiceOption.label, voiceOption.id, voiceOption.description, voiceOption.language]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(query)),
+    )
+  }, [audioGenVoiceOptions, audioGenVoiceSearch])
+  const selectedAudioGenVoice =
+    audioGenVoiceOptions.find((voiceOption) => voiceOption.id === audioGenVoice) ??
+    audioGenVoiceOptions[0] ??
+    ({ id: '', label: 'No voices available' } satisfies AudioGenVoice)
   const trimmedMusicPrompt = musicPrompt.trim()
+
+  const loadAllGenMaxVoices = async () => {
+    const apiKey = genMaxApiKey.trim()
+    if (!apiKey) {
+      setAudioGenVoiceError('Enter a GenMax API key to load all provider catalogs.')
+      return
+    }
+
+    setIsLoadingAudioGenVoices(true)
+    setAudioGenVoiceError(null)
+    try {
+      const catalog = await loadGenMaxVoiceCatalog(apiKey, { forceRefresh: true })
+      setGenMaxVoiceCatalog(catalog)
+      setAudioGenVoice(catalog[audioGenProvider][0]?.id ?? '')
+      setGenMaxApiKey('')
+    } catch (error) {
+      setAudioGenVoiceError(
+        error instanceof Error ? error.message : 'Could not load voice catalogs.',
+      )
+    } finally {
+      setIsLoadingAudioGenVoices(false)
+    }
+  }
 
   const totalTtsBytes = useMemo(
     () => ttsGenerations.reduce((sum, generation) => sum + generation.byteSize, 0),
@@ -697,6 +793,104 @@ export const AiPanel = memo(function AiPanel() {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-3">
       <div className="space-y-3">
+        <section className="rounded-lg border border-border bg-secondary/20 p-3">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-medium">Audio Gen</h2>
+              <p className="text-[11px] text-muted-foreground">
+                Choose a provider and voice for generated audio.
+              </p>
+            </div>
+            <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
+              Preview setup
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {(Object.keys(AUDIO_GEN_PROVIDER_LABELS) as AudioGenProvider[]).map((provider) => (
+              <Button
+                key={provider}
+                type="button"
+                size="sm"
+                variant={audioGenProvider === provider ? 'default' : 'outline'}
+                className="h-8 px-2 text-[11px]"
+                onClick={() => {
+                  setAudioGenProvider(provider)
+                  setAudioGenVoice(AUDIO_GEN_VOICES[provider][0]!.id)
+                }}
+              >
+                {AUDIO_GEN_PROVIDER_LABELS[provider]}
+              </Button>
+            ))}
+          </div>
+          <div className="mt-2 space-y-1">
+            <Label htmlFor="ai-genmax-api-key" className="text-[11px]">
+              Load all provider voice catalogs
+            </Label>
+            <div className="flex gap-1.5">
+              <input
+                id="ai-genmax-api-key"
+                type="password"
+                value={genMaxApiKey}
+                onChange={(event) => setGenMaxApiKey(event.target.value)}
+                placeholder="GenMax API key (xi-api-key)"
+                autoComplete="off"
+                className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground"
+              />
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 shrink-0 px-2 text-[11px]"
+                onClick={() => void loadAllGenMaxVoices()}
+                disabled={isLoadingAudioGenVoices}
+              >
+                {isLoadingAudioGenVoices ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  'Load'
+                )}
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              One GenMax key loads ElevenLabs, MiniMax and CapCut. The key is cleared after use;
+              only compact metadata is cached locally in IndexedDB.
+            </p>
+          </div>
+          <div className="mt-2 space-y-1">
+            <Label htmlFor="ai-audio-gen-voice-search" className="text-[11px]">
+              Search voice ({audioGenVoiceOptions.length})
+            </Label>
+            <input
+              id="ai-audio-gen-voice-search"
+              value={audioGenVoiceSearch}
+              onChange={(event) => setAudioGenVoiceSearch(event.target.value)}
+              placeholder="Search by name, ID, language..."
+              className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground"
+            />
+          </div>
+          <div className="mt-2 space-y-1">
+            <Label htmlFor="ai-audio-gen-voice" className="text-[11px]">
+              Voice ({filteredAudioGenVoiceOptions.length} matches)
+            </Label>
+            <select
+              id="ai-audio-gen-voice"
+              value={selectedAudioGenVoice.id}
+              onChange={(event) => setAudioGenVoice(event.target.value)}
+              className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground"
+            >
+              {filteredAudioGenVoiceOptions.map((voiceOption) => (
+                <option key={voiceOption.id} value={voiceOption.id}>
+                  {voiceOption.label} {voiceOption.language ? `— ${voiceOption.language}` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          {audioGenVoiceError && (
+            <p className="mt-2 text-[10px] text-destructive">{audioGenVoiceError}</p>
+          )}
+          <p className="mt-2 text-[10px] text-muted-foreground">
+            Full catalogs are loaded on demand from GenMax and cached locally for faster startup.
+          </p>
+        </section>
         <Collapsible open={ttsSectionOpen} onOpenChange={setTtsSectionOpen}>
           <div className="-mx-3 -mt-3 bg-secondary/50 px-3 py-2">
             <CollapsibleTrigger asChild>

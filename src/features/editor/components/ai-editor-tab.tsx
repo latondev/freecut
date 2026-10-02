@@ -22,6 +22,42 @@ import { AgentChatPanel } from './agent-chat-panel'
 import { useAgentStore } from '../agent'
 import { listMcpTools } from '../agent/tools'
 
+interface ModelCapabilities {
+  vision?: boolean
+  video?: boolean
+  tools?: boolean
+  streaming?: boolean
+  reasoning?: boolean
+  context?: string
+}
+
+// fallow-ignore-next-line complexity
+function getModelCapabilities(model: string): ModelCapabilities {
+  const id = model.toLowerCase()
+  if (!id) return {}
+
+  const capabilities: ModelCapabilities = {
+    tools: true,
+    streaming: true,
+    reasoning: true,
+  }
+  if (id.includes('minimax-m3')) {
+    return { ...capabilities, vision: true, video: true, context: '1M tokens' }
+  }
+  if (id.includes('minimax')) {
+    return { ...capabilities, context: '204K tokens' }
+  }
+  if (id.includes('qwen3-vl') || id.includes('qwen3-omni') || id.includes('qwen3.5-omni')) {
+    return { ...capabilities, vision: true, video: id.includes('vl'), context: 'Long context' }
+  }
+  if (id.includes('coder')) return { ...capabilities, context: 'Long context' }
+  if (id.includes('glm') || id.includes('deepseek') || id.includes('ling-3')) {
+    return { ...capabilities, context: 'Long context' }
+  }
+
+  return {}
+}
+
 const DOCUMENTED_MODEL_IDS = [
   'seekai_fee/deepseek-v4-flash',
   'seekai_fee/glm-5.3-flash',
@@ -58,6 +94,14 @@ const DOCUMENTED_MODEL_IDS = [
   'xkiro/dots-studio/dots-3-note-preview',
 ]
 
+function CapabilityBadge({ label }: { label: string }) {
+  return (
+    <span className="rounded border border-border bg-secondary/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+      {label}
+    </span>
+  )
+}
+
 export const AiEditorTab = memo(function AiEditorTab() {
   const { t } = useTranslation()
   const [settings, setSettings] = useState<LlmProviderSettings>(getLlmProviderSettings)
@@ -74,6 +118,7 @@ export const AiEditorTab = memo(function AiEditorTab() {
     ...new Set([...DOCUMENTED_MODEL_IDS, ...models, settings.model].filter(Boolean)),
   ]
   const toolCount = listMcpTools().length
+  const capabilities = getModelCapabilities(settings.model)
 
   const updateSettings = (updates: Partial<LlmProviderSettings>) => {
     setSettings((current) => ({ ...current, ...updates }))
@@ -190,6 +235,19 @@ export const AiEditorTab = memo(function AiEditorTab() {
                   </option>
                 ))}
               </select>
+              <div className="flex flex-wrap gap-1 pt-1">
+                {capabilities.context && <CapabilityBadge label={capabilities.context} />}
+                {capabilities.vision && <CapabilityBadge label="Vision" />}
+                {capabilities.video && <CapabilityBadge label="Video" />}
+                {capabilities.tools && <CapabilityBadge label="Tools" />}
+                {capabilities.streaming && <CapabilityBadge label="Streaming" />}
+                {capabilities.reasoning && <CapabilityBadge label="Reasoning" />}
+                {!Object.keys(capabilities).length && (
+                  <span className="text-[10px] text-muted-foreground">
+                    Capabilities unavailable for this model.
+                  </span>
+                )}
+              </div>
             </div>
             <div className="space-y-1">
               <Label htmlFor="ai-editor-api-key" className="text-[11px]">
