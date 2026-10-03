@@ -382,8 +382,8 @@ export const AiPanel = memo(function AiPanel() {
   }
 
   // fallow-ignore-next-line complexity
-
   const togglePlayVoicePreview = useCallback(
+    // fallow-ignore-next-line complexity
     async (voiceItem?: AudioGenVoice) => {
       if (!voiceItem?.previewUrl) {
         showNotification({ type: 'warning', message: 'Giọng này chưa có file nghe thử.' })

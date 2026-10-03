@@ -19,6 +19,7 @@ const codes = [
 async function downloadAll() {
   console.log(`Downloading ${codes.length} flags into ${flagsDir}...`)
   await Promise.all(
+    // fallow-ignore-next-line complexity
     codes.map(async (code) => {
       const filePath = path.join(flagsDir, `${code}.svg`)
       if (fs.existsSync(filePath) && fs.statSync(filePath).size > 100) {

@@ -115,7 +115,7 @@ function voiceText(voice: AudioGenVoice, withMeta: boolean): string {
   return `${meta}${(voice.tags || []).join(' ')} ${voice.description || ''} ${voice.label}`.toLowerCase()
 }
 
-export function normalizeLanguageTag(lang?: string): string {
+function normalizeLanguageTag(lang?: string): string {
   if (!lang) return ''
   const lower = lang.toLowerCase().trim()
   for (const [code, rule] of Object.entries(LANGUAGE_RULES)) {
@@ -124,7 +124,7 @@ export function normalizeLanguageTag(lang?: string): string {
   return lower
 }
 
-export function normalizeGenderTag(gender?: string): string {
+function normalizeGenderTag(gender?: string): string {
   if (!gender) return ''
   const lower = gender.toLowerCase().trim()
   if (includesAny(lower, FEMALE_WORDS)) return 'female'

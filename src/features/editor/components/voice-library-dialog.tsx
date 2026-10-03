@@ -316,6 +316,7 @@ export const VoiceLibraryDialog = memo(function VoiceLibraryDialog({
 
   // fallow-ignore-next-line complexity
   const handlePlayPreview = useCallback(
+    // fallow-ignore-next-line complexity
     async (voice: AudioGenVoice) => {
       if (!voice.previewUrl) {
         toast.info('Giọng này không có file nghe thử.')

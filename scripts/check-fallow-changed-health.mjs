@@ -28,6 +28,11 @@ function getBaseRef() {
     if (currentBranch === 'main') {
       return 'origin/main';
     }
+    const upstreamRes = spawnSync('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], { encoding: 'utf8' });
+    const upstream = upstreamRes.stdout ? upstreamRes.stdout.trim() : '';
+    if (upstream && upstream !== currentBranch) {
+      return upstream;
+    }
   } catch {
     // ignore
   }
