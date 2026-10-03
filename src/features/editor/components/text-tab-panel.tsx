@@ -57,6 +57,7 @@ import {
 } from '@/shared/typography/text-templates-catalog'
 import {
   createTextTemplateMotion,
+  getCapcutAlphaTextGradient,
   getTextTemplateMotionPresetId,
 } from '@/shared/typography/text-template-motion'
 import './text-template-preview.css'
@@ -129,55 +130,54 @@ function renderCardIcon(icon?: TextTemplateCardItem['icon']): React.ReactNode {
   return (icon && CARD_ICONS[icon]) || CARD_ICONS.sparkle
 }
 
+// fallow-ignore-next-line complexity
 function renderTemplatePreview(template: TextTemplateCardItem) {
   const { stroke, textShadow } = template.patch
-  const fontSize = Math.max(12, Math.min(20, (template.patch.fontSize ?? 60) * 0.25))
-  const webkitStroke = stroke ? `${Math.min(1.2, stroke.width * 0.4)}px ${stroke.color}` : undefined
+  const fontSize = Math.max(13, Math.min(22, (template.patch.fontSize ?? 60) * 0.28))
+  const strokeWidth = stroke ? Math.min(1.4, Math.max(0.7, stroke.width * 0.4)) : 0
+  const webkitStroke = stroke ? `${strokeWidth}px ${stroke.color}` : undefined
   const shadow = textShadow
-    ? `${textShadow.offsetX * 0.5}px ${textShadow.offsetY * 0.5}px ${textShadow.blur * 0.45}px ${textShadow.color}`
+    ? `${textShadow.offsetX * 0.5}px ${textShadow.offsetY * 0.5}px ${textShadow.blur * 0.5}px ${textShadow.color}`
     : undefined
+  const textGradient = getCapcutAlphaTextGradient(template.patch.color)
 
   return (
-    <div className="capcut-template-preview relative flex min-h-18 flex-1 items-center justify-center overflow-hidden rounded-md p-2">
-      {template.previewImage && (
-        <img
-          src={template.previewImage}
-          alt=""
-          className="absolute inset-0 h-full w-full object-contain opacity-55 transition-opacity duration-200 group-hover:opacity-35"
-          draggable={false}
-          loading="lazy"
-        />
-      )}
-      <div className="absolute inset-0 bg-linear-to-b from-black/10 via-black/15 to-black/60" />
+    <div className="capcut-alpha-canvas relative flex min-h-[72px] flex-1 items-center justify-center overflow-hidden p-2 w-full">
+      {/* Specular light sweep on hover */}
+      <div className="capcut-template-preview__shine" />
       <div
         className="capcut-template-preview__copy relative z-1 flex max-w-full flex-col items-center text-center"
         data-template-motion={getTextTemplateMotionPresetId(template)}
       >
         {template.sample.tag && (
-          <div className="mb-1 flex items-center gap-1">
+          <div className="mb-0.5 flex items-center gap-1">
             {!template.badge && renderCardIcon(template.icon)}
-            <span className="text-[8px] font-bold uppercase tracking-widest text-zinc-200/90">
+            <span className="text-[7.5px] font-bold uppercase tracking-wider text-zinc-300/80 drop-shadow-sm">
               {template.sample.tag}
             </span>
           </div>
         )}
         <span
-          className="line-clamp-2 max-w-full text-balance font-extrabold leading-snug drop-shadow-md antialiased"
+          className="capcut-alpha-text line-clamp-2 max-w-full text-balance font-extrabold leading-snug antialiased"
           style={{
-            color: template.patch.color,
+            backgroundImage: textGradient,
+            WebkitBackgroundClip: 'text',
+            backgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            color: 'transparent',
+            WebkitTextStroke: webkitStroke,
+            filter: shadow ? `drop-shadow(${shadow})` : undefined,
             fontFamily: `"${template.patch.fontFamily}", "CapCut Sans Text", sans-serif`,
             fontSize: `${fontSize}px`,
             fontWeight: template.patch.fontWeight,
             fontStyle: template.patch.fontStyle,
             letterSpacing: `${(template.patch.letterSpacing ?? 0) * 0.3}px`,
-            WebkitTextStroke: webkitStroke,
-            textShadow: shadow,
           }}
         >
           {template.sample.title}
         </span>
         {template.sample.subtitle && (
-          <span className="mt-1 max-w-full truncate text-[8px] font-medium text-white/80 drop-shadow">
+          <span className="mt-0.5 max-w-full truncate text-[7.5px] font-semibold text-zinc-300/90 drop-shadow-sm">
             {template.sample.subtitle}
           </span>
         )}
@@ -209,11 +209,10 @@ const TextTemplateCard = memo(function TextTemplateCard({
       onDragEnd={onDragEnd}
       onClick={() => onApply(template)}
       className={cn(
-        'group relative flex flex-col justify-between p-2.5 rounded-xl border border-zinc-800/80',
-        'bg-gradient-to-b',
-        template.cardBgClass || 'from-zinc-900/60 to-black/80',
-        'hover:border-primary/70 hover:shadow-lg hover:shadow-primary/5 transition-[transform,border-color,box-shadow]',
-        'active:scale-[0.97] text-left overflow-hidden min-h-[105px]',
+        'group relative flex flex-col justify-between p-2 rounded-xl border border-zinc-800/80',
+        'bg-zinc-900/80 hover:bg-zinc-900 hover:border-primary/60 hover:shadow-lg hover:shadow-primary/5',
+        'transition-[transform,border-color,background-color,box-shadow]',
+        'active:scale-[0.97] text-left overflow-hidden min-h-[110px]',
       )}
     >
       {/* Decorative Badge */}
@@ -263,7 +262,7 @@ const TextEffectTile = memo(function TextEffectTile({
         'group relative flex flex-col items-center justify-between p-2 rounded-xl border transition-[transform,background-color,border-color,box-shadow] active:scale-95 text-center min-h-[84px]',
         isApplied
           ? 'border-emerald-500 bg-emerald-950/40 shadow-sm shadow-emerald-500/20'
-          : 'border-zinc-800/80 bg-zinc-900/60 hover:bg-zinc-900 hover:border-primary/60 hover:shadow-md',
+          : 'border-zinc-800/80 bg-zinc-900/80 hover:bg-zinc-900 hover:border-primary/60 hover:shadow-md',
       )}
     >
       {isApplied && (
@@ -272,9 +271,9 @@ const TextEffectTile = memo(function TextEffectTile({
         </span>
       )}
 
-      <div className="flex-1 flex items-center justify-center py-1 w-full">
+      <div className="capcut-alpha-canvas flex-1 flex items-center justify-center py-2 px-1 w-full min-h-[50px]">
         <span
-          className="text-lg font-bold tracking-wider select-none leading-none max-w-full truncate px-1"
+          className="text-lg font-bold tracking-wider select-none leading-none max-w-full truncate px-1 transition-transform group-hover:scale-110"
           style={effect.previewStyle}
         >
           {effect.previewText || 'Ag'}
