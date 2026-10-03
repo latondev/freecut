@@ -11,9 +11,16 @@ export interface AudioGenVoice {
   language?: string
   gender?: string
   accent?: string
+  tags?: string[]
 }
 
 export type AudioGenVoiceCatalog = Record<AudioGenProvider, AudioGenVoice[]>
+
+export const AUDIO_GEN_PROVIDER_LABELS: Record<AudioGenProvider, string> = {
+  elevenlabs: 'ElevenLabs',
+  minimax: 'MiniMax',
+  capcut: 'CapCut',
+}
 
 interface AudioGenVoiceCache extends DBSchema {
   catalogs: {
@@ -38,10 +45,10 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
       id: '362703657091264',
       label: 'Professional Guide — Clear, Informative',
       description: 'Corporate Promotion & Narration. Clear, measured Vietnamese male voice.',
-      previewUrl:
-        'https://cdn.hailuoai.video/moss/prod/2026-02-22-16/moss-audio/user_audio/1771747483272680073-369436790456569_2026-02-22_.mp3',
+      previewUrl: 'https://file.cdn.minimax.io/public/84d2ad4a-14d2-43bb-8ee7-e6f7df2ce47e.wav',
       language: 'Vietnamese',
       gender: 'Male',
+      tags: ['Vietnamese', 'Standard', 'Male', 'Young', 'Corporate Promotion & Narration'],
     },
     {
       id: '273554146070723',
@@ -51,6 +58,7 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
         'https://cdn.hailuoai.video/open-hailuo-video-web/public_assets/29748991-1b83-428a-9062-b9a967e9b68a.mp3',
       language: 'Vietnamese',
       gender: 'Male',
+      tags: ['Vietnamese', 'Male', 'Documentary', 'Audiobooks & Novels'],
     },
     {
       id: '362703657091265',
@@ -60,6 +68,7 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
         'https://cdn.hailuoai.video/open-hailuo-video-web/public_assets/dc8888e4-6091-429b-8111-8f7f1bfa4c9f.mp3',
       language: 'Vietnamese',
       gender: 'Male',
+      tags: ['Vietnamese', 'Male', 'Documentary', 'Online Education'],
     },
     {
       id: '262184394641601',
@@ -68,6 +77,7 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
       previewUrl: 'https://file.cdn.minimax.io/public/e4f5a81d-5d4f-41f0-b68d-27167b815246.mp3',
       language: 'Vietnamese',
       gender: 'Female',
+      tags: ['Vietnamese', 'Female', 'Podcasts & Social', 'Audio Drama'],
     },
     {
       id: '262184394641600',
@@ -77,15 +87,16 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
         'https://cdn.hailuoai.video/open-hailuo-video-web/public_assets/883dfc14-6eaa-49d1-883f-8bead1dae05e.mp3',
       language: 'Vietnamese',
       gender: 'Male',
+      tags: ['Vietnamese', 'Male', 'Commercials & Trailers', 'Podcasts & Social'],
     },
     {
       id: '226905123659934',
       label: 'Kind-hearted Girl — Compassionate, Heartwarming',
       description: 'Audiobooks & Novels, E-Learning, Podcasts & Social. Gentle young female.',
-      previewUrl:
-        'https://cdn.hailuoai.video/moss/prod/2026-02-22-17/moss-audio/user_audio/1771751178982496472-369452270174418_2026-02-22_.mp3',
+      previewUrl: 'https://filecdn.minimax.chat/public/a1730798-8a0d-417c-98ed-ae04d82d0d5a.mp3',
       language: 'Vietnamese',
       gender: 'Female',
+      tags: ['Vietnamese', 'Female', 'Young', 'E-Learning', 'Podcasts & Social'],
     },
     {
       id: '362703657091266',
@@ -94,6 +105,111 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
       previewUrl: 'https://file.cdn.minimax.io/public/f69eae01-485c-4f11-820c-9c1ee877c668.mp3',
       language: 'Vietnamese',
       gender: 'Female',
+      tags: ['Vietnamese', 'Female', 'Young', 'Online Education'],
+    },
+    {
+      id: '362703657091267',
+      label: 'Warm Narrator — Clean, Warm, Measured (Giọng Bắc)',
+      description: 'Formal Northern Vietnamese accent. News broadcasting and technical briefings.',
+      previewUrl: 'https://file.cdn.minimax.io/public/f495ffb8-7c4d-4186-840a-3c8dd3f85c2e.wav',
+      language: 'Vietnamese',
+      gender: 'Male',
+      tags: ['Vietnamese', 'Male', 'Northern', 'Corporate Promotion & Narration'],
+    },
+    {
+      id: '362703657091268',
+      label: 'Steady Instructor — Resonant, Smooth, Informative (Giọng Bắc)',
+      description: 'Clear, steady Northern Vietnamese accent. Educational tutorials and training.',
+      previewUrl: 'https://file.cdn.minimax.io/public/699648d6-eb59-41b6-a10c-28c09896c650.wav',
+      language: 'Vietnamese',
+      gender: 'Male',
+      tags: ['Vietnamese', 'Male', 'Northern', 'Online Education'],
+    },
+    {
+      id: '362703657091269',
+      label: 'Polished Announcer — Bright, Articulate (Giọng Bắc Nữ)',
+      description: 'Polished Northern Vietnamese female voice. Audiobooks and storytelling.',
+      previewUrl: 'https://file.cdn.minimax.io/public/792c88d6-07b9-4b71-9b50-85a43575e8cf.wav',
+      language: 'Vietnamese',
+      gender: 'Female',
+      tags: ['Vietnamese', 'Female', 'Northern', 'Online Education'],
+    },
+    {
+      id: '362703657091270',
+      label: 'Patient Instructor — Informative, Calm, Soothing (Giọng Bắc Nữ)',
+      description:
+        'Warm, calm Northern Vietnamese female voice. Guided meditations and audiobooks.',
+      previewUrl: 'https://file.cdn.minimax.io/public/ce3fa3c3-fb7f-4e0c-a10f-d85e2bc2780a.mp3',
+      language: 'Vietnamese',
+      gender: 'Female',
+      tags: ['Vietnamese', 'Female', 'Northern', 'Audiobooks & Novels'],
+    },
+    {
+      id: '362703657091271',
+      label: 'Crisp Woman — Fluid, Energetic, Commercial (Giọng Bắc Nữ)',
+      description:
+        'Crisp, bright Northern Vietnamese female voice. Promotional videos and commercials.',
+      previewUrl: 'https://file.cdn.minimax.io/public/dea9a4a8-e293-4737-9d90-a0dcc54e2f9b.wav',
+      language: 'Vietnamese',
+      gender: 'Female',
+      tags: ['Vietnamese', 'Female', 'Northern', 'Commercials'],
+    },
+    {
+      id: '362703657091272',
+      label: 'Dependable Woman — Warm, Smooth, Inviting (Giọng Bắc Nữ)',
+      description:
+        'Articulate and expressive Northern Vietnamese female. Podcasts and presentations.',
+      previewUrl: 'https://file.cdn.minimax.io/public/c540811d-d90d-4f5b-ac36-5cda5f4c2a52.wav',
+      language: 'Vietnamese',
+      gender: 'Female',
+      tags: ['Vietnamese', 'Female', 'Northern', 'Podcasts'],
+    },
+    {
+      id: '362703657091273',
+      label: 'Podcast Host — Deep, Resonant, Authoritative (Giọng Bắc Nam)',
+      description: 'Deep and authoritative Northern Vietnamese male. News and event reporting.',
+      previewUrl: 'https://file.cdn.minimax.io/public/1219f65e-a95f-42bd-8648-3978d23e9cd6.wav',
+      language: 'Vietnamese',
+      gender: 'Male',
+      tags: ['Vietnamese', 'Male', 'Northern', 'Podcast', 'Documentary'],
+    },
+    {
+      id: '362703657091274',
+      label: 'Audiobook Woman — Serene, Low-Paced, Tranquil (Giọng Bắc Nữ)',
+      description:
+        'Tranquil Northern Vietnamese female voice. Mindfulness, philosophy, audiobooks.',
+      previewUrl: 'https://file.cdn.minimax.io/public/d16eb4ab-4625-4a62-82dd-f79334c6de38.wav',
+      language: 'Vietnamese',
+      gender: 'Female',
+      tags: ['Vietnamese', 'Female', 'Northern', 'Audiobooks & Novels'],
+    },
+    {
+      id: '362703657091275',
+      label: 'Male Narrator — Warm, Gentle, Encouraging (Giọng Miền Nam)',
+      description:
+        'Friendly Southern Vietnamese male voice. Motivational speeches and lifestyle guides.',
+      previewUrl: 'https://file.cdn.minimax.io/public/a52c1efb-1a39-457d-a81c-5c41a79585e2.wav',
+      language: 'Vietnamese',
+      gender: 'Male',
+      tags: ['Vietnamese', 'Male', 'Southern', 'Audiobooks & Novels'],
+    },
+    {
+      id: '362703657091276',
+      label: 'Cheerful Instructor — Energetic, Dynamic (Giọng Bắc Nam)',
+      description: 'Dynamic Northern Vietnamese male. Entertainment, vlogs, and storytelling.',
+      previewUrl: 'https://file.cdn.minimax.io/public/42c7a9c8-a406-4389-96f0-8749509032ac.wav',
+      language: 'Vietnamese',
+      gender: 'Male',
+      tags: ['Vietnamese', 'Male', 'Northern', 'Online Education'],
+    },
+    {
+      id: '362703657091277',
+      label: 'Cute Girl — Bright, Articulate, Rhythmic (Giọng Bắc Nữ Trẻ)',
+      description: 'Bright and articulate young Northern Vietnamese female. Tutorials and dubbing.',
+      previewUrl: 'https://file.cdn.minimax.io/public/12361fd6-5be0-4acb-8648-339ebc257bde.wav',
+      language: 'Vietnamese',
+      gender: 'Female',
+      tags: ['Vietnamese', 'Female', 'Young', 'Dubbing'],
     },
     {
       id: '380426458095854',
@@ -103,6 +219,7 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
         'https://cdn.hailuoai.video/open-hailuo-video-web/public_assets/29748991-1b83-428a-9062-b9a967e9b68a.mp3',
       language: 'English',
       gender: 'Male',
+      tags: ['English', 'Male', 'Documentary', 'Audiobooks & Novels'],
     },
     {
       id: '226905123659939',
@@ -112,6 +229,7 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
         'https://cdn.hailuoai.video/moss/prod/2026-02-24-10/moss-audio/user_audio/1771901848260058013-370069215523062_2026-02-24_.mp3',
       language: 'English',
       gender: 'Female',
+      tags: ['English', 'Female', 'Audiobooks', 'Documentaries'],
     },
     {
       id: '369788429140175',
@@ -121,6 +239,7 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
         'https://cdn.hailuoai.video/open-hailuo-video-web/public_assets/dc8888e4-6091-429b-8111-8f7f1bfa4c9f.mp3',
       language: 'English',
       gender: 'Female',
+      tags: ['English', 'Female', 'Commercials'],
     },
   ],
   elevenlabs: [
@@ -301,23 +420,61 @@ function normalizeVoice(value: Record<string, unknown>): AudioGenVoice | null {
   const label = stringValue(value.name) ?? stringValue(value.voice_name) ?? id
   if (!id || !label) return null
 
-  // Extract tags / labels
-  const rawTags = (value.tag_list || value.tags || value.labels) as unknown
-  const tagsList = Array.isArray(rawTags)
+  // Extract labels object if present (e.g. ElevenLabs format labels: { accent: 'welsh', ... })
+  const labelsObj =
+    value.labels && typeof value.labels === 'object' && !Array.isArray(value.labels)
+      ? (value.labels as Record<string, unknown>)
+      : {}
+
+  // Extract tags / labels array
+  const rawTags = (value.tag_list ||
+    value.tags ||
+    (Array.isArray(value.labels) ? value.labels : [])) as unknown
+  const tagsList: string[] = Array.isArray(rawTags)
     ? rawTags.map((t) => String(t || '').trim()).filter(Boolean)
     : []
+
+  // Add all string values from labelsObj into tagsList
+  for (const v of Object.values(labelsObj)) {
+    const s = stringValue(v)
+    if (s && !tagsList.includes(s)) {
+      tagsList.push(s)
+    }
+  }
+
+  const detectedAccent =
+    stringValue(value.accent) ?? stringValue(labelsObj.accent) ?? stringValue(labelsObj.dialect)
 
   const detectedLanguage =
     stringValue(value.language) ??
     stringValue(value.language_tag) ??
+    stringValue(labelsObj.language) ??
+    detectedAccent ??
     tagsList.find((tag) =>
-      ['vietnamese', 'tiếng việt', 'english', 'japanese', 'chinese', 'korean'].includes(
-        tag.toLowerCase(),
-      ),
+      [
+        'vietnamese',
+        'tiếng việt',
+        'english',
+        'japanese',
+        'chinese',
+        'korean',
+        'welsh',
+        'spanish',
+        'french',
+        'german',
+        'russian',
+        'italian',
+        'portuguese',
+        'arabic',
+        'hindi',
+        'thai',
+        'indonesian',
+      ].includes(tag.toLowerCase()),
     )
 
   const detectedGender =
     stringValue(value.gender) ??
+    stringValue(labelsObj.gender) ??
     tagsList.find((tag) => ['male', 'female', 'neutral'].includes(tag.toLowerCase()))
 
   return {
@@ -330,7 +487,8 @@ function normalizeVoice(value: Record<string, unknown>): AudioGenVoice | null {
       stringValue(value.sample_audio),
     language: detectedLanguage,
     gender: detectedGender,
-    accent: stringValue(value.accent),
+    accent: detectedAccent,
+    tags: tagsList.length > 0 ? tagsList : undefined,
   }
 }
 
@@ -424,6 +582,7 @@ async function loadPagedVoices(
   firstPage: number,
   maxPages: number = 6,
   params: Record<string, string> = {},
+  onPage?: (page: number, voiceCount: number) => void,
 ): Promise<AudioGenVoice[]> {
   const voices: AudioGenVoice[] = []
   let page = firstPage
@@ -444,6 +603,7 @@ async function loadPagedVoices(
     voices.push(
       ...pageVoices.map(normalizeVoice).filter((voice): voice is AudioGenVoice => Boolean(voice)),
     )
+    onPage?.(page, voices.length)
 
     const metadata = payload as Record<string, unknown>
     const dataObj = metadata.data as Record<string, unknown> | undefined
@@ -500,6 +660,7 @@ export async function loadGenMaxVoiceCatalog(
   options: {
     forceRefresh?: boolean
     onProgress?: (stage: string) => void
+    onCatalogUpdate?: (catalog: AudioGenVoiceCatalog) => void
   } = {},
 ): Promise<AudioGenVoiceCatalog> {
   const normalizedApiKey = apiKey.trim()
@@ -511,97 +672,105 @@ export async function loadGenMaxVoiceCatalog(
     return cached.catalogs
   }
 
-  options.onProgress?.('Fetching voice catalogs from GenMax...')
+  options.onProgress?.('Preparing GenMax voice catalog...')
+  const catalogs: AudioGenVoiceCatalog = {
+    elevenlabs: cached?.catalogs.elevenlabs ?? DEFAULT_AUDIO_GEN_VOICES.elevenlabs,
+    minimax: cached?.catalogs.minimax ?? DEFAULT_AUDIO_GEN_VOICES.minimax,
+    capcut: cached?.catalogs.capcut ?? DEFAULT_AUDIO_GEN_VOICES.capcut,
+  }
+  let loadedProviders = 0
+  let lastError: unknown = null
 
-  // 1. ElevenLabs: Default voices (21) + top trending library voices (up to 300)
-  const loadElevenLabs = async (): Promise<AudioGenVoice[]> => {
-    options.onProgress?.('Loading ElevenLabs voices...')
-    const defaultVoicesPromise = loadPagedVoices(
+  const publish = async (provider: AudioGenProvider, voices: AudioGenVoice[]) => {
+    catalogs[provider] = uniqueVoices(voices)
+    loadedProviders += 1
+    await db.put('catalogs', { fetchedAt: Date.now(), catalogs }, CACHE_KEY)
+    options.onCatalogUpdate?.({
+      elevenlabs: [...catalogs.elevenlabs],
+      minimax: [...catalogs.minimax],
+      capcut: [...catalogs.capcut],
+    })
+    options.onProgress?.(
+      `${AUDIO_GEN_PROVIDER_LABELS[provider]} loaded: ${catalogs[provider].length} voices (${loadedProviders}/3 providers)`,
+    )
+  }
+
+  try {
+    options.onProgress?.('Loading ElevenLabs default voices, page 1...')
+    const defaults = await loadPagedVoices(
       '/v1/default-voices',
       normalizedApiKey,
       'page',
       0,
       1,
+      {},
+      (page, count) =>
+        options.onProgress?.(
+          `Loading ElevenLabs default voices, page ${page + 1} (${count} voices)...`,
+        ),
     )
-    const sharedVoicesPromise = loadPagedVoices(
+    const shared = await loadPagedVoices(
       '/v1/shared-voices',
       normalizedApiKey,
       'page',
       0,
-      3,
+      100,
       { sort: 'trending' },
-    ).catch(() => [] as AudioGenVoice[])
-
-    const [defaults, shared] = await Promise.all([defaultVoicesPromise, sharedVoicesPromise])
-    return uniqueVoices([...defaults, ...shared, ...DEFAULT_AUDIO_GEN_VOICES.elevenlabs])
+      (page, count) =>
+        options.onProgress?.(`Loading ElevenLabs shared page ${page + 1} (${count} voices)...`),
+    )
+    await publish('elevenlabs', [...defaults, ...shared, ...DEFAULT_AUDIO_GEN_VOICES.elevenlabs])
+  } catch (error) {
+    lastError = error
+    options.onProgress?.('ElevenLabs failed; continuing with other providers...')
   }
 
-  // 2. MiniMax: System voices (~600) + Cloned custom voices
-  const loadMiniMax = async (): Promise<AudioGenVoice[]> => {
-    options.onProgress?.('Loading MiniMax voices...')
-    const systemVoicesPromise = loadPagedVoices(
+  try {
+    options.onProgress?.('Loading MiniMax system voices, page 1...')
+    const system = await loadPagedVoices(
       '/v1/minimax/system-voices',
       normalizedApiKey,
       'page',
       1,
-      6,
+      100,
+      {},
+      (page, count) => options.onProgress?.(`Loading MiniMax page ${page} (${count} voices)...`),
     )
-    const clonedVoicesPromise = requestGenMax('/v1/minimax/voices', normalizedApiKey)
-      .then(async (res) => {
-        const payload = await res.json()
-        return getVoiceArray(payload)
-          .map(normalizeVoice)
-          .filter((v): v is AudioGenVoice => Boolean(v))
-      })
-      .catch(() => [] as AudioGenVoice[])
-
-    const [system, cloned] = await Promise.all([systemVoicesPromise, clonedVoicesPromise])
-    return uniqueVoices([...cloned, ...system, ...DEFAULT_AUDIO_GEN_VOICES.minimax])
+    const cloned = await requestGenMax('/v1/minimax/voices', normalizedApiKey).then(async (res) => {
+      const payload = await res.json()
+      return getVoiceArray(payload)
+        .map(normalizeVoice)
+        .filter((voice): voice is AudioGenVoice => Boolean(voice))
+    })
+    await publish('minimax', [...system, ...cloned, ...DEFAULT_AUDIO_GEN_VOICES.minimax])
+  } catch (error) {
+    lastError = error
+    options.onProgress?.('MiniMax failed; continuing with CapCut...')
   }
 
-  // 3. CapCut: System voices (~492)
-  const loadCapCut = async (): Promise<AudioGenVoice[]> => {
-    options.onProgress?.('Loading CapCut voices...')
-    const system = await loadPagedVoices('/v1/capcut/system-voices', normalizedApiKey, 'page', 1, 5)
-    return uniqueVoices([...system, ...DEFAULT_AUDIO_GEN_VOICES.capcut])
+  try {
+    options.onProgress?.('Loading CapCut system voices, page 1...')
+    const system = await loadPagedVoices(
+      '/v1/capcut/system-voices',
+      normalizedApiKey,
+      'page',
+      1,
+      100,
+      {},
+      (page, count) => options.onProgress?.(`Loading CapCut page ${page} (${count} voices)...`),
+    )
+    await publish('capcut', [...system, ...DEFAULT_AUDIO_GEN_VOICES.capcut])
+  } catch (error) {
+    lastError = error
   }
 
-  const [elevenLabsResult, minimaxResult, capcutResult] = await Promise.allSettled([
-    loadElevenLabs(),
-    loadMiniMax(),
-    loadCapCut(),
-  ])
-
-  const catalogs: AudioGenVoiceCatalog = {
-    elevenlabs:
-      elevenLabsResult.status === 'fulfilled' && elevenLabsResult.value.length > 0
-        ? elevenLabsResult.value
-        : (cached?.catalogs.elevenlabs ?? DEFAULT_AUDIO_GEN_VOICES.elevenlabs),
-    minimax:
-      minimaxResult.status === 'fulfilled' && minimaxResult.value.length > 0
-        ? minimaxResult.value
-        : (cached?.catalogs.minimax ?? DEFAULT_AUDIO_GEN_VOICES.minimax),
-    capcut:
-      capcutResult.status === 'fulfilled' && capcutResult.value.length > 0
-        ? capcutResult.value
-        : (cached?.catalogs.capcut ?? DEFAULT_AUDIO_GEN_VOICES.capcut),
+  if (loadedProviders === 0) {
+    throw lastError instanceof Error
+      ? lastError
+      : new Error('Failed to load voice catalogs from GenMax.')
   }
 
-  // Check if all failed
-  if (
-    elevenLabsResult.status === 'rejected' &&
-    minimaxResult.status === 'rejected' &&
-    capcutResult.status === 'rejected'
-  ) {
-    const errorMsg =
-      (minimaxResult.reason instanceof Error ? minimaxResult.reason.message : '') ||
-      (elevenLabsResult.reason instanceof Error ? elevenLabsResult.reason.message : '') ||
-      'Failed to load voice catalogs from GenMax.'
-    throw new Error(errorMsg)
-  }
-
-  await db.put('catalogs', { fetchedAt: Date.now(), catalogs }, CACHE_KEY)
-  options.onProgress?.('Catalogs loaded successfully!')
+  options.onProgress?.('All available voice catalogs loaded.')
   return catalogs
 }
 

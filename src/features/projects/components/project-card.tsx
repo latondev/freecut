@@ -11,7 +11,9 @@ import {
   AlertTriangle,
   HardDrive,
   Check,
+  Loader2,
 } from 'lucide-react'
+import { useProjectStore } from '../stores/project-store'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -135,7 +137,12 @@ export function ProjectCard({
     onEdit?.(project)
   }
 
+  const openingProjectId = useProjectStore((s) => s.openingProjectId)
+  const isOpening = openingProjectId === project.id
+
   const openProject = () => {
+    if (isOpening) return
+    useProjectStore.getState().setOpeningProjectId(project.id)
     navigate({ to: '/editor/$projectId', params: { projectId: project.id } })
   }
 
@@ -192,8 +199,20 @@ export function ProjectCard({
         isSelected
           ? 'border-primary ring-2 ring-primary/40 shadow-lg shadow-primary/10'
           : 'border-border hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5'
-      }`}
+      } ${isOpening ? 'ring-2 ring-primary/60 border-primary/50 cursor-wait' : ''}`}
     >
+      {/* Loading Alpha Overlay on Card */}
+      {isOpening && (
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-black/80 backdrop-blur-[2px] animate-in fade-in-0 duration-150 pointer-events-auto cursor-wait select-none">
+          <div className="relative flex items-center justify-center">
+            <div className="h-9 w-9 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
+            <Loader2 className="h-4 w-4 text-primary animate-spin absolute" />
+          </div>
+          <span className="text-xs font-semibold text-white tracking-wide">Đang mở dự án...</span>
+          <span className="text-[10px] text-zinc-400">Loading...</span>
+        </div>
+      )}
+
       {/* Selection check badge */}
       {isSelected && (
         <div className="absolute top-2 left-2 z-10 w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-md pointer-events-none">

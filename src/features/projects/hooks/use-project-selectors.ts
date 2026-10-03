@@ -60,6 +60,11 @@ export const useProjectsLoading = () => useProjectStore((s) => s.isLoading)
 export const useProjectsError = () => useProjectStore((s) => s.error)
 
 /**
+ * Get opening project ID
+ */
+export const useOpeningProjectId = () => useProjectStore((s) => s.openingProjectId)
+
+/**
  * Get sort field
  */
 export const useSortField = () => useProjectStore((s) => s.sortField)

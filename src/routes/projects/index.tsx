@@ -7,7 +7,7 @@ import { createLogger } from '@/shared/logging/logger'
 const logger = createLogger('ProjectsIndex')
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import { Plus, Upload, FolderOpen, File, Github, BookOpen } from 'lucide-react'
+import { Plus, Upload, FolderOpen, File, Github, BookOpen, Loader2 } from 'lucide-react'
 import { FreeCutLogo } from '@/components/brand/freecut-logo'
 import { DiscordIcon } from '@/components/brand/discord-icon'
 import { DISCORD_INVITE_URL } from '@/config/community'
@@ -28,6 +28,7 @@ import {
   useProjects,
   useProjectsLoading,
   useProjectsError,
+  useOpeningProjectId,
 } from '@/features/projects/hooks/use-project-selectors'
 import { cleanupBlobUrls } from '@/features/media-library/utils/media-resolver'
 import type { Project } from '@/types/project'
@@ -45,6 +46,8 @@ export const Route = createFileRoute('/projects/')({
   // Clean up any media blob URLs when returning to projects page
   beforeLoad: async () => {
     cleanupBlobUrls()
+    // Reset opening state when returning to /projects
+    useProjectStore.getState().setOpeningProjectId(null)
     // Always reload projects from storage to get fresh data (thumbnails may have changed)
     const { loadProjects } = useProjectStore.getState()
     await loadProjects()
@@ -92,7 +95,19 @@ function ProjectsIndex() {
   const isLoading = useProjectsLoading()
   const projects = useProjects()
   const error = useProjectsError()
+  const openingProjectId = useOpeningProjectId()
   const { loadProjects, updateProject } = useProjectActions()
+
+  const openingProject = openingProjectId ? projects.find((p) => p.id === openingProjectId) : null
+
+  // Safety fallback: if navigation takes too long or errors out, clear the overlay
+  useEffect(() => {
+    if (!openingProjectId) return
+    const timer = setTimeout(() => {
+      useProjectStore.getState().setOpeningProjectId(null)
+    }, 15000)
+    return () => clearTimeout(timer)
+  }, [openingProjectId])
 
   // Only show the full-page spinner for the genuine initial load — mutations
   // (delete/duplicate/update) should never blank the populated list.
@@ -201,6 +216,7 @@ function ProjectsIndex() {
 
       // Close dialog and navigate to the imported project
       handleCloseImportDialog()
+      useProjectStore.getState().setOpeningProjectId(result.project.id)
       navigate({ to: '/editor/$projectId', params: { projectId: result.project.id } })
     } catch (err) {
       logger.error('Import failed:', err)
@@ -526,6 +542,31 @@ function ProjectsIndex() {
           ) : null}
         </DialogContent>
       </Dialog>
+
+      {/* Full-screen Loading Alpha Overlay when opening a project */}
+      {openingProjectId && (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/75 backdrop-blur-sm select-none animate-in fade-in-0 duration-150 cursor-wait pointer-events-auto"
+        >
+          <div className="flex flex-col items-center gap-4 rounded-2xl border border-white/10 bg-zinc-900/95 px-8 py-6 shadow-2xl backdrop-blur-md max-w-sm mx-4 text-center">
+            <div className="relative flex items-center justify-center">
+              <div className="h-12 w-12 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
+              <Loader2 className="h-6 w-6 text-primary animate-spin absolute" />
+            </div>
+            <div className="flex flex-col items-center gap-1.5">
+              <span className="text-base font-semibold text-white tracking-wide">
+                Đang mở dự án{openingProject?.name ? ` "${openingProject.name}"` : ''}...
+              </span>
+              <span className="text-xs text-zinc-400">
+                Vui lòng đợi trong giây lát • Loading...
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

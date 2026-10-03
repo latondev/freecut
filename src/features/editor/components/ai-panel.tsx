@@ -13,15 +13,22 @@ import {
   CheckCircle2,
   ChevronDown,
   Download,
+  FileText,
   Info,
   ListPlus,
   Loader2,
+  Mic,
   Pause,
   Play,
+  RotateCw,
+  Settings,
+  SlidersHorizontal,
   Trash2,
+  Upload,
   WandSparkles,
   X,
 } from 'lucide-react'
+import { VoiceLibraryDialog } from './voice-library-dialog'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Label } from '@/components/ui/label'
@@ -97,6 +104,8 @@ const AUDIO_GEN_PROVIDER_LABELS: Record<AudioGenProvider, string> = {
   minimax: 'MiniMax',
   capcut: 'CapCut',
 }
+
+type AiSection = 'audio-gen' | 'tts' | 'music'
 
 const MUSIC_PROMPT_PRESETS = [
   {
@@ -241,7 +250,9 @@ export const AiPanel = memo(function AiPanel() {
   const selectMedia = useMediaLibraryStore((state) => state.selectMedia)
   const showNotification = useMediaLibraryStore((state) => state.showNotification)
 
+  const [activeAiSection, setActiveAiSection] = useState<AiSection>('audio-gen')
   const [audioGenProvider, setAudioGenProvider] = useState<AudioGenProvider>('minimax')
+  const [audioGenSettingsOpen, setAudioGenSettingsOpen] = useState(false)
   const [genMaxApiKey, setGenMaxApiKey] = useState(() => {
     try {
       return localStorage.getItem('freecut:genmax-api-key') || ''
@@ -257,13 +268,27 @@ export const AiPanel = memo(function AiPanel() {
   const [audioGenVoice, setAudioGenVoice] = useState(
     () => DEFAULT_AUDIO_GEN_VOICES.minimax[0]?.id || '',
   )
-  const [audioGenVoiceSearch, setAudioGenVoiceSearch] = useState('')
   const [isLoadingAudioGenVoices, setIsLoadingAudioGenVoices] = useState(false)
   const [audioGenVoiceLoadProgress, setAudioGenVoiceLoadProgress] = useState<string | null>(null)
   const [audioGenVoiceError, setAudioGenVoiceError] = useState<string | null>(null)
   const [audioGenVoiceSuccess, setAudioGenVoiceSuccess] = useState<string | null>(null)
   const [audioGenPreviewPlayingId, setAudioGenPreviewPlayingId] = useState<string | null>(null)
+  const [audioGenPreviewLoadingId, setAudioGenPreviewLoadingId] = useState<string | null>(null)
+  const [voiceLibraryOpen, setVoiceLibraryOpen] = useState(false)
   const audioGenPreviewAudioRef = useRef<HTMLAudioElement | null>(null)
+  const audioGenBlobUrlRef = useRef<string | null>(null)
+
+  const handleSelectVoiceFromLibrary = useCallback(
+    (voiceId: string, provider: AudioGenProvider, voice: AudioGenVoice) => {
+      setAudioGenProvider(provider)
+      setAudioGenVoice(voiceId)
+      showNotification({
+        type: 'success',
+        message: `Đã chọn: ${voice.label} (${AUDIO_GEN_PROVIDER_LABELS[provider]})`,
+      })
+    },
+    [showNotification],
+  )
   const [ttsText, setTtsText] = useState(() => t('editor.aiPanel.defaultTtsPrompt'))
   const [ttsEngine, setTtsEngine] = useState<StoredTtsEngine>(() => getStoredTtsEngine())
   const [ttsKokoroVoice, setTtsKokoroVoice] = useState<KokoroTtsVoice>('af_heart')
@@ -313,6 +338,10 @@ export const AiPanel = memo(function AiPanel() {
       musicAbortRef.current = null
       audioGenPreviewAudioRef.current?.pause()
       audioGenPreviewAudioRef.current = null
+      if (audioGenBlobUrlRef.current) {
+        URL.revokeObjectURL(audioGenBlobUrlRef.current)
+        audioGenBlobUrlRef.current = null
+      }
       for (const url of urls) {
         URL.revokeObjectURL(url)
       }
@@ -340,29 +369,157 @@ export const AiPanel = memo(function AiPanel() {
 
   const handleApiKeyChange = (key: string) => {
     setGenMaxApiKey(key)
+  }
+
+  const saveGenMaxApiKey = () => {
     try {
-      localStorage.setItem('freecut:genmax-api-key', key)
-    } catch {}
+      localStorage.setItem('freecut:genmax-api-key', genMaxApiKey.trim())
+      setAudioGenVoiceSuccess('GenMax API key saved on this device.')
+      setAudioGenSettingsOpen(false)
+    } catch {
+      setAudioGenVoiceError('Could not save the GenMax API key on this device.')
+    }
   }
 
   const togglePlayVoicePreview = useCallback(
-    (voiceItem?: AudioGenVoice) => {
-      if (!voiceItem?.previewUrl) return
-      if (audioGenPreviewPlayingId === voiceItem.id) {
-        audioGenPreviewAudioRef.current?.pause()
-        setAudioGenPreviewPlayingId(null)
+    async (voiceItem?: AudioGenVoice) => {
+      if (!voiceItem?.previewUrl) {
+        showNotification({ type: 'warning', message: 'Giọng này chưa có file nghe thử.' })
         return
       }
-      if (!audioGenPreviewAudioRef.current) {
-        audioGenPreviewAudioRef.current = new Audio()
-        audioGenPreviewAudioRef.current.onended = () => setAudioGenPreviewPlayingId(null)
-        audioGenPreviewAudioRef.current.onerror = () => setAudioGenPreviewPlayingId(null)
+      if (audioGenPreviewPlayingId === voiceItem.id || audioGenPreviewLoadingId === voiceItem.id) {
+        audioGenPreviewAudioRef.current?.pause()
+        setAudioGenPreviewPlayingId(null)
+        setAudioGenPreviewLoadingId(null)
+        return
       }
-      audioGenPreviewAudioRef.current.src = voiceItem.previewUrl
-      audioGenPreviewAudioRef.current.play().catch(() => setAudioGenPreviewPlayingId(null))
-      setAudioGenPreviewPlayingId(voiceItem.id)
+
+      if (audioGenPreviewAudioRef.current) {
+        audioGenPreviewAudioRef.current.pause()
+        audioGenPreviewAudioRef.current.currentTime = 0
+      }
+      if (audioGenBlobUrlRef.current) {
+        URL.revokeObjectURL(audioGenBlobUrlRef.current)
+        audioGenBlobUrlRef.current = null
+      }
+
+      setAudioGenPreviewLoadingId(voiceItem.id)
+      setAudioGenPreviewPlayingId(null)
+
+      let audio = audioGenPreviewAudioRef.current
+      if (!audio) {
+        audio = new Audio()
+        audioGenPreviewAudioRef.current = audio
+      }
+      audio.crossOrigin = 'anonymous'
+
+      const rawUrl = voiceItem.previewUrl
+      const resolvedUrl = rawUrl.startsWith('https://api.genmax.io')
+        ? rawUrl.replace('https://api.genmax.io', '/api/genmax')
+        : rawUrl
+
+      audio.onended = () => {
+        setAudioGenPreviewPlayingId(null)
+        setAudioGenPreviewLoadingId(null)
+      }
+
+      try {
+        audio.src = resolvedUrl
+        await audio.play()
+        setAudioGenPreviewLoadingId(null)
+        setAudioGenPreviewPlayingId(voiceItem.id)
+      } catch (err) {
+        try {
+          const res = await fetch(resolvedUrl)
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          const blob = await res.blob()
+          const blobUrl = URL.createObjectURL(blob)
+          audioGenBlobUrlRef.current = blobUrl
+          audio.src = blobUrl
+          await audio.play()
+          setAudioGenPreviewLoadingId(null)
+          setAudioGenPreviewPlayingId(voiceItem.id)
+        } catch (fallbackErr) {
+          console.error('[VoicePreview] Failed to play preview audio:', fallbackErr || err)
+          showNotification({
+            type: 'error',
+            message: 'Không thể phát file nghe thử mẫu giọng này.',
+          })
+          setAudioGenPreviewLoadingId(null)
+          setAudioGenPreviewPlayingId(null)
+        }
+      }
     },
-    [audioGenPreviewPlayingId],
+    [audioGenPreviewPlayingId, audioGenPreviewLoadingId, showNotification],
+  )
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [isDraggingFile, setIsDraggingFile] = useState(false)
+  const [loadedFileName, setLoadedFileName] = useState<string | null>(null)
+
+  const handleFileRead = useCallback(
+    (file: File) => {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const content = e.target?.result
+        if (typeof content === 'string') {
+          setTtsText(content)
+          setLoadedFileName(file.name)
+          showNotification({
+            type: 'success',
+            message: `Đã nạp văn bản từ tệp "${file.name}" (${content.length} ký tự)`,
+          })
+        }
+      }
+      reader.onerror = () => {
+        showNotification({
+          type: 'error',
+          message: `Không thể đọc tệp "${file.name}".`,
+        })
+      }
+      reader.readAsText(file, 'utf-8')
+    },
+    [setTtsText, showNotification],
+  )
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDraggingFile(true)
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return
+    setIsDraggingFile(false)
+  }, [])
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setIsDraggingFile(false)
+      const files = e.dataTransfer.files
+      if (files && files.length > 0) {
+        const file = files[0]
+        if (file) {
+          handleFileRead(file)
+        }
+      }
+    },
+    [handleFileRead],
+  )
+
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      if (file) {
+        handleFileRead(file)
+      }
+      e.target.value = ''
+    },
+    [handleFileRead],
   )
 
   const isKokoroSupported = kokoroTtsService.isSupported()
@@ -389,15 +546,7 @@ export const AiPanel = memo(function AiPanel() {
   const isMusicSupported = musicgenService.isSupported()
   const trimmedTtsText = ttsText.trim()
   const audioGenVoiceOptions = genMaxVoiceCatalog[audioGenProvider]
-  const filteredAudioGenVoiceOptions = useMemo(() => {
-    const query = audioGenVoiceSearch.trim().toLowerCase()
-    if (!query) return audioGenVoiceOptions
-    return audioGenVoiceOptions.filter((voiceOption) =>
-      [voiceOption.label, voiceOption.id, voiceOption.description, voiceOption.language]
-        .filter(Boolean)
-        .some((value) => value!.toLowerCase().includes(query)),
-    )
-  }, [audioGenVoiceOptions, audioGenVoiceSearch])
+  const filteredAudioGenVoiceOptions = audioGenVoiceOptions
   const selectedAudioGenVoice = useMemo(
     () =>
       audioGenVoiceOptions.find((voiceOption) => voiceOption.id === audioGenVoice) ??
@@ -422,6 +571,7 @@ export const AiPanel = memo(function AiPanel() {
       const catalog = await loadGenMaxVoiceCatalog(apiKey, {
         forceRefresh: true,
         onProgress: (stage) => setAudioGenVoiceLoadProgress(stage),
+        onCatalogUpdate: (catalog) => setGenMaxVoiceCatalog(catalog),
       })
       setGenMaxVoiceCatalog(catalog)
       if (catalog[audioGenProvider]?.length > 0) {
@@ -877,440 +1027,404 @@ export const AiPanel = memo(function AiPanel() {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-3">
       <div className="space-y-3">
-        <section className="rounded-lg border border-border bg-secondary/20 p-3">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div>
-              <h2 className="text-sm font-medium">Audio Gen</h2>
-              <p className="text-[11px] text-muted-foreground">
-                AI voice generation via GenMax API (ElevenLabs, MiniMax, CapCut).
-              </p>
-            </div>
-            <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
-              {AUDIO_GEN_PROVIDER_LABELS[audioGenProvider]}
-            </span>
-          </div>
+        <div className="flex gap-1 overflow-x-auto rounded-lg border border-border/70 bg-secondary/20 p-1">
+          {[
+            { id: 'audio-gen' as const, label: 'Audio Gen', icon: WandSparkles },
+            { id: 'tts' as const, label: 'Text to Speech', icon: ListPlus },
+            { id: 'music' as const, label: 'Music Generation', icon: Play },
+          ].map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setActiveAiSection(id)}
+              aria-pressed={activeAiSection === id}
+              className={cn(
+                'flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-medium transition-colors',
+                activeAiSection === id
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-secondary/70 hover:text-foreground',
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
 
-          <div className="grid grid-cols-3 gap-1.5">
-            {(Object.keys(AUDIO_GEN_PROVIDER_LABELS) as AudioGenProvider[]).map((provider) => (
-              <Button
-                key={provider}
-                type="button"
-                size="sm"
-                variant={audioGenProvider === provider ? 'default' : 'outline'}
-                className="h-8 px-2 text-[11px]"
-                onClick={() => {
-                  setAudioGenProvider(provider)
-                  const firstVoice = genMaxVoiceCatalog[provider][0]
-                  if (firstVoice) {
-                    setAudioGenVoice(firstVoice.id)
-                  }
-                }}
-              >
-                {AUDIO_GEN_PROVIDER_LABELS[provider]}
-              </Button>
-            ))}
-          </div>
+        {activeAiSection === 'audio-gen' && (
+          <section className="space-y-3 rounded-lg border border-border bg-secondary/20 p-3">
+            {/* Top Toolbar: Voice Selector + Preview + Load Voices + Settings */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-foreground tracking-wide flex items-center gap-1.5">
+                  <Mic className="h-3.5 w-3.5 text-primary" />
+                  <span>Giọng đọc đang chọn</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setVoiceLibraryOpen(true)}
+                  className="text-[10px] text-primary hover:underline font-medium"
+                >
+                  Mở thư viện giọng &rarr;
+                </button>
+              </div>
 
-          <div className="mt-2.5 space-y-1">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="ai-genmax-api-key" className="text-[11px]">
-                GenMax API Key (xi-api-key)
-              </Label>
-              <a
-                href="https://genmax.io/docs"
-                target="_blank"
-                rel="noreferrer"
-                className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80"
-              >
-                genmax.io/docs
-              </a>
-            </div>
-            <div className="flex gap-1.5">
-              <input
-                id="ai-genmax-api-key"
-                type="password"
-                value={genMaxApiKey}
-                onChange={(event) => handleApiKeyChange(event.target.value)}
-                placeholder="sk_..."
-                autoComplete="off"
-                className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground"
-              />
-              <Button
-                type="button"
-                size="sm"
-                className="h-8 shrink-0 px-2.5 text-[11px]"
-                onClick={() => void loadAllGenMaxVoices()}
-                disabled={isLoadingAudioGenVoices}
-              >
-                {isLoadingAudioGenVoices ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  'Load Voices'
-                )}
-              </Button>
-            </div>
-            {audioGenVoiceLoadProgress && (
-              <p className="flex items-center gap-1.5 text-[11px] text-primary">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                {audioGenVoiceLoadProgress}
-              </p>
-            )}
-            {audioGenVoiceSuccess && (
-              <p className="text-[10px] text-emerald-400">{audioGenVoiceSuccess}</p>
-            )}
-            {audioGenVoiceError && (
-              <p className="text-[10px] text-destructive">{audioGenVoiceError}</p>
-            )}
-          </div>
+              <div className="flex items-stretch gap-1.5">
+                {/* Clickable Voice Info Card (Opens Voice Library Dialog) */}
+                <button
+                  type="button"
+                  onClick={() => setVoiceLibraryOpen(true)}
+                  className="group relative flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg border border-border/80 bg-secondary/50 p-2 text-left transition-all hover:border-primary/60 hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary shadow-sm"
+                  title="Nhấp để đổi giọng đọc hoặc mở Thư viện giọng nói"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-semibold text-foreground group-hover:text-primary transition-colors">
+                      {selectedAudioGenVoice.label || 'Chọn giọng đọc...'}
+                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                      {selectedAudioGenVoice.language && (
+                        <span className="rounded bg-sky-950/70 border border-sky-800/40 px-1.5 py-0.2 text-[9px] font-medium text-sky-300">
+                          {selectedAudioGenVoice.language}
+                        </span>
+                      )}
+                      {selectedAudioGenVoice.gender && (
+                        <span className="rounded bg-zinc-800 px-1.5 py-0.2 text-[9px] text-zinc-300">
+                          {selectedAudioGenVoice.gender}
+                        </span>
+                      )}
+                      <span className="rounded bg-primary/10 border border-primary/20 px-1.5 py-0.2 font-mono text-[9px] text-primary">
+                        {AUDIO_GEN_PROVIDER_LABELS[audioGenProvider]}
+                      </span>
+                    </div>
+                  </div>
+                  <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-primary transition-colors" />
+                </button>
 
-          <div className="mt-2.5 space-y-1">
-            <Label htmlFor="ai-audio-gen-voice-search" className="text-[11px]">
-              Search {AUDIO_GEN_PROVIDER_LABELS[audioGenProvider]} Voices (
-              {audioGenVoiceOptions.length} available)
-            </Label>
-            <input
-              id="ai-audio-gen-voice-search"
-              value={audioGenVoiceSearch}
-              onChange={(event) => setAudioGenVoiceSearch(event.target.value)}
-              placeholder="Filter by name, ID, language (e.g. Vietnamese, English)..."
-              className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground"
-            />
-          </div>
-
-          <div className="mt-2 space-y-1.5">
-            <Label htmlFor="ai-audio-gen-voice" className="text-[11px]">
-              Voice ({filteredAudioGenVoiceOptions.length} matches)
-            </Label>
-            <div className="flex items-center gap-1.5">
-              <select
-                id="ai-audio-gen-voice"
-                value={selectedAudioGenVoice.id}
-                onChange={(event) => setAudioGenVoice(event.target.value)}
-                className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground"
-              >
-                {filteredAudioGenVoiceOptions.map((voiceOption) => (
-                  <option key={voiceOption.id} value={voiceOption.id}>
-                    {voiceOption.label} {voiceOption.language ? `[${voiceOption.language}]` : ''}
-                  </option>
-                ))}
-              </select>
-              {selectedAudioGenVoice.previewUrl && (
+                {/* Preview Button (Nghe thử / Dừng) */}
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  className="h-8 shrink-0 gap-1 px-2 text-[11px]"
-                  onClick={() => togglePlayVoicePreview(selectedAudioGenVoice)}
-                  title="Play voice preview sample"
+                  disabled={
+                    !selectedAudioGenVoice.previewUrl ||
+                    Boolean(
+                      audioGenPreviewLoadingId &&
+                      audioGenPreviewLoadingId !== selectedAudioGenVoice.id,
+                    )
+                  }
+                  onClick={() => void togglePlayVoicePreview(selectedAudioGenVoice)}
+                  className={cn(
+                    'h-auto min-h-[46px] shrink-0 gap-1.5 px-3 text-xs font-medium transition-colors shadow-sm',
+                    audioGenPreviewPlayingId === selectedAudioGenVoice.id
+                      ? 'border-red-500/50 bg-red-500/20 text-red-300 hover:bg-red-500/30'
+                      : audioGenPreviewLoadingId === selectedAudioGenVoice.id
+                        ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                        : 'border-border bg-secondary/50 text-foreground hover:bg-secondary/80 hover:border-primary/50',
+                  )}
+                  title={
+                    selectedAudioGenVoice.previewUrl
+                      ? 'Nghe thử mẫu giọng'
+                      : 'Giọng này chưa có file nghe thử'
+                  }
                 >
-                  {audioGenPreviewPlayingId === selectedAudioGenVoice.id ? (
+                  {audioGenPreviewLoadingId === selectedAudioGenVoice.id ? (
                     <>
-                      <Pause className="h-3 w-3 text-primary" />
-                      <span className="text-[10px]">Stop</span>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" />
+                      <span className="text-[11px]">Đang tải...</span>
+                    </>
+                  ) : audioGenPreviewPlayingId === selectedAudioGenVoice.id ? (
+                    <>
+                      <Pause className="h-3.5 w-3.5 text-red-400" />
+                      <span className="text-[11px]">Dừng</span>
                     </>
                   ) : (
                     <>
-                      <Play className="h-3 w-3 text-primary ml-px" />
-                      <span className="text-[10px]">Preview</span>
+                      <Play className="h-3.5 w-3.5 text-primary ml-0.5" />
+                      <span className="text-[11px]">Nghe thử</span>
                     </>
                   )}
                 </Button>
+
+                {/* Settings Button */}
+                <Button
+                  type="button"
+                  size="icon"
+                  variant={audioGenSettingsOpen ? 'default' : 'outline'}
+                  className={cn(
+                    'h-auto min-h-[46px] w-9 shrink-0 border-border transition-colors',
+                    audioGenSettingsOpen
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-secondary/50 hover:bg-secondary/80 hover:border-primary/50 text-foreground',
+                  )}
+                  onClick={() => setAudioGenSettingsOpen((open) => !open)}
+                  title="Cài đặt GenMax API Key & Tải giọng"
+                >
+                  <Settings className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {/* Status indicator for voice loading when settings is closed */}
+              {audioGenVoiceLoadProgress && !audioGenSettingsOpen && (
+                <p className="flex items-center gap-1.5 text-[11px] text-primary">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <span>{audioGenVoiceLoadProgress}</span>
+                </p>
               )}
             </div>
-            {selectedAudioGenVoice.description && (
-              <p className="rounded bg-secondary/30 p-1.5 text-[11px] leading-relaxed text-muted-foreground">
-                {selectedAudioGenVoice.description}
-              </p>
-            )}
-          </div>
 
-          <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/40 pt-2.5">
-            <span className="text-[10px] text-muted-foreground">Uses prompt text below</span>
-            <Button
-              type="button"
-              size="sm"
-              className="h-7 gap-1.5 text-xs"
-              onClick={() => {
-                setTtsEngine('genmax')
-                void handleGenerate()
-              }}
-              disabled={isGenerating || !trimmedText || !currentProjectId || !genMaxApiKey.trim()}
-            >
-              {isGenerating && ttsEngine === 'genmax' ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <WandSparkles className="h-3.5 w-3.5" />
-              )}
-              {isGenerating && ttsEngine === 'genmax' ? 'Generating...' : 'Generate with Audio Gen'}
-            </Button>
-          </div>
-        </section>
-        <Collapsible open={ttsSectionOpen} onOpenChange={setTtsSectionOpen}>
-          <div className="-mx-3 -mt-3 bg-secondary/50 px-3 py-2">
-            <CollapsibleTrigger asChild>
-              <button
-                type="button"
-                className="flex w-full items-center justify-between gap-2 text-left"
-                aria-label={
-                  ttsSectionOpen
-                    ? t('editor.aiPanel.collapseTextToSpeech')
-                    : t('editor.aiPanel.expandTextToSpeech')
-                }
-              >
-                <h2 className="text-sm font-medium">{t('editor.aiPanel.textToSpeech')}</h2>
-                <ChevronDown
-                  className={cn(
-                    'h-4 w-4 text-muted-foreground transition-transform',
-                    ttsSectionOpen && 'rotate-180',
-                  )}
+            {/* GenMax API Key & Voice Sync Settings Panel */}
+            {audioGenSettingsOpen && (
+              <div className="space-y-2.5 rounded-lg border border-primary/30 bg-primary/5 p-3 animate-in fade-in-0 duration-150">
+                <div className="flex items-center justify-between gap-2">
+                  <Label
+                    htmlFor="ai-genmax-api-key"
+                    className="text-[11px] font-semibold text-foreground"
+                  >
+                    GenMax API Key (xi-api-key)
+                  </Label>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-6 px-2 text-[10px]"
+                    onClick={saveGenMaxApiKey}
+                  >
+                    Lưu trên máy
+                  </Button>
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                  <span>Lưu trên trình duyệt / thiết bị này</span>
+                  <a
+                    href="https://genmax.io/docs"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-primary underline underline-offset-2 hover:opacity-80"
+                  >
+                    genmax.io/docs
+                  </a>
+                </div>
+                <input
+                  id="ai-genmax-api-key"
+                  type="password"
+                  value={genMaxApiKey}
+                  onChange={(event) => handleApiKeyChange(event.target.value)}
+                  placeholder="sk_..."
+                  autoComplete="off"
+                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground"
                 />
-              </button>
-            </CollapsibleTrigger>
-          </div>
 
-          <CollapsibleContent className="space-y-4 pt-3">
-            {!isTtsSupported && (
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">
-                {ttsEngine === 'kokoro'
-                  ? t('editor.tts.kokoroUnsupported')
-                  : ttsEngine === 'moss'
-                    ? t('editor.tts.mossUnsupported')
-                    : t('editor.tts.supertonicUnsupported', {
-                        defaultValue:
-                          'This browser cannot run the local Supertonic TTS runtime. Try a recent Chrome or Edge browser.',
-                      })}
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label htmlFor="ai-tts-text">{t('editor.tts.text')}</Label>
-              <Textarea
-                ref={ttsTextareaRef}
-                id="ai-tts-text"
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-                placeholder={t('editor.tts.textPlaceholder')}
-                className="min-h-24 resize-y bg-secondary/30 text-sm"
-                disabled={isGenerating}
-              />
-              {ttsEngine === 'supertonic' && (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] text-muted-foreground">
-                    {t('editor.tts.expressiveTags', { defaultValue: 'Expressive tags' })}
-                  </span>
-                  {SUPERTONIC_TTS_EXPRESSIVE_TAG_OPTIONS.map((tag) => (
+                {/* Load Voices Button inside Settings */}
+                <div className="border-t border-border/40 pt-2 flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-foreground">
+                      Kho giọng (
+                      {genMaxVoiceCatalog.minimax.length +
+                        genMaxVoiceCatalog.elevenlabs.length +
+                        genMaxVoiceCatalog.capcut.length}{' '}
+                      giọng)
+                    </span>
                     <Button
-                      key={tag.value}
                       type="button"
                       size="sm"
-                      variant="secondary"
-                      className="h-6 px-2 text-[11px]"
-                      onClick={() =>
-                        insertTextAtCursor({
-                          input: ttsTextareaRef.current,
-                          insertText: tag.value,
-                          setText,
-                          text,
-                        })
+                      variant="outline"
+                      className="h-7 gap-1.5 px-2.5 text-[11px] font-medium border-border hover:border-primary/50"
+                      onClick={() => void loadAllGenMaxVoices()}
+                      disabled={isLoadingAudioGenVoices || !genMaxApiKey.trim()}
+                      title={
+                        genMaxApiKey.trim()
+                          ? 'Tải lại danh sách giọng từ GenMax API'
+                          : 'Vui lòng nhập API Key phía trên để tải giọng'
                       }
-                      disabled={isGenerating}
                     >
-                      {tag.label}
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label>{t('editor.tts.engine')}</Label>
-                <Select
-                  value={ttsEngine}
-                  onValueChange={(value) => setTtsEngine(value as StoredTtsEngine)}
-                  disabled={isGenerating}
-                >
-                  <SelectTrigger className="h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="kokoro" className="text-xs">
-                      {t('editor.tts.kokoroOption')}
-                    </SelectItem>
-                    <SelectItem value="moss" className="text-xs">
-                      {t('editor.tts.mossOption')}
-                    </SelectItem>
-                    <SelectItem value="supertonic" className="text-xs">
-                      {t('editor.tts.supertonicOption', {
-                        defaultValue: 'Supertonic 3 (31 languages, local ONNX)',
-                      })}
-                    </SelectItem>
-                    <SelectItem value="genmax" className="text-xs">
-                      Audio Gen (ElevenLabs, MiniMax, CapCut via GenMax)
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3">
-                <div className="space-y-1.5">
-                  <Label>{t('editor.tts.voice')}</Label>
-                  {ttsEngine === 'genmax' ? (
-                    <div className="flex items-center gap-1.5">
-                      <Select
-                        value={selectedAudioGenVoice.id}
-                        onValueChange={(val) => setAudioGenVoice(val)}
-                        disabled={isGenerating}
-                      >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-72">
-                          {filteredAudioGenVoiceOptions.map((v) => (
-                            <SelectItem key={v.id} value={v.id} className="text-xs">
-                              {v.label} {v.language ? `[${v.language}]` : ''}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {selectedAudioGenVoice.previewUrl && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-8 w-8 shrink-0 p-0"
-                          onClick={() => togglePlayVoicePreview(selectedAudioGenVoice)}
-                          title="Preview Voice Sample"
-                        >
-                          {audioGenPreviewPlayingId === selectedAudioGenVoice.id ? (
-                            <Pause className="h-3.5 w-3.5 text-primary" />
-                          ) : (
-                            <Play className="h-3.5 w-3.5 text-primary ml-px" />
-                          )}
-                        </Button>
+                      {isLoadingAudioGenVoices ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                          <span>Đang tải...</span>
+                        </>
+                      ) : (
+                        <>
+                          <RotateCw className="h-3.5 w-3.5 text-primary" />
+                          <span>Tải danh sách giọng</span>
+                        </>
                       )}
-                    </div>
-                  ) : (
-                    <Select
-                      value={voice}
-                      onValueChange={(value) => {
-                        if (ttsEngine === 'kokoro') {
-                          setTtsKokoroVoice(value as KokoroTtsVoice)
-                        } else if (ttsEngine === 'moss') {
-                          setTtsMossVoice(value as MossTtsVoice)
-                        } else {
-                          setTtsSupertonicVoice(value as SupertonicTtsVoice)
-                        }
-                      }}
-                      disabled={isGenerating}
-                    >
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-72">
-                        {(ttsEngine === 'kokoro'
-                          ? KOKORO_TTS_VOICE_OPTIONS
-                          : ttsEngine === 'moss'
-                            ? MOSS_TTS_VOICE_OPTIONS
-                            : SUPERTONIC_TTS_VOICE_OPTIONS
-                        ).map((option) => (
-                          <SelectItem key={option.value} value={option.value} className="text-xs">
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    </Button>
+                  </div>
+
+                  {audioGenVoiceLoadProgress && (
+                    <p className="flex items-center gap-1.5 text-[11px] text-primary">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <span>{audioGenVoiceLoadProgress}</span>
+                    </p>
+                  )}
+                  {audioGenVoiceSuccess && (
+                    <p className="text-[10px] text-emerald-400">{audioGenVoiceSuccess}</p>
+                  )}
+                  {audioGenVoiceError && (
+                    <p className="text-[10px] text-destructive">{audioGenVoiceError}</p>
                   )}
                 </div>
-                {ttsEngine === 'supertonic' && (
-                  <div className="space-y-1.5">
-                    <Label>{t('editor.tts.language', { defaultValue: 'Language' })}</Label>
-                    <Select
-                      value={ttsSupertonicLanguage}
-                      onValueChange={(value) =>
-                        setTtsSupertonicLanguage(value as SupertonicTtsLanguageSelection)
-                      }
-                      disabled={isGenerating}
-                    >
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-72">
-                        {SUPERTONIC_TTS_LANGUAGE_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value} className="text-xs">
-                            {getLanguageDisplayName(
-                              option.value,
-                              option.label,
-                              i18n.language,
-                              t('editor.tts.autoDetectLanguage', {
-                                defaultValue: 'Auto detect',
-                              }),
-                            )}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
               </div>
+            )}
+
+            {/* Prompt Text / Script with Drag & Drop */}
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={cn(
+                'relative space-y-1.5 rounded-lg border transition-all p-2.5',
+                isDraggingFile
+                  ? 'border-primary border-dashed bg-primary/10 ring-2 ring-primary/30'
+                  : 'border-border/70 bg-secondary/30',
+              )}
+            >
+              {/* Hidden File Input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".txt,.md,.markdown,.srt,.vtt,.json,.text"
+                onChange={handleFileInputChange}
+                className="hidden"
+              />
+
+              <div className="flex items-center justify-between gap-1.5">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
+                  <Label
+                    htmlFor="ai-audio-gen-prompt-text"
+                    className="text-[11px] font-semibold text-foreground truncate"
+                  >
+                    Văn bản đọc (Kịch bản)
+                  </Label>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {/* Upload file button */}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="h-6 gap-1 px-1.5 text-[10px] text-primary hover:text-primary hover:bg-primary/10"
+                    title="Mở tệp .txt, .md, .srt từ máy tính"
+                  >
+                    <Upload className="h-3 w-3" />
+                    <span>Tải tệp</span>
+                  </Button>
+
+                  {text.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setText('')
+                        setLoadedFileName(null)
+                      }}
+                      className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-destructive"
+                      title="Xóa văn bản"
+                    >
+                      Xóa
+                    </Button>
+                  )}
+
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    {text.length} ký tự
+                  </span>
+                </div>
+              </div>
+
+              {loadedFileName && (
+                <div className="flex items-center justify-between rounded bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] text-primary">
+                  <span className="truncate">Tệp: {loadedFileName}</span>
+                  <button
+                    type="button"
+                    onClick={() => setLoadedFileName(null)}
+                    className="text-muted-foreground hover:text-primary ml-1"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+
+              <Textarea
+                id="ai-audio-gen-prompt-text"
+                value={text}
+                onChange={(event) => setText(event.target.value)}
+                placeholder="Nhập nội dung cần đọc hoặc kéo thả tệp .txt, .md, .srt vào đây..."
+                className="min-h-24 resize-y bg-background/60 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground/70"
+                disabled={isGenerating}
+              />
+
+              {isDraggingFile && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 rounded-lg bg-background/90 backdrop-blur-sm pointer-events-none">
+                  <Upload className="h-6 w-6 text-primary animate-bounce" />
+                  <p className="text-xs font-semibold text-primary">
+                    Thả tệp .txt, .md, .srt để nạp văn bản
+                  </p>
+                </div>
+              )}
             </div>
 
-            <div className="flex items-center gap-2">
-              {supportsNativeTtsSpeed && (
-                <SliderInput
-                  label={t('editor.tts.speed')}
-                  value={speed}
-                  onChange={setSpeed}
-                  min={ttsSpeedMin}
-                  max={ttsSpeedMax}
-                  step={0.05}
-                  unit="x"
-                  disabled={isGenerating}
-                />
-              )}
+            {/* Speed slider */}
+            <div>
+              <SliderInput
+                label={t('editor.tts.speed')}
+                value={speed}
+                onChange={setSpeed}
+                min={0.5}
+                max={2}
+                step={0.05}
+                unit="x"
+                disabled={isGenerating}
+              />
+            </div>
+
+            {/* Action Row */}
+            <div className="flex items-center justify-between gap-2 border-t border-border/40 pt-2.5">
+              <span className="text-[10px] text-muted-foreground">
+                {trimmedText ? `${trimmedText.length} ký tự` : 'Chưa nhập văn bản'}
+              </span>
               <Button
+                type="button"
                 size="sm"
+                className="h-8 gap-1.5 text-xs font-semibold bg-gradient-to-r from-primary to-orange-600 hover:from-primary/90 hover:to-orange-500 shadow-sm"
                 onClick={() => {
+                  setTtsEngine('genmax')
                   void handleGenerate()
                 }}
-                disabled={isGenerating || !trimmedText || !currentProjectId || !isTtsSupported}
-                className="h-7 shrink-0 gap-1.5"
+                disabled={isGenerating || !trimmedText || !currentProjectId || !genMaxApiKey.trim()}
               >
-                {isGenerating ? (
+                {isGenerating && ttsEngine === 'genmax' ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <WandSparkles className="h-3.5 w-3.5" />
                 )}
-                {isGenerating ? t('editor.tts.generating') : t('editor.tts.generate')}
+                {isGenerating && ttsEngine === 'genmax'
+                  ? 'Đang tạo âm thanh...'
+                  : 'Generate with Audio Gen'}
               </Button>
             </div>
-            <p className="text-[11px] text-muted-foreground">
-              {t('editor.aiPanel.runsLocally', {
-                runtime: currentTtsRuntimeLabel,
-                backend: currentTtsBackendLabel,
-              })}
-            </p>
 
-            {progress && (
-              <div className="rounded-lg border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">
-                {progress}
+            {/* In-tab Progress & Errors */}
+            {progress && ttsEngine === 'genmax' && (
+              <div className="mt-2.5 rounded-lg border border-primary/30 bg-primary/10 p-2.5 text-xs text-primary flex items-center gap-2">
+                <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                <span>{progress}</span>
               </div>
             )}
 
-            {error && (
-              <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+            {error && ttsEngine === 'genmax' && (
+              <div className="mt-2.5 rounded-lg border border-destructive/40 bg-destructive/10 p-2.5 text-xs text-destructive">
                 {error}
               </div>
             )}
 
+            {/* Generations History */}
             {generations.length > 0 && (
-              <div className="space-y-2">
+              <div className="mt-3.5 space-y-2 border-t border-border/40 pt-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-muted-foreground">
-                    {t('editor.aiPanel.history', {
-                      count: generations.length,
-                      size: formatBytes(totalBytes),
-                    })}
+                    Lịch sử ({generations.length})
                   </span>
                   <Button
                     variant="ghost"
@@ -1337,223 +1451,538 @@ export const AiPanel = memo(function AiPanel() {
                 </div>
               </div>
             )}
-          </CollapsibleContent>
-        </Collapsible>
-
-        <Collapsible open={musicSectionOpen} onOpenChange={setMusicSectionOpen}>
-          <div className="-mx-3 bg-secondary/50 px-3 py-2">
-            <div className="flex items-center gap-2">
+          </section>
+        )}
+        {activeAiSection === 'tts' && (
+          <Collapsible open={ttsSectionOpen} onOpenChange={setTtsSectionOpen}>
+            <div className="-mx-3 -mt-3 bg-secondary/50 px-3 py-2">
               <CollapsibleTrigger asChild>
                 <button
                   type="button"
-                  className="flex flex-1 items-center justify-between gap-2 text-left"
+                  className="flex w-full items-center justify-between gap-2 text-left"
                   aria-label={
-                    musicSectionOpen
-                      ? t('editor.aiPanel.collapseMusicGeneration')
-                      : t('editor.aiPanel.expandMusicGeneration')
+                    ttsSectionOpen
+                      ? t('editor.aiPanel.collapseTextToSpeech')
+                      : t('editor.aiPanel.expandTextToSpeech')
                   }
                 >
-                  <h2 className="text-sm font-medium">{t('editor.aiPanel.musicGeneration')}</h2>
+                  <h2 className="text-sm font-medium">{t('editor.aiPanel.textToSpeech')}</h2>
                   <ChevronDown
                     className={cn(
                       'h-4 w-4 text-muted-foreground transition-transform',
-                      musicSectionOpen && 'rotate-180',
+                      ttsSectionOpen && 'rotate-180',
                     )}
                   />
                 </button>
               </CollapsibleTrigger>
-              <Popover open={musicInfoOpen} onOpenChange={setMusicInfoOpen}>
-                <PopoverTrigger asChild>
+            </div>
+
+            <CollapsibleContent className="space-y-4 pt-3">
+              {!isTtsSupported && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">
+                  {ttsEngine === 'kokoro'
+                    ? t('editor.tts.kokoroUnsupported')
+                    : ttsEngine === 'moss'
+                      ? t('editor.tts.mossUnsupported')
+                      : t('editor.tts.supertonicUnsupported', {
+                          defaultValue:
+                            'This browser cannot run the local Supertonic TTS runtime. Try a recent Chrome or Edge browser.',
+                        })}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="ai-tts-text">{t('editor.tts.text')}</Label>
+                <Textarea
+                  ref={ttsTextareaRef}
+                  id="ai-tts-text"
+                  value={text}
+                  onChange={(event) => setText(event.target.value)}
+                  placeholder={t('editor.tts.textPlaceholder')}
+                  className="min-h-24 resize-y bg-secondary/30 text-sm"
+                  disabled={isGenerating}
+                />
+                {ttsEngine === 'supertonic' && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] text-muted-foreground">
+                      {t('editor.tts.expressiveTags', { defaultValue: 'Expressive tags' })}
+                    </span>
+                    {SUPERTONIC_TTS_EXPRESSIVE_TAG_OPTIONS.map((tag) => (
+                      <Button
+                        key={tag.value}
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        className="h-6 px-2 text-[11px]"
+                        onClick={() =>
+                          insertTextAtCursor({
+                            input: ttsTextareaRef.current,
+                            insertText: tag.value,
+                            setText,
+                            text,
+                          })
+                        }
+                        disabled={isGenerating}
+                      >
+                        {tag.label}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>{t('editor.tts.engine')}</Label>
+                  <Select
+                    value={ttsEngine}
+                    onValueChange={(value) => setTtsEngine(value as StoredTtsEngine)}
+                    disabled={isGenerating}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="kokoro" className="text-xs">
+                        {t('editor.tts.kokoroOption')}
+                      </SelectItem>
+                      <SelectItem value="moss" className="text-xs">
+                        {t('editor.tts.mossOption')}
+                      </SelectItem>
+                      <SelectItem value="supertonic" className="text-xs">
+                        {t('editor.tts.supertonicOption', {
+                          defaultValue: 'Supertonic 3 (31 languages, local ONNX)',
+                        })}
+                      </SelectItem>
+                      <SelectItem value="genmax" className="text-xs">
+                        Audio Gen (ElevenLabs, MiniMax, CapCut via GenMax)
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>{t('editor.tts.voice')}</Label>
+                    {ttsEngine === 'genmax' ? (
+                      <div className="flex items-center gap-1.5">
+                        <Select
+                          value={selectedAudioGenVoice.id}
+                          onValueChange={(val) => setAudioGenVoice(val)}
+                          disabled={isGenerating}
+                        >
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-72">
+                            {filteredAudioGenVoiceOptions.map((v) => (
+                              <SelectItem key={v.id} value={v.id} className="text-xs">
+                                {v.label} {v.language ? `[${v.language}]` : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {selectedAudioGenVoice.previewUrl && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 w-8 shrink-0 p-0"
+                            onClick={() => togglePlayVoicePreview(selectedAudioGenVoice)}
+                            title="Preview Voice Sample"
+                          >
+                            {audioGenPreviewPlayingId === selectedAudioGenVoice.id ? (
+                              <Pause className="h-3.5 w-3.5 text-primary" />
+                            ) : (
+                              <Play className="h-3.5 w-3.5 text-primary ml-px" />
+                            )}
+                          </Button>
+                        )}
+                      </div>
+                    ) : (
+                      <Select
+                        value={voice}
+                        onValueChange={(value) => {
+                          if (ttsEngine === 'kokoro') {
+                            setTtsKokoroVoice(value as KokoroTtsVoice)
+                          } else if (ttsEngine === 'moss') {
+                            setTtsMossVoice(value as MossTtsVoice)
+                          } else {
+                            setTtsSupertonicVoice(value as SupertonicTtsVoice)
+                          }
+                        }}
+                        disabled={isGenerating}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-72">
+                          {(ttsEngine === 'kokoro'
+                            ? KOKORO_TTS_VOICE_OPTIONS
+                            : ttsEngine === 'moss'
+                              ? MOSS_TTS_VOICE_OPTIONS
+                              : SUPERTONIC_TTS_VOICE_OPTIONS
+                          ).map((option) => (
+                            <SelectItem key={option.value} value={option.value} className="text-xs">
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                  {ttsEngine === 'supertonic' && (
+                    <div className="space-y-1.5">
+                      <Label>{t('editor.tts.language', { defaultValue: 'Language' })}</Label>
+                      <Select
+                        value={ttsSupertonicLanguage}
+                        onValueChange={(value) =>
+                          setTtsSupertonicLanguage(value as SupertonicTtsLanguageSelection)
+                        }
+                        disabled={isGenerating}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-72">
+                          {SUPERTONIC_TTS_LANGUAGE_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value} className="text-xs">
+                              {getLanguageDisplayName(
+                                option.value,
+                                option.label,
+                                i18n.language,
+                                t('editor.tts.autoDetectLanguage', {
+                                  defaultValue: 'Auto detect',
+                                }),
+                              )}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {supportsNativeTtsSpeed && (
+                  <SliderInput
+                    label={t('editor.tts.speed')}
+                    value={speed}
+                    onChange={setSpeed}
+                    min={ttsSpeedMin}
+                    max={ttsSpeedMax}
+                    step={0.05}
+                    unit="x"
+                    disabled={isGenerating}
+                  />
+                )}
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    void handleGenerate()
+                  }}
+                  disabled={isGenerating || !trimmedText || !currentProjectId || !isTtsSupported}
+                  className="h-7 shrink-0 gap-1.5"
+                >
+                  {isGenerating ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <WandSparkles className="h-3.5 w-3.5" />
+                  )}
+                  {isGenerating ? t('editor.tts.generating') : t('editor.tts.generate')}
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {t('editor.aiPanel.runsLocally', {
+                  runtime: currentTtsRuntimeLabel,
+                  backend: currentTtsBackendLabel,
+                })}
+              </p>
+
+              {progress && (
+                <div className="rounded-lg border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">
+                  {progress}
+                </div>
+              )}
+
+              {error && (
+                <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+                  {error}
+                </div>
+              )}
+
+              {generations.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {t('editor.aiPanel.history', {
+                        count: generations.length,
+                        size: formatBytes(totalBytes),
+                      })}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 gap-1 px-2 text-[11px] text-muted-foreground"
+                      onClick={handleClearAll}
+                      disabled={anySaving}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      {t('editor.aiPanel.clearAll')}
+                    </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {generations.map((gen) => (
+                      <GenerationRow
+                        key={gen.id}
+                        generation={gen}
+                        onSave={handleSaveTtsGeneration}
+                        onSaveAndInsert={handleSaveAndInsertTtsGeneration}
+                        onRemove={handleRemoveGeneration}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+
+        {activeAiSection === 'music' && (
+          <Collapsible open={musicSectionOpen} onOpenChange={setMusicSectionOpen}>
+            <div className="-mx-3 bg-secondary/50 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <CollapsibleTrigger asChild>
                   <button
                     type="button"
-                    className="rounded-full p-0.5 text-muted-foreground hover:text-foreground"
-                    aria-label={t('editor.aiPanel.musicGenerationInfo')}
+                    className="flex flex-1 items-center justify-between gap-2 text-left"
+                    aria-label={
+                      musicSectionOpen
+                        ? t('editor.aiPanel.collapseMusicGeneration')
+                        : t('editor.aiPanel.expandMusicGeneration')
+                    }
+                  >
+                    <h2 className="text-sm font-medium">{t('editor.aiPanel.musicGeneration')}</h2>
+                    <ChevronDown
+                      className={cn(
+                        'h-4 w-4 text-muted-foreground transition-transform',
+                        musicSectionOpen && 'rotate-180',
+                      )}
+                    />
+                  </button>
+                </CollapsibleTrigger>
+                <Popover open={musicInfoOpen} onOpenChange={setMusicInfoOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="rounded-full p-0.5 text-muted-foreground hover:text-foreground"
+                      aria-label={t('editor.aiPanel.musicGenerationInfo')}
+                      onMouseEnter={() => setMusicInfoOpen(true)}
+                      onMouseLeave={() => setMusicInfoOpen(false)}
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    side="bottom"
+                    align="start"
+                    className="w-72 space-y-2 p-3 text-xs"
                     onMouseEnter={() => setMusicInfoOpen(true)}
                     onMouseLeave={() => setMusicInfoOpen(false)}
+                    onOpenAutoFocus={(e) => e.preventDefault()}
                   >
-                    <Info className="h-3.5 w-3.5" />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent
-                  side="bottom"
-                  align="start"
-                  className="w-72 space-y-2 p-3 text-xs"
-                  onMouseEnter={() => setMusicInfoOpen(true)}
-                  onMouseLeave={() => setMusicInfoOpen(false)}
-                  onOpenAutoFocus={(e) => e.preventDefault()}
-                >
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                      WebGPU
-                    </span>
-                    <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                      Local
-                    </span>
-                  </div>
-                  <p className="leading-relaxed text-muted-foreground">
-                    {t('editor.aiPanel.musicgenDescription')}
-                  </p>
-                  <table className="w-full text-[11px]">
-                    <tbody>
-                      {MUSICGEN_MODEL_OPTIONS.map((option) => (
-                        <tr key={option.value} className="border-t border-border/50">
-                          <td className="py-1 pr-2 font-medium text-foreground">{option.label}</td>
-                          <td className="py-1 text-right text-muted-foreground">
-                            {option.downloadLabel}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <p className="leading-relaxed text-muted-foreground">
-                    {t('editor.aiPanel.musicgenPromptHint')}
-                  </p>
-                </PopoverContent>
-              </Popover>
-            </div>
-          </div>
-
-          <CollapsibleContent className="space-y-4 pt-3">
-            {!isMusicSupported && (
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">
-                {t('editor.aiPanel.musicgenUnsupported')}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                        WebGPU
+                      </span>
+                      <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                        Local
+                      </span>
+                    </div>
+                    <p className="leading-relaxed text-muted-foreground">
+                      {t('editor.aiPanel.musicgenDescription')}
+                    </p>
+                    <table className="w-full text-[11px]">
+                      <tbody>
+                        {MUSICGEN_MODEL_OPTIONS.map((option) => (
+                          <tr key={option.value} className="border-t border-border/50">
+                            <td className="py-1 pr-2 font-medium text-foreground">
+                              {option.label}
+                            </td>
+                            <td className="py-1 text-right text-muted-foreground">
+                              {option.downloadLabel}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="leading-relaxed text-muted-foreground">
+                      {t('editor.aiPanel.musicgenPromptHint')}
+                    </p>
+                  </PopoverContent>
+                </Popover>
               </div>
-            )}
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="ai-music-prompt">{t('editor.aiPanel.prompt')}</Label>
-                <Select
-                  value=""
-                  onValueChange={(value) => setMusicPrompt(value)}
-                  disabled={isMusicGenerating}
-                >
-                  <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent px-1.5 text-[11px] text-muted-foreground shadow-none hover:text-foreground">
-                    <SelectValue placeholder={t('editor.aiPanel.presets')} />
-                  </SelectTrigger>
-                  <SelectContent align="end">
-                    {MUSIC_PROMPT_PRESETS.map((preset) => (
-                      <SelectItem
-                        key={preset.labelKey}
-                        value={t(preset.promptKey)}
-                        className="text-xs"
-                      >
-                        {t(preset.labelKey)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Textarea
-                id="ai-music-prompt"
-                value={musicPrompt}
-                onChange={(event) => setMusicPrompt(event.target.value)}
-                placeholder={t('editor.aiPanel.musicPromptPlaceholder')}
-                className="min-h-24 resize-y bg-secondary/30 text-sm"
-                disabled={isMusicGenerating}
-              />
             </div>
 
-            <div className="flex items-center gap-2">
-              <SliderInput
-                label={t('editor.aiPanel.length')}
-                value={musicDuration}
-                onChange={(value) => setMusicDuration(Math.round(value))}
-                min={currentMusicModel.minDurationSeconds}
-                max={currentMusicModel.maxDurationSeconds}
-                step={1}
-                unit="s"
-                disabled={isMusicGenerating}
-              />
-              {isMusicGenerating && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleMusicCancel}
-                  className="h-7 shrink-0 gap-1.5 text-muted-foreground"
-                >
-                  <X className="h-3.5 w-3.5" />
-                  {t('common.cancel')}
-                </Button>
+            <CollapsibleContent className="space-y-4 pt-3">
+              {!isMusicSupported && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">
+                  {t('editor.aiPanel.musicgenUnsupported')}
+                </div>
               )}
-              <Button
-                size="sm"
-                onClick={() => {
-                  void handleMusicGenerate()
-                }}
-                disabled={
-                  isMusicGenerating || !trimmedMusicPrompt || !currentProjectId || !isMusicSupported
-                }
-                className="h-7 shrink-0 gap-1.5"
-              >
-                {isMusicGenerating ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <WandSparkles className="h-3.5 w-3.5" />
-                )}
-                {isMusicGenerating ? t('editor.tts.generating') : t('editor.tts.generate')}
-              </Button>
-            </div>
 
-            {musicProgress && (
-              <div className="space-y-2 rounded-lg border border-border bg-secondary/20 p-3">
-                <p className="text-xs text-muted-foreground">{musicProgress}</p>
-                {musicProgressPct != null && (
-                  <div className="h-1.5 overflow-hidden rounded-full bg-secondary">
-                    <div
-                      className="h-full rounded-full bg-primary transition-[width] duration-300 ease-linear"
-                      style={{ width: `${Math.round(musicProgressPct * 100)}%` }}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {musicError && (
-              <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
-                {musicError}
-              </div>
-            )}
-
-            {musicGenerations.length > 0 && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {t('editor.aiPanel.musicHistory', {
-                      count: musicGenerations.length,
-                      size: formatBytes(totalMusicBytes),
-                    })}
-                  </span>
+                  <Label htmlFor="ai-music-prompt">{t('editor.aiPanel.prompt')}</Label>
+                  <Select
+                    value=""
+                    onValueChange={(value) => setMusicPrompt(value)}
+                    disabled={isMusicGenerating}
+                  >
+                    <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent px-1.5 text-[11px] text-muted-foreground shadow-none hover:text-foreground">
+                      <SelectValue placeholder={t('editor.aiPanel.presets')} />
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      {MUSIC_PROMPT_PRESETS.map((preset) => (
+                        <SelectItem
+                          key={preset.labelKey}
+                          value={t(preset.promptKey)}
+                          className="text-xs"
+                        >
+                          {t(preset.labelKey)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Textarea
+                  id="ai-music-prompt"
+                  value={musicPrompt}
+                  onChange={(event) => setMusicPrompt(event.target.value)}
+                  placeholder={t('editor.aiPanel.musicPromptPlaceholder')}
+                  className="min-h-24 resize-y bg-secondary/30 text-sm"
+                  disabled={isMusicGenerating}
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <SliderInput
+                  label={t('editor.aiPanel.length')}
+                  value={musicDuration}
+                  onChange={(value) => setMusicDuration(Math.round(value))}
+                  min={currentMusicModel.minDurationSeconds}
+                  max={currentMusicModel.maxDurationSeconds}
+                  step={1}
+                  unit="s"
+                  disabled={isMusicGenerating}
+                />
+                {isMusicGenerating && (
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-6 gap-1 px-2 text-[11px] text-muted-foreground"
-                    onClick={() => clearGenerationList(setMusicGenerations)}
-                    disabled={anyMusicSaving}
+                    onClick={handleMusicCancel}
+                    className="h-7 shrink-0 gap-1.5 text-muted-foreground"
                   >
-                    <Trash2 className="h-3 w-3" />
-                    {t('editor.aiPanel.clearAll')}
+                    <X className="h-3.5 w-3.5" />
+                    {t('common.cancel')}
                   </Button>
-                </div>
-
-                <div className="space-y-2">
-                  {musicGenerations.map((generation) => (
-                    <GenerationRow
-                      key={generation.id}
-                      generation={generation}
-                      onSave={(entry) => handleSave(entry, setMusicGenerations, setMusicError)}
-                      onSaveAndInsert={(entry) =>
-                        handleSaveAndInsert(entry, setMusicGenerations, setMusicError)
-                      }
-                      onRemove={(id) => removeGenerationFromList(setMusicGenerations, id)}
-                    />
-                  ))}
-                </div>
+                )}
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    void handleMusicGenerate()
+                  }}
+                  disabled={
+                    isMusicGenerating ||
+                    !trimmedMusicPrompt ||
+                    !currentProjectId ||
+                    !isMusicSupported
+                  }
+                  className="h-7 shrink-0 gap-1.5"
+                >
+                  {isMusicGenerating ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <WandSparkles className="h-3.5 w-3.5" />
+                  )}
+                  {isMusicGenerating ? t('editor.tts.generating') : t('editor.tts.generate')}
+                </Button>
               </div>
-            )}
-          </CollapsibleContent>
-        </Collapsible>
+
+              {musicProgress && (
+                <div className="space-y-2 rounded-lg border border-border bg-secondary/20 p-3">
+                  <p className="text-xs text-muted-foreground">{musicProgress}</p>
+                  {musicProgressPct != null && (
+                    <div className="h-1.5 overflow-hidden rounded-full bg-secondary">
+                      <div
+                        className="h-full rounded-full bg-primary transition-[width] duration-300 ease-linear"
+                        style={{ width: `${Math.round(musicProgressPct * 100)}%` }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {musicError && (
+                <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+                  {musicError}
+                </div>
+              )}
+
+              {musicGenerations.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {t('editor.aiPanel.musicHistory', {
+                        count: musicGenerations.length,
+                        size: formatBytes(totalMusicBytes),
+                      })}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 gap-1 px-2 text-[11px] text-muted-foreground"
+                      onClick={() => clearGenerationList(setMusicGenerations)}
+                      disabled={anyMusicSaving}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      {t('editor.aiPanel.clearAll')}
+                    </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {musicGenerations.map((generation) => (
+                      <GenerationRow
+                        key={generation.id}
+                        generation={generation}
+                        onSave={(entry) => handleSave(entry, setMusicGenerations, setMusicError)}
+                        onSaveAndInsert={(entry) =>
+                          handleSaveAndInsert(entry, setMusicGenerations, setMusicError)
+                        }
+                        onRemove={(id) => removeGenerationFromList(setMusicGenerations, id)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CollapsibleContent>
+          </Collapsible>
+        )}
       </div>
+
+      <VoiceLibraryDialog
+        open={voiceLibraryOpen}
+        onOpenChange={setVoiceLibraryOpen}
+        selectedVoiceId={audioGenVoice}
+        selectedProvider={audioGenProvider}
+        onSelectVoice={handleSelectVoiceFromLibrary}
+        voiceCatalog={genMaxVoiceCatalog}
+        onReloadVoices={loadAllGenMaxVoices}
+        isLoadingVoices={isLoadingAudioGenVoices}
+        hasApiKey={Boolean(genMaxApiKey.trim())}
+      />
     </div>
   )
 })

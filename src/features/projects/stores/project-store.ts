@@ -31,6 +31,7 @@ interface ProjectState {
   // UI State
   isLoading: boolean
   error: string | null
+  openingProjectId: string | null
 
   // Search and filter state
   searchQuery: string
@@ -87,6 +88,7 @@ interface ProjectActions {
 
   // Utility
   clearError: () => void
+  setOpeningProjectId: (id: string | null) => void
 }
 
 export const useProjectStore = create<ProjectState & ProjectActions>()(
@@ -98,11 +100,13 @@ export const useProjectStore = create<ProjectState & ProjectActions>()(
         currentProject: null,
         isLoading: false,
         error: null,
+        openingProjectId: null,
         searchQuery: '',
         sortField: 'updatedAt',
         sortDirection: 'desc',
         filterResolution: undefined,
         filterFps: undefined,
+        setOpeningProjectId: (id: string | null) => set({ openingProjectId: id }),
 
         // Load all projects from workspace storage
         loadProjects: async () => {

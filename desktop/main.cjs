@@ -21,6 +21,7 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('force_high_performance_gpu');
 app.commandLine.appendSwitch('gpu-preference', '2');
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 // Auto-register executable in Windows DirectX Graphics Settings for High-Performance Discrete GPU
 function registerWindowsGpuPreference() {
@@ -421,17 +422,27 @@ app.whenReady().then(async () => {
     }
   });
 
-  // Ensure headers for any internal interceptor
+  // Ensure headers for local app and external CDN/API resources
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const responseHeaders = { ...details.responseHeaders };
-    if (details.url.includes('genmax.io')) {
+    const url = details.url || '';
+    const isLocalApp =
+      url.startsWith('http://localhost') ||
+      url.startsWith('http://127.0.0.1') ||
+      url.startsWith('file://');
+
+    if (isLocalApp) {
+      responseHeaders['Cross-Origin-Opener-Policy'] = ['same-origin'];
+      responseHeaders['Cross-Origin-Embedder-Policy'] = ['require-corp'];
+    } else {
+      // For any external requests (CDNs, GenMax, ElevenLabs, MiniMax, Hailuo, audio/video previews, APIs):
+      // Ensure CORS & CORP allow embedding without being blocked by parent window's COEP
       responseHeaders['Access-Control-Allow-Origin'] = ['*'];
       responseHeaders['Access-Control-Allow-Headers'] = ['*'];
       responseHeaders['Access-Control-Allow-Methods'] = ['GET, POST, PUT, DELETE, OPTIONS'];
       responseHeaders['Cross-Origin-Resource-Policy'] = ['cross-origin'];
-    } else {
-      responseHeaders['Cross-Origin-Opener-Policy'] = ['same-origin'];
-      responseHeaders['Cross-Origin-Embedder-Policy'] = ['require-corp'];
+      delete responseHeaders['cross-origin-embedder-policy'];
+      delete responseHeaders['Cross-Origin-Embedder-Policy'];
     }
     callback({ responseHeaders });
   });
