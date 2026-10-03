@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
+const { handleAiDancingServerRequest } = require('./aidancing-server.cjs');
 
 // 1. Single Instance Lock - Ensure only one instance of FreeCut runs
 const gotTheLock = app.requestSingleInstanceLock();
@@ -118,8 +119,11 @@ const MIME_TYPES = {
 
 function startLocalServer(distDir) {
   return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
+    const server = http.createServer(async (req, res) => {
       try {
+        const handled = await handleAiDancingServerRequest(req, res);
+        if (handled) return;
+
         if (req.url && req.url.startsWith('/api/genmax')) {
           const targetPath = req.url.replace(/^\/api\/genmax/, '');
           const proxyReq = https.request(

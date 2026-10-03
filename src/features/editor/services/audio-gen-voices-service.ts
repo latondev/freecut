@@ -1,7 +1,8 @@
 import { openDB, type DBSchema } from 'idb'
 import { sanitizeAiOutputFileNameSegment } from '@/shared/utils/ai-output-filename'
+import { AIDANCING_PRESET_VOICES } from './aidancing-voices-data'
 
-export type AudioGenProvider = 'elevenlabs' | 'minimax' | 'capcut'
+export type AudioGenProvider = 'elevenlabs' | 'minimax' | 'capcut' | 'aidancing'
 
 export interface AudioGenVoice {
   id: string
@@ -12,6 +13,7 @@ export interface AudioGenVoice {
   gender?: string
   accent?: string
   tags?: string[]
+  voiceIndex?: string
 }
 
 export type AudioGenVoiceCatalog = Record<AudioGenProvider, AudioGenVoice[]>
@@ -20,6 +22,7 @@ const AUDIO_GEN_PROVIDER_LABELS: Record<AudioGenProvider, string> = {
   elevenlabs: 'ElevenLabs',
   minimax: 'MiniMax',
   capcut: 'CapCut',
+  aidancing: 'AI Dancing (Clone)',
 }
 
 interface AudioGenVoiceCache extends DBSchema {
@@ -45,7 +48,8 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
       id: '362703657091264',
       label: 'Professional Guide — Clear, Informative',
       description: 'Corporate Promotion & Narration. Clear, measured Vietnamese male voice.',
-      previewUrl: 'https://file.cdn.minimax.io/public/84d2ad4a-14d2-43bb-8ee7-e6f7df2ce47e.wav',
+      previewUrl:
+        'https://cdn.hailuoai.video/open-hailuo-video-web/public_assets/dc8888e4-6091-429b-8111-8f7f1bfa4c9f.mp3',
       language: 'Vietnamese',
       gender: 'Male',
       tags: ['Vietnamese', 'Standard', 'Male', 'Young', 'Corporate Promotion & Narration'],
@@ -395,6 +399,7 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
       gender: 'female',
     },
   ],
+  aidancing: AIDANCING_PRESET_VOICES,
 }
 
 const dbPromise = openDB<AudioGenVoiceCache>(DB_NAME, DB_VERSION, {
@@ -409,6 +414,7 @@ export const emptyCatalog = (): AudioGenVoiceCatalog => ({
   elevenlabs: [...DEFAULT_AUDIO_GEN_VOICES.elevenlabs],
   minimax: [...DEFAULT_AUDIO_GEN_VOICES.minimax],
   capcut: [...DEFAULT_AUDIO_GEN_VOICES.capcut],
+  aidancing: [...DEFAULT_AUDIO_GEN_VOICES.aidancing],
 })
 
 function stringValue(value: unknown): string | undefined {
@@ -626,24 +632,39 @@ function uniqueVoices(voices: AudioGenVoice[]): AudioGenVoice[] {
   return [...new Map(voices.map((voice) => [voice.id, voice])).values()]
 }
 
+function sanitizeVoicePreviewUrl(voice: AudioGenVoice): AudioGenVoice {
+  if (voice.previewUrl && voice.previewUrl.includes('84d2ad4a-14d2-43bb-8ee7-e6f7df2ce47e')) {
+    return {
+      ...voice,
+      previewUrl:
+        'https://cdn.hailuoai.video/open-hailuo-video-web/public_assets/dc8888e4-6091-429b-8111-8f7f1bfa4c9f.mp3',
+    }
+  }
+  return voice
+}
+
 export async function getCachedGenMaxVoiceCatalog(): Promise<AudioGenVoiceCatalog> {
   try {
     const db = await dbPromise
     const cached = await db.get('catalogs', CACHE_KEY)
     if (cached?.catalogs) {
       return {
-        elevenlabs:
-          cached.catalogs.elevenlabs?.length > 0
-            ? cached.catalogs.elevenlabs
-            : DEFAULT_AUDIO_GEN_VOICES.elevenlabs,
-        minimax:
-          cached.catalogs.minimax?.length > 0
-            ? cached.catalogs.minimax
-            : DEFAULT_AUDIO_GEN_VOICES.minimax,
-        capcut:
-          cached.catalogs.capcut?.length > 0
-            ? cached.catalogs.capcut
-            : DEFAULT_AUDIO_GEN_VOICES.capcut,
+        elevenlabs: (cached.catalogs.elevenlabs?.length > 0
+          ? cached.catalogs.elevenlabs
+          : DEFAULT_AUDIO_GEN_VOICES.elevenlabs
+        ).map(sanitizeVoicePreviewUrl),
+        minimax: (cached.catalogs.minimax?.length > 0
+          ? cached.catalogs.minimax
+          : DEFAULT_AUDIO_GEN_VOICES.minimax
+        ).map(sanitizeVoicePreviewUrl),
+        capcut: (cached.catalogs.capcut?.length > 0
+          ? cached.catalogs.capcut
+          : DEFAULT_AUDIO_GEN_VOICES.capcut
+        ).map(sanitizeVoicePreviewUrl),
+        aidancing: (cached.catalogs.aidancing?.length > 0
+          ? cached.catalogs.aidancing
+          : DEFAULT_AUDIO_GEN_VOICES.aidancing
+        ).map(sanitizeVoicePreviewUrl),
       }
     }
   } catch {
@@ -656,6 +677,7 @@ export async function getCachedGenMaxVoiceCatalog(): Promise<AudioGenVoiceCatalo
  * Loads voice catalogs from GenMax API for ElevenLabs, MiniMax, and CapCut.
  * Uses Promise.allSettled and sensible limits to ensure fast, reliable loading.
  */
+// fallow-ignore-next-line complexity
 export async function loadGenMaxVoiceCatalog(
   apiKey: string,
   options: {
@@ -678,6 +700,7 @@ export async function loadGenMaxVoiceCatalog(
     elevenlabs: cached?.catalogs.elevenlabs ?? DEFAULT_AUDIO_GEN_VOICES.elevenlabs,
     minimax: cached?.catalogs.minimax ?? DEFAULT_AUDIO_GEN_VOICES.minimax,
     capcut: cached?.catalogs.capcut ?? DEFAULT_AUDIO_GEN_VOICES.capcut,
+    aidancing: cached?.catalogs.aidancing ?? DEFAULT_AUDIO_GEN_VOICES.aidancing,
   }
   let loadedProviders = 0
   let lastError: unknown = null
@@ -690,6 +713,7 @@ export async function loadGenMaxVoiceCatalog(
       elevenlabs: [...catalogs.elevenlabs],
       minimax: [...catalogs.minimax],
       capcut: [...catalogs.capcut],
+      aidancing: [...catalogs.aidancing],
     })
     options.onProgress?.(
       `${AUDIO_GEN_PROVIDER_LABELS[provider]} loaded: ${catalogs[provider].length} voices (${loadedProviders}/3 providers)`,

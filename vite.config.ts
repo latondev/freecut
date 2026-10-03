@@ -5,6 +5,29 @@ import tailwindcss from '@tailwindcss/vite'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+
+function aiDancingDevPlugin(): Plugin {
+  return {
+    name: 'freecut-aidancing-server',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        try {
+          // In development, require fresh module on demand
+          const {
+            handleAiDancingServerRequest: handler,
+          } = require('./desktop/aidancing-server.cjs')
+          const handled = await handler(req, res)
+          if (!handled) next()
+        } catch (err) {
+          next(err)
+        }
+      })
+    },
+  }
+}
 
 // Stamps public/sw.js with the hashed entry-chunk filename at build time so the service
 // worker's CACHE_VERSION — and the sw.js bytes — change on every deploy. Without this the
@@ -94,7 +117,12 @@ export default defineConfig({
       },
     },
   },
-  plugins: lazyPlugins(() => [react(), tailwindcss(), serviceWorkerVersionPlugin()]),
+  plugins: lazyPlugins(() => [
+    react(),
+    tailwindcss(),
+    serviceWorkerVersionPlugin(),
+    aiDancingDevPlugin(),
+  ]),
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
@@ -111,6 +139,16 @@ export default defineConfig({
         target: 'https://api.genmax.io',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/genmax/, ''),
+      },
+      '/api/aidancing': {
+        target: 'https://audio.aidancing.net',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/aidancing/, ''),
+      },
+      '/api/aidancing-media': {
+        target: 'https://video.aidancing.net',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/aidancing-media/, ''),
       },
     },
     headers: {

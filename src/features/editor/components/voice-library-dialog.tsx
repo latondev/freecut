@@ -179,10 +179,17 @@ type SubTab = 'library' | 'favourites' | 'default'
 
 type ActiveProviderTab = 'all' | AudioGenProvider
 
-const ALL_PROVIDER_TABS: ActiveProviderTab[] = ['all', 'minimax', 'elevenlabs', 'capcut']
+const ALL_PROVIDER_TABS: ActiveProviderTab[] = [
+  'all',
+  'aidancing',
+  'minimax',
+  'elevenlabs',
+  'capcut',
+]
 
 const ALL_PROVIDER_LABELS: Record<ActiveProviderTab, string> = {
   all: 'Tất cả',
+  aidancing: 'AI Dancing (Clone)',
   minimax: 'MiniMax',
   elevenlabs: 'ElevenLabs',
   capcut: 'CapCut',
@@ -202,10 +209,17 @@ interface VoiceLibraryDialogProps {
 
 function resolveAudioPreviewUrl(url?: string): string {
   if (!url) return ''
+  if (url.startsWith('/')) return url
   if (url.startsWith('https://api.genmax.io')) {
     return url.replace('https://api.genmax.io', '/api/genmax')
   }
-  return url
+  if (url.startsWith('https://video.aidancing.net')) {
+    return url.replace('https://video.aidancing.net', '/api/aidancing-media')
+  }
+  if (url.startsWith('https://audio.aidancing.net')) {
+    return url.replace('https://audio.aidancing.net', '/api/aidancing')
+  }
+  return `/api/audio-proxy?url=${encodeURIComponent(url)}`
 }
 
 // fallow-ignore-next-line complexity
@@ -398,7 +412,7 @@ export const VoiceLibraryDialog = memo(function VoiceLibraryDialog({
   const allVoices = useMemo(() => {
     const list: AudioGenVoice[] = []
     const seen = new Set<string>()
-    for (const prov of ['minimax', 'elevenlabs', 'capcut'] as const) {
+    for (const prov of ['aidancing', 'minimax', 'elevenlabs', 'capcut'] as const) {
       for (const v of voiceCatalog[prov] || []) {
         if (!seen.has(v.id)) {
           seen.add(v.id)
@@ -419,6 +433,7 @@ export const VoiceLibraryDialog = memo(function VoiceLibraryDialog({
   const defaultVoices = useMemo(() => {
     if (activeProvider === 'all') {
       return [
+        ...(DEFAULT_AUDIO_GEN_VOICES.aidancing || []),
         ...(DEFAULT_AUDIO_GEN_VOICES.minimax || []),
         ...(DEFAULT_AUDIO_GEN_VOICES.elevenlabs || []),
         ...(DEFAULT_AUDIO_GEN_VOICES.capcut || []),

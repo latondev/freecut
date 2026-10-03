@@ -23,6 +23,7 @@ import {
   RotateCw,
   Settings,
   SlidersHorizontal,
+  Sparkles,
   Trash2,
   Upload,
   WandSparkles,
@@ -98,11 +99,16 @@ import {
   type AudioGenVoice,
   type AudioGenVoiceCatalog,
 } from '../services/audio-gen-voices-service'
+import {
+  generateAiDancingSpeech,
+  resolveAiDancingPreviewUrl,
+} from '../services/aidancing-voice-service'
 
 const AUDIO_GEN_PROVIDER_LABELS: Record<AudioGenProvider, string> = {
   elevenlabs: 'ElevenLabs',
   minimax: 'MiniMax',
   capcut: 'CapCut',
+  aidancing: 'AI Dancing (Clone)',
 }
 
 type AiSection = 'audio-gen' | 'tts' | 'music'
@@ -264,6 +270,7 @@ export const AiPanel = memo(function AiPanel() {
     elevenlabs: [...DEFAULT_AUDIO_GEN_VOICES.elevenlabs],
     minimax: [...DEFAULT_AUDIO_GEN_VOICES.minimax],
     capcut: [...DEFAULT_AUDIO_GEN_VOICES.capcut],
+    aidancing: [...DEFAULT_AUDIO_GEN_VOICES.aidancing],
   }))
   const [audioGenVoice, setAudioGenVoice] = useState(
     () => DEFAULT_AUDIO_GEN_VOICES.minimax[0]?.id || '',
@@ -360,6 +367,7 @@ export const AiPanel = memo(function AiPanel() {
         elevenlabs: catalog.elevenlabs.length > 0 ? catalog.elevenlabs : current.elevenlabs,
         minimax: catalog.minimax.length > 0 ? catalog.minimax : current.minimax,
         capcut: catalog.capcut.length > 0 ? catalog.capcut : current.capcut,
+        aidancing: catalog.aidancing?.length > 0 ? catalog.aidancing : current.aidancing,
       }))
     })
     return () => {
@@ -416,9 +424,7 @@ export const AiPanel = memo(function AiPanel() {
       audio.crossOrigin = 'anonymous'
 
       const rawUrl = voiceItem.previewUrl
-      const resolvedUrl = rawUrl.startsWith('https://api.genmax.io')
-        ? rawUrl.replace('https://api.genmax.io', '/api/genmax')
-        : rawUrl
+      const resolvedUrl = resolveAiDancingPreviewUrl(rawUrl)
 
       audio.onended = () => {
         setAudioGenPreviewPlayingId(null)
@@ -544,7 +550,9 @@ export const AiPanel = memo(function AiPanel() {
         ? isMossSupported
         : ttsEngine === 'supertonic'
           ? isSupertonicSupported
-          : Boolean(genMaxApiKey.trim())
+          : audioGenProvider === 'aidancing'
+            ? true
+            : Boolean(genMaxApiKey.trim())
   const isMusicSupported = musicgenService.isSupported()
   const trimmedTtsText = ttsText.trim()
   const audioGenVoiceOptions = genMaxVoiceCatalog[audioGenProvider]
@@ -639,168 +647,192 @@ export const AiPanel = memo(function AiPanel() {
           : `GenMax (${AUDIO_GEN_PROVIDER_LABELS[audioGenProvider]})`
 
   // --- actions ---
-
-  const handleTtsGenerate = useCallback(async () => {
-    if (!currentProjectId) {
-      setTtsError(t('editor.tts.errors.openProject'))
-      return
-    }
-    if (!trimmedTtsText) {
-      setTtsError(t('editor.tts.errors.enterText'))
-      return
-    }
-    if (ttsEngine === 'genmax' && !genMaxApiKey.trim()) {
-      setAudioGenVoiceError('Please enter your GenMax API key in Audio Gen.')
-      setTtsError('Please enter your GenMax API key (xi-api-key).')
-      return
-    }
-    if (!isTtsSupported) {
-      setTtsError(
-        ttsEngine === 'kokoro'
-          ? t('editor.tts.errors.kokoroUnsupported')
-          : ttsEngine === 'moss'
-            ? t('editor.tts.errors.mossUnsupported')
-            : ttsEngine === 'supertonic'
-              ? t('editor.tts.errors.supertonicUnsupported', {
-                  defaultValue:
-                    'This browser cannot run the local Supertonic TTS runtime. Try a recent Chrome or Edge browser.',
-                })
-              : 'GenMax API key is required.',
-      )
-      return
-    }
-
-    setTtsError(null)
-    setIsTtsGenerating(true)
-    setTtsProgress(t('editor.tts.progressPreparing'))
-
-    try {
-      const result =
-        ttsEngine === 'kokoro'
-          ? await kokoroTtsService.generateSpeechFile({
-              text: trimmedTtsText,
-              voice: ttsKokoroVoice,
-              speed: effectiveTtsSpeed,
-              model: ttsModel,
-              onProgress: setTtsProgress,
-            })
-          : ttsEngine === 'moss'
-            ? await mossTtsService.generateSpeechFile({
-                text: trimmedTtsText,
-                voice: ttsMossVoice,
-                speed: effectiveTtsSpeed,
-                onProgress: setTtsProgress,
-              })
-            : ttsEngine === 'supertonic'
-              ? await supertonicTtsService.generateSpeechFile({
-                  text: trimmedTtsText,
-                  voice: ttsSupertonicVoice,
-                  language: ttsSupertonicLanguage,
-                  speed: effectiveTtsSpeed,
-                  onProgress: setTtsProgress,
-                })
-              : await generateGenMaxSpeechFile({
-                  apiKey: genMaxApiKey,
-                  provider: audioGenProvider,
-                  voiceId: selectedAudioGenVoice.id,
-                  voiceName: selectedAudioGenVoice.label,
-                  text: trimmedTtsText,
-                  speed: effectiveTtsSpeed,
-                  onProgress: setTtsProgress,
-                })
-
-      const { blob, file, duration } = result
-
-      const objectUrl = URL.createObjectURL(blob)
-      generationUrlsRef.current.add(objectUrl)
-      const voiceLabel =
-        ttsEngine === 'kokoro'
-          ? getKokoroTtsVoiceOption(ttsKokoroVoice).label
-          : ttsEngine === 'moss'
-            ? getMossTtsVoiceOption(ttsMossVoice).label
-            : ttsEngine === 'supertonic'
-              ? (SUPERTONIC_TTS_VOICE_OPTIONS.find((option) => option.value === ttsSupertonicVoice)
-                  ?.label ?? ttsSupertonicVoice)
-              : selectedAudioGenVoice.label
-      const modelLabel =
-        ttsEngine === 'kokoro'
-          ? getKokoroTtsModelOption(ttsModel).label
-          : ttsEngine === 'moss'
-            ? 'Multilingual Nano'
-            : ttsEngine === 'supertonic'
-              ? 'Supertonic 3'
-              : `${AUDIO_GEN_PROVIDER_LABELS[audioGenProvider]} (GenMax)`
-      const engineTags =
-        ttsEngine === 'kokoro'
-          ? [
-              'ai-generated',
-              'kokoro-tts',
-              'tts-engine:kokoro',
-              `kokoro-quality:${ttsModel}`,
-              `kokoro-voice:${ttsKokoroVoice}`,
-            ]
-          : ttsEngine === 'moss'
-            ? ['ai-generated', 'moss-tts', 'tts-engine:moss', `moss-voice:${ttsMossVoice}`]
-            : ttsEngine === 'supertonic'
-              ? [
-                  'ai-generated',
-                  'supertonic-tts',
-                  'tts-engine:supertonic',
-                  `supertonic-voice:${ttsSupertonicVoice}`,
-                ]
-              : [
-                  'ai-generated',
-                  'genmax-tts',
-                  'tts-engine:genmax',
-                  `genmax-provider:${audioGenProvider}`,
-                  `genmax-voice:${selectedAudioGenVoice.id}`,
-                ]
-
-      const generation: AudioGeneration = {
-        id: crypto.randomUUID(),
-        file,
-        objectUrl,
-        byteSize: blob.size,
-        duration,
-        textSnippet: trimmedTtsText,
-        voice: voiceLabel,
-        model: modelLabel,
-        summary: trimmedTtsText,
-        details: `${voiceLabel} / ${modelLabel} / ${duration > 0 ? `${duration.toFixed(1)}s` : '-'} / ${formatBytes(blob.size)}`,
-        tags: engineTags,
-        savedMediaId: null,
-        saving: false,
+  // fallow-ignore-next-line complexity
+  const handleTtsGenerate = useCallback(
+    async (forcedProvider?: AudioGenProvider) => {
+      const activeProvider = forcedProvider || audioGenProvider
+      if (!currentProjectId) {
+        setTtsError(t('editor.tts.errors.openProject'))
+        return
+      }
+      if (!trimmedTtsText) {
+        setTtsError(t('editor.tts.errors.enterText'))
+        return
+      }
+      if (ttsEngine === 'genmax' && activeProvider !== 'aidancing' && !genMaxApiKey.trim()) {
+        setAudioGenVoiceError('Please enter your GenMax API key in Audio Gen.')
+        setTtsError('Please enter your GenMax API key (xi-api-key).')
+        return
+      }
+      if (!isTtsSupported && activeProvider !== 'aidancing') {
+        setTtsError(
+          ttsEngine === 'kokoro'
+            ? t('editor.tts.errors.kokoroUnsupported')
+            : ttsEngine === 'moss'
+              ? t('editor.tts.errors.mossUnsupported')
+              : ttsEngine === 'supertonic'
+                ? t('editor.tts.errors.supertonicUnsupported', {
+                    defaultValue:
+                      'This browser cannot run the local Supertonic TTS runtime. Try a recent Chrome or Edge browser.',
+                  })
+                : 'GenMax API key is required.',
+        )
+        return
       }
 
-      setTtsGenerations((prev) => [generation, ...prev])
-      setTtsProgress(null)
-    } catch (generationError) {
-      setTtsError(
-        generationError instanceof Error
-          ? generationError.message
-          : t('editor.tts.errors.generateFailed'),
-      )
-      setTtsProgress(null)
-    } finally {
-      setIsTtsGenerating(false)
-    }
-  }, [
-    audioGenProvider,
-    currentProjectId,
-    effectiveTtsSpeed,
-    genMaxApiKey,
-    isTtsSupported,
-    selectedAudioGenVoice,
-    trimmedTtsText,
-    ttsEngine,
-    ttsKokoroVoice,
-    ttsModel,
-    ttsMossVoice,
-    ttsSupertonicLanguage,
-    ttsSupertonicVoice,
-    t,
-  ])
+      setTtsError(null)
+      setIsTtsGenerating(true)
+      setTtsProgress(t('editor.tts.progressPreparing'))
 
+      try {
+        const result =
+          ttsEngine === 'kokoro'
+            ? await kokoroTtsService.generateSpeechFile({
+                text: trimmedTtsText,
+                voice: ttsKokoroVoice,
+                speed: effectiveTtsSpeed,
+                model: ttsModel,
+                onProgress: setTtsProgress,
+              })
+            : ttsEngine === 'moss'
+              ? await mossTtsService.generateSpeechFile({
+                  text: trimmedTtsText,
+                  voice: ttsMossVoice,
+                  speed: effectiveTtsSpeed,
+                  onProgress: setTtsProgress,
+                })
+              : ttsEngine === 'supertonic'
+                ? await supertonicTtsService.generateSpeechFile({
+                    text: trimmedTtsText,
+                    voice: ttsSupertonicVoice,
+                    language: ttsSupertonicLanguage,
+                    speed: effectiveTtsSpeed,
+                    onProgress: setTtsProgress,
+                  })
+                : activeProvider === 'aidancing'
+                  ? await generateAiDancingSpeech({
+                      text: trimmedTtsText,
+                      previewUrl: selectedAudioGenVoice.previewUrl,
+                      voiceIndex: selectedAudioGenVoice.voiceIndex,
+                      onProgress: setTtsProgress,
+                    })
+                  : await generateGenMaxSpeechFile({
+                      apiKey: genMaxApiKey,
+                      provider: activeProvider,
+                      voiceId: selectedAudioGenVoice.id,
+                      voiceName: selectedAudioGenVoice.label,
+                      text: trimmedTtsText,
+                      speed: effectiveTtsSpeed,
+                      onProgress: setTtsProgress,
+                    })
+
+        const { blob, file, duration } = result
+
+        const objectUrl = URL.createObjectURL(blob)
+        generationUrlsRef.current.add(objectUrl)
+        const voiceLabel =
+          ttsEngine === 'kokoro'
+            ? getKokoroTtsVoiceOption(ttsKokoroVoice).label
+            : ttsEngine === 'moss'
+              ? getMossTtsVoiceOption(ttsMossVoice).label
+              : ttsEngine === 'supertonic'
+                ? (SUPERTONIC_TTS_VOICE_OPTIONS.find(
+                    (option) => option.value === ttsSupertonicVoice,
+                  )?.label ?? ttsSupertonicVoice)
+                : activeProvider === 'aidancing'
+                  ? `AI Dancing: ${selectedAudioGenVoice.label}`
+                  : selectedAudioGenVoice.label
+        const modelLabel =
+          ttsEngine === 'kokoro'
+            ? getKokoroTtsModelOption(ttsModel).label
+            : ttsEngine === 'moss'
+              ? 'Multilingual Nano'
+              : ttsEngine === 'supertonic'
+                ? 'Supertonic 3'
+                : activeProvider === 'aidancing'
+                  ? 'AI Dancing Clone'
+                  : `${AUDIO_GEN_PROVIDER_LABELS[activeProvider]} (GenMax)`
+        const engineTags =
+          ttsEngine === 'kokoro'
+            ? [
+                'ai-generated',
+                'kokoro-tts',
+                'tts-engine:kokoro',
+                `kokoro-quality:${ttsModel}`,
+                `kokoro-voice:${ttsKokoroVoice}`,
+              ]
+            : ttsEngine === 'moss'
+              ? ['ai-generated', 'moss-tts', 'tts-engine:moss', `moss-voice:${ttsMossVoice}`]
+              : ttsEngine === 'supertonic'
+                ? [
+                    'ai-generated',
+                    'supertonic-tts',
+                    'tts-engine:supertonic',
+                    `supertonic-voice:${ttsSupertonicVoice}`,
+                  ]
+                : activeProvider === 'aidancing'
+                  ? [
+                      'ai-generated',
+                      'aidancing-tts',
+                      'tts-engine:aidancing',
+                      `aidancing-voice:${selectedAudioGenVoice.id}`,
+                    ]
+                  : [
+                      'ai-generated',
+                      'genmax-tts',
+                      'tts-engine:genmax',
+                      `genmax-provider:${activeProvider}`,
+                      `genmax-voice:${selectedAudioGenVoice.id}`,
+                    ]
+
+        const generation: AudioGeneration = {
+          id: crypto.randomUUID(),
+          file,
+          objectUrl,
+          byteSize: blob.size,
+          duration,
+          textSnippet: trimmedTtsText,
+          voice: voiceLabel,
+          model: modelLabel,
+          summary: trimmedTtsText,
+          details: `${voiceLabel} / ${modelLabel} / ${duration > 0 ? `${duration.toFixed(1)}s` : '-'} / ${formatBytes(blob.size)}`,
+          tags: engineTags,
+          savedMediaId: null,
+          saving: false,
+        }
+
+        setTtsGenerations((prev) => [generation, ...prev])
+        setTtsProgress(null)
+      } catch (generationError) {
+        setTtsError(
+          generationError instanceof Error
+            ? generationError.message
+            : t('editor.tts.errors.generateFailed'),
+        )
+        setTtsProgress(null)
+      } finally {
+        setIsTtsGenerating(false)
+      }
+    },
+    [
+      audioGenProvider,
+      currentProjectId,
+      effectiveTtsSpeed,
+      genMaxApiKey,
+      isTtsSupported,
+      selectedAudioGenVoice,
+      trimmedTtsText,
+      ttsEngine,
+      ttsKokoroVoice,
+      ttsModel,
+      ttsMossVoice,
+      ttsSupertonicLanguage,
+      ttsSupertonicVoice,
+      t,
+    ],
+  )
+
+  // fallow-ignore-next-line complexity
   const handleMusicGenerate = useCallback(async () => {
     if (!currentProjectId) return null
     if (!trimmedMusicPrompt) {
@@ -1382,29 +1414,57 @@ export const AiPanel = memo(function AiPanel() {
             </div>
 
             {/* Action Row */}
-            <div className="flex items-center justify-between gap-2 border-t border-border/40 pt-2.5">
-              <span className="text-[10px] text-muted-foreground">
-                {trimmedText ? `${trimmedText.length} ký tự` : 'Chưa nhập văn bản'}
-              </span>
-              <Button
-                type="button"
-                size="sm"
-                className="h-8 gap-1.5 text-xs font-semibold bg-gradient-to-r from-primary to-orange-600 hover:from-primary/90 hover:to-orange-500 shadow-sm"
-                onClick={() => {
-                  setTtsEngine('genmax')
-                  void handleGenerate()
-                }}
-                disabled={isGenerating || !trimmedText || !currentProjectId || !genMaxApiKey.trim()}
-              >
-                {isGenerating && ttsEngine === 'genmax' ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <WandSparkles className="h-3.5 w-3.5" />
-                )}
-                {isGenerating && ttsEngine === 'genmax'
-                  ? 'Đang tạo âm thanh...'
-                  : 'Generate with Audio Gen'}
-              </Button>
+            <div className="flex flex-col gap-2 border-t border-border/40 pt-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-muted-foreground">
+                  {trimmedText ? `${trimmedText.length} ký tự` : 'Chưa nhập văn bản'}
+                </span>
+                <div className="flex items-center gap-2">
+                  {selectedAudioGenVoice.previewUrl && audioGenProvider !== 'aidancing' && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 gap-1.5 text-xs font-medium border-orange-500/40 text-orange-400 hover:bg-orange-500/10 hover:text-orange-300"
+                      onClick={() => {
+                        setTtsEngine('genmax')
+                        void handleTtsGenerate('aidancing')
+                      }}
+                      disabled={isGenerating || !trimmedText || !currentProjectId}
+                      title="Lấy file nghe thử của giọng đang chọn và gửi nội dung lên AI Dancing để Clone giọng"
+                    >
+                      <Sparkles className="h-3.5 w-3.5 text-orange-400" />
+                      <span>Clone qua AI Dancing</span>
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs font-semibold bg-gradient-to-r from-primary to-orange-600 hover:from-primary/90 hover:to-orange-500 shadow-sm"
+                    onClick={() => {
+                      setTtsEngine('genmax')
+                      void handleGenerate()
+                    }}
+                    disabled={
+                      isGenerating ||
+                      !trimmedText ||
+                      !currentProjectId ||
+                      (!genMaxApiKey.trim() && audioGenProvider !== 'aidancing')
+                    }
+                  >
+                    {isGenerating && ttsEngine === 'genmax' ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <WandSparkles className="h-3.5 w-3.5" />
+                    )}
+                    {isGenerating && ttsEngine === 'genmax'
+                      ? 'Đang tạo âm thanh...'
+                      : audioGenProvider === 'aidancing'
+                        ? 'Clone giọng với AI Dancing'
+                        : 'Generate with Audio Gen'}
+                  </Button>
+                </div>
+              </div>
             </div>
 
             {/* In-tab Progress & Errors */}

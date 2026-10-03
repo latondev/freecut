@@ -283,4 +283,4 @@ Current development priorities, in order:
 ## Resource:
 https://iconscout.com/free-lottie-animations
 
-https://lottiefiles.com/free-animations/youtube
+https://lottiefiles.com/free-animations
