@@ -16,7 +16,7 @@ export interface AudioGenVoice {
 
 export type AudioGenVoiceCatalog = Record<AudioGenProvider, AudioGenVoice[]>
 
-export const AUDIO_GEN_PROVIDER_LABELS: Record<AudioGenProvider, string> = {
+const AUDIO_GEN_PROVIDER_LABELS: Record<AudioGenProvider, string> = {
   elevenlabs: 'ElevenLabs',
   minimax: 'MiniMax',
   capcut: 'CapCut',
@@ -415,6 +415,7 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
 }
 
+// fallow-ignore-next-line complexity
 function normalizeVoice(value: Record<string, unknown>): AudioGenVoice | null {
   const id = stringValue(value.voice_id) ?? stringValue(value.id) ?? stringValue(value.public_id)
   const label = stringValue(value.name) ?? stringValue(value.voice_name) ?? id

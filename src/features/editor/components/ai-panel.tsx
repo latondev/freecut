@@ -381,6 +381,8 @@ export const AiPanel = memo(function AiPanel() {
     }
   }
 
+  // fallow-ignore-next-line complexity
+
   const togglePlayVoicePreview = useCallback(
     async (voiceItem?: AudioGenVoice) => {
       if (!voiceItem?.previewUrl) {

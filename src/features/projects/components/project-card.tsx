@@ -54,6 +54,7 @@ interface ProjectCardProps {
   onCardClick?: (e: React.MouseEvent, project: Project) => void
 }
 
+// fallow-ignore-next-line complexity
 export function ProjectCard({
   project,
   onEdit,

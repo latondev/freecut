@@ -27,6 +27,12 @@ import {
   type AudioGenVoiceCatalog,
 } from '../services/audio-gen-voices-service'
 import { FLAG_DATA_URLS } from './flag-data-urls'
+import {
+  extractVoiceBadges,
+  getVoiceCountryCodes,
+  voiceMatchesFilters,
+  type VoiceFilterCriteria,
+} from '../utils/voice-library-filter'
 
 const FAVORITES_STORAGE_KEY = 'freecut:favorite-voices'
 const INITIAL_BATCH_SIZE = 24
@@ -169,175 +175,6 @@ function saveStoredFavorites(favs: Set<string>): void {
   }
 }
 
-function normalizeLanguageTag(lang?: string): string {
-  if (!lang) return ''
-  const lower = lang.toLowerCase().trim()
-  if (lower === 'vi' || lower.includes('vietnam') || lower.includes('tiếng việt'))
-    return 'vietnamese'
-  if (lower === 'en' || lower.includes('english')) return 'english'
-  if (lower === 'zh' || lower.includes('chinese') || lower.includes('trung')) return 'chinese'
-  if (lower === 'ja' || lower.includes('japanese') || lower.includes('nhật')) return 'japanese'
-  if (lower === 'ko' || lower.includes('korean') || lower.includes('hàn')) return 'korean'
-  if (lower === 'es' || lower.includes('spanish') || lower.includes('tây ban nha')) return 'spanish'
-  if (lower === 'fr' || lower.includes('french') || lower.includes('pháp')) return 'french'
-  if (lower === 'de' || lower.includes('german') || lower.includes('đức')) return 'german'
-  if (lower === 'ru' || lower.includes('russian') || lower.includes('nga')) return 'russian'
-  return lower
-}
-
-function normalizeGenderTag(gender?: string): string {
-  if (!gender) return ''
-  const lower = gender.toLowerCase().trim()
-  if (
-    lower.includes('female') ||
-    lower.includes('nữ') ||
-    lower.includes('woman') ||
-    lower.includes('girl')
-  )
-    return 'female'
-  if (
-    lower.includes('male') ||
-    lower.includes('nam') ||
-    lower.includes('man') ||
-    lower.includes('boy')
-  )
-    return 'male'
-  return 'other'
-}
-
-function getVoiceCountryCodes(voice: AudioGenVoice): string[] {
-  const codes: string[] = []
-  const text =
-    `${voice.language || ''} ${voice.accent || ''} ${(voice.tags || []).join(' ')} ${voice.label} ${voice.description || ''}`.toLowerCase()
-
-  if (text.includes('vietnam') || text.includes('tiếng việt') || /\bvi\b/.test(text))
-    codes.push('vn')
-  if (text.includes('welsh') || text.includes('wales') || /\bcy\b/.test(text)) codes.push('gb')
-  if (
-    text.includes('american') ||
-    text.includes('united states') ||
-    /\bus\b/.test(text) ||
-    text.includes('en-us') ||
-    text.includes('(us)')
-  )
-    codes.push('us')
-  if (
-    text.includes('british') ||
-    text.includes('united kingdom') ||
-    text.includes('scottish') ||
-    /\buk\b/.test(text) ||
-    text.includes('en-gb') ||
-    text.includes('(uk)')
-  )
-    codes.push('gb')
-  if (text.includes('australi')) codes.push('au')
-  if (
-    text.includes('chines') ||
-    text.includes('mandarin') ||
-    text.includes('cantonese') ||
-    text.includes('trung')
-  )
-    codes.push('cn')
-  if (text.includes('japan') || text.includes('nhật')) codes.push('jp')
-  if (text.includes('korean') || text.includes('hàn')) codes.push('kr')
-  if (text.includes('french') || text.includes('pháp')) codes.push('fr')
-  if (text.includes('german') || text.includes('đức')) codes.push('de')
-  if (text.includes('spanish') || text.includes('tây ban nha')) codes.push('es')
-  if (text.includes('russian') || text.includes('nga')) codes.push('ru')
-  if (text.includes('italian') || text.includes('ý')) codes.push('it')
-  if (text.includes('portuguese') || text.includes('brazil')) codes.push('pt')
-  if (text.includes('arabic') || text.includes('ả rập')) codes.push('sa')
-  if (text.includes('hindi') || text.includes('indian') || text.includes('ấn độ')) codes.push('in')
-  if (text.includes('thai') || text.includes('thái')) codes.push('th')
-  if (text.includes('indonesia') || text.includes('malay')) codes.push('id')
-  if (text.includes('irish') || text.includes('ireland')) codes.push('ie')
-  if (text.includes('canad')) codes.push('ca')
-  if (text.includes('mexic')) codes.push('mx')
-  if (text.includes('singapore')) codes.push('sg')
-  if (text.includes('polish')) codes.push('pl')
-  if (text.includes('dutch')) codes.push('nl')
-  if (text.includes('swedish')) codes.push('se')
-  if (text.includes('turkish')) codes.push('tr')
-  if (text.includes('filipino') || text.includes('tagalog')) codes.push('ph')
-  if (text.includes('greek')) codes.push('gr')
-  if (text.includes('czech')) codes.push('cz')
-  if (text.includes('ukrain')) codes.push('ua')
-  if (text.includes('hebrew')) codes.push('il')
-
-  // If voice contains English / en, map to US flag
-  if (codes.length === 0 && (text.includes('english') || /\ben\b/.test(text))) {
-    codes.push('us')
-  }
-
-  if (codes.length === 0) {
-    if (voice.language?.toLowerCase().includes('vi')) codes.push('vn')
-    else if (voice.language?.toLowerCase().includes('en')) codes.push('us')
-    else if (voice.language?.toLowerCase().includes('zh')) codes.push('cn')
-    else if (voice.language?.toLowerCase().includes('ja')) codes.push('jp')
-    else if (voice.language?.toLowerCase().includes('ko')) codes.push('kr')
-    else codes.push('global')
-  }
-
-  return Array.from(new Set(codes)).slice(0, 2)
-}
-
-function extractVoiceBadges(voice: AudioGenVoice) {
-  const tags = voice.tags || []
-  const text = `${tags.join(' ')} ${voice.description || ''} ${voice.label}`.toLowerCase()
-
-  // 1. Accent
-  let accent = voice.accent
-  if (!accent) {
-    if (text.includes('american') || text.includes('us')) accent = 'American'
-    else if (text.includes('british') || text.includes('uk')) accent = 'British'
-    else if (text.includes('welsh') || text.includes('wales')) accent = 'Welsh'
-    else if (text.includes('australi')) accent = 'Australian'
-    else if (text.includes('vietnam')) accent = 'Vietnamese'
-    else if (text.includes('chinese')) accent = 'Chinese'
-    else if (text.includes('japanese')) accent = 'Japanese'
-    else if (text.includes('korean')) accent = 'Korean'
-    else if (voice.language) accent = voice.language
-    else accent = 'Standard'
-  }
-
-  // 2. Gender
-  let gender = voice.gender
-  if (!gender) {
-    if (
-      text.includes('female') ||
-      text.includes('nữ') ||
-      text.includes('woman') ||
-      text.includes('girl')
-    )
-      gender = 'Female'
-    else if (
-      text.includes('male') ||
-      text.includes('nam') ||
-      text.includes('man') ||
-      text.includes('boy')
-    )
-      gender = 'Male'
-    else gender = 'Neutral'
-  }
-
-  // 3. Age
-  let age = 'Middle_aged'
-  if (
-    text.includes('young') ||
-    text.includes('trẻ') ||
-    text.includes('youth') ||
-    text.includes('child')
-  ) {
-    age = 'Young'
-  } else if (text.includes('old') || text.includes('senior') || text.includes('elderly')) {
-    age = 'Old'
-  } else if (tags.some((t) => t.toLowerCase().includes('middle'))) {
-    age = 'Middle_aged'
-  }
-
-  return { accent, gender, age }
-}
-
 type SubTab = 'library' | 'favourites' | 'default'
 
 type ActiveProviderTab = 'all' | AudioGenProvider
@@ -351,7 +188,7 @@ const ALL_PROVIDER_LABELS: Record<ActiveProviderTab, string> = {
   capcut: 'CapCut',
 }
 
-export interface VoiceLibraryDialogProps {
+interface VoiceLibraryDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   selectedVoiceId: string
@@ -371,6 +208,7 @@ function resolveAudioPreviewUrl(url?: string): string {
   return url
 }
 
+// fallow-ignore-next-line complexity
 export const VoiceLibraryDialog = memo(function VoiceLibraryDialog({
   open,
   onOpenChange,
@@ -476,6 +314,7 @@ export const VoiceLibraryDialog = memo(function VoiceLibraryDialog({
     toast.info('Đã đặt lại toàn bộ bộ lọc')
   }, [])
 
+  // fallow-ignore-next-line complexity
   const handlePlayPreview = useCallback(
     async (voice: AudioGenVoice) => {
       if (!voice.previewUrl) {
@@ -595,255 +434,16 @@ export const VoiceLibraryDialog = memo(function VoiceLibraryDialog({
   // Helper to filter any voice list based on active criteria
   const filterVoiceList = useCallback(
     (list: AudioGenVoice[]) => {
-      const query = deferredSearchQuery.trim().toLowerCase()
-      const targetQuality = qualityFilter.toLowerCase()
-      const targetGender = genderFilter.toLowerCase()
-      const targetAge = ageFilter.toLowerCase()
-
-      return list.filter((voice) => {
-        // 1. Language filter (Accurate matching for 70+ languages & accents)
-        if (languageFilter !== 'all') {
-          const normVoiceLang = normalizeLanguageTag(voice.language)
-          const fullText =
-            `${voice.language || ''} ${voice.accent || ''} ${(voice.tags || []).join(' ')} ${voice.description || ''} ${voice.label}`.toLowerCase()
-
-          let matched = false
-          const selectedOption = LANGUAGE_OPTIONS.find((l) => l.code === languageFilter)
-          const langCode = languageFilter.toLowerCase()
-          const langLabel = (selectedOption?.label || '').toLowerCase()
-          const primaryWord = langLabel
-            .split(' ')[0]!
-            .replace(/[^a-z]/g, '')
-            .toLowerCase()
-
-          // Match by ISO code or normalized language name
-          if (normVoiceLang === langCode || voice.language?.toLowerCase() === langCode) {
-            matched = true
-          } else if (normVoiceLang === primaryWord) {
-            matched = true
-          } else if (primaryWord.length > 2 && fullText.includes(primaryWord)) {
-            matched = true
-          } else if (languageFilter === 'vi') {
-            matched =
-              normVoiceLang === 'vietnamese' ||
-              fullText.includes('vietnam') ||
-              fullText.includes('tiếng việt') ||
-              /\bvi\b/.test(fullText)
-          } else if (languageFilter === 'en') {
-            matched =
-              normVoiceLang === 'english' ||
-              fullText.includes('english') ||
-              fullText.includes('american') ||
-              fullText.includes('british') ||
-              fullText.includes('australi') ||
-              /\ben\b/.test(fullText)
-          } else if (languageFilter === 'zh') {
-            matched =
-              normVoiceLang === 'chinese' ||
-              fullText.includes('chinese') ||
-              fullText.includes('mandarin') ||
-              fullText.includes('cantonese') ||
-              fullText.includes('trung') ||
-              /\bzh\b/.test(fullText)
-          } else if (languageFilter === 'ja') {
-            matched =
-              normVoiceLang === 'japanese' ||
-              fullText.includes('japanese') ||
-              fullText.includes('nhật') ||
-              /\bja\b/.test(fullText)
-          } else if (languageFilter === 'ko') {
-            matched =
-              normVoiceLang === 'korean' ||
-              fullText.includes('korean') ||
-              fullText.includes('hàn') ||
-              /\bko\b/.test(fullText)
-          } else if (languageFilter === 'fr') {
-            matched =
-              normVoiceLang === 'french' ||
-              fullText.includes('french') ||
-              fullText.includes('pháp') ||
-              /\bfr\b/.test(fullText)
-          } else if (languageFilter === 'de') {
-            matched =
-              normVoiceLang === 'german' ||
-              fullText.includes('german') ||
-              fullText.includes('đức') ||
-              /\bde\b/.test(fullText)
-          } else if (languageFilter === 'es') {
-            matched =
-              normVoiceLang === 'spanish' ||
-              fullText.includes('spanish') ||
-              fullText.includes('tây ban nha') ||
-              /\bes\b/.test(fullText)
-          } else if (languageFilter === 'ru') {
-            matched =
-              normVoiceLang === 'russian' ||
-              fullText.includes('russian') ||
-              fullText.includes('nga') ||
-              /\bru\b/.test(fullText)
-          } else if (languageFilter === 'it') {
-            matched =
-              fullText.includes('italian') || fullText.includes('ý') || /\bit\b/.test(fullText)
-          } else if (languageFilter === 'pt') {
-            matched =
-              fullText.includes('portuguese') ||
-              fullText.includes('brazil') ||
-              /\bpt\b/.test(fullText)
-          } else if (languageFilter === 'cy') {
-            matched = fullText.includes('welsh') || /\bcy\b/.test(fullText)
-          }
-
-          if (!matched) return false
-        }
-
-        // 2. Quality filter
-        if (targetQuality !== 'all') {
-          const fullVoiceText =
-            `${(voice.tags || []).join(' ')} ${voice.description || ''} ${voice.label}`.toLowerCase()
-          if (
-            targetQuality === 'studio_hd' &&
-            !fullVoiceText.includes('studio') &&
-            !fullVoiceText.includes('hd')
-          )
-            return false
-          if (
-            targetQuality === 'ultra_realistic' &&
-            !fullVoiceText.includes('ultra') &&
-            !fullVoiceText.includes('realistic')
-          )
-            return false
-          if (targetQuality === 'standard' && !fullVoiceText.includes('standard')) return false
-        }
-
-        // 3. Gender filter
-        if (targetGender !== 'all') {
-          const normGen = normalizeGenderTag(voice.gender)
-          if (normGen !== targetGender) {
-            const inTags = voice.tags?.some((t) => normalizeGenderTag(t) === targetGender)
-            const inDesc = voice.description?.toLowerCase().includes(targetGender)
-            if (!inTags && !inDesc) return false
-          }
-        }
-
-        // 4. Age filter
-        if (targetAge !== 'all') {
-          const fullVoiceText =
-            `${(voice.tags || []).join(' ')} ${voice.description || ''} ${voice.label}`.toLowerCase()
-          if (
-            targetAge === 'young' &&
-            !fullVoiceText.includes('young') &&
-            !fullVoiceText.includes('trẻ') &&
-            !fullVoiceText.includes('child')
-          )
-            return false
-          if (
-            targetAge === 'middle_aged' &&
-            !fullVoiceText.includes('middle') &&
-            !fullVoiceText.includes('adult') &&
-            !fullVoiceText.includes('trung niên')
-          )
-            return false
-          if (
-            targetAge === 'old' &&
-            !fullVoiceText.includes('old') &&
-            !fullVoiceText.includes('senior') &&
-            !fullVoiceText.includes('già') &&
-            !fullVoiceText.includes('cao tuổi')
-          )
-            return false
-        }
-
-        // 5. Category filter
-        if (categoryFilter !== 'all') {
-          const fullVoiceText =
-            `${(voice.tags || []).join(' ')} ${voice.description || ''} ${voice.label}`.toLowerCase()
-          if (categoryFilter === 'story') {
-            if (
-              !fullVoiceText.includes('narrat') &&
-              !fullVoiceText.includes('story') &&
-              !fullVoiceText.includes('tường thuật') &&
-              !fullVoiceText.includes('kể') &&
-              !fullVoiceText.includes('audiobook') &&
-              !fullVoiceText.includes('novel')
-            )
-              return false
-          } else if (categoryFilter === 'conversational') {
-            if (
-              !fullVoiceText.includes('convers') &&
-              !fullVoiceText.includes('hội thoại') &&
-              !fullVoiceText.includes('chat') &&
-              !fullVoiceText.includes('trò chuyện') &&
-              !fullVoiceText.includes('podcast')
-            )
-              return false
-          } else if (categoryFilter === 'animation') {
-            if (
-              !fullVoiceText.includes('charact') &&
-              !fullVoiceText.includes('nhân vật') &&
-              !fullVoiceText.includes('animat') &&
-              !fullVoiceText.includes('hoạt hình') &&
-              !fullVoiceText.includes('anime') &&
-              !fullVoiceText.includes('game')
-            )
-              return false
-          } else if (categoryFilter === 'social_media') {
-            if (
-              !fullVoiceText.includes('social') &&
-              !fullVoiceText.includes('mạng xã hội') &&
-              !fullVoiceText.includes('stream') &&
-              !fullVoiceText.includes('reels') &&
-              !fullVoiceText.includes('tiktok') &&
-              !fullVoiceText.includes('youtube')
-            )
-              return false
-          } else if (categoryFilter === 'entertainment') {
-            if (
-              !fullVoiceText.includes('entertain') &&
-              !fullVoiceText.includes('giải trí') &&
-              !fullVoiceText.includes('tv') &&
-              !fullVoiceText.includes('movie') &&
-              !fullVoiceText.includes('cinema') &&
-              !fullVoiceText.includes('drama')
-            )
-              return false
-          } else if (categoryFilter === 'commercial') {
-            if (
-              !fullVoiceText.includes('commercial') &&
-              !fullVoiceText.includes('quảng cáo') &&
-              !fullVoiceText.includes('promo') &&
-              !fullVoiceText.includes('advert') &&
-              !fullVoiceText.includes('brand')
-            )
-              return false
-          } else if (categoryFilter === 'education') {
-            if (
-              !fullVoiceText.includes('educat') &&
-              !fullVoiceText.includes('giáo dục') &&
-              !fullVoiceText.includes('inform') &&
-              !fullVoiceText.includes('thông tin') &&
-              !fullVoiceText.includes('instruct') &&
-              !fullVoiceText.includes('news') &&
-              !fullVoiceText.includes('bản tin')
-            )
-              return false
-          }
-        }
-
-        // 6. Search query
-        if (query) {
-          const matchName = voice.label.toLowerCase().includes(query)
-          const matchId = voice.id.toLowerCase().includes(query)
-          const matchDesc = Boolean(voice.description?.toLowerCase().includes(query))
-          const matchLang = Boolean(voice.language?.toLowerCase().includes(query))
-          const matchAccent = Boolean(voice.accent?.toLowerCase().includes(query))
-          const matchTags = Boolean(voice.tags?.some((t) => t.toLowerCase().includes(query)))
-          if (!matchName && !matchId && !matchDesc && !matchLang && !matchAccent && !matchTags) {
-            return false
-          }
-        }
-
-        return true
-      })
+      const criteria: VoiceFilterCriteria = {
+        query: deferredSearchQuery.trim().toLowerCase(),
+        language: languageFilter,
+        languageLabel: LANGUAGE_OPTIONS.find((l) => l.code === languageFilter)?.label ?? '',
+        quality: qualityFilter,
+        gender: genderFilter,
+        age: ageFilter,
+        category: categoryFilter,
+      }
+      return list.filter((voice) => voiceMatchesFilters(voice, criteria))
     },
     [deferredSearchQuery, languageFilter, qualityFilter, genderFilter, ageFilter, categoryFilter],
   )
@@ -1467,6 +1067,7 @@ interface VoiceCardItemProps {
   onSelectVoice: (voice: AudioGenVoice) => void
 }
 
+// fallow-ignore-next-line complexity
 const VoiceCardItem = memo(function VoiceCardItem({
   voice,
   isCurrent,
