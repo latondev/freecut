@@ -15,10 +15,19 @@ import {
   Loader2,
   CheckCircle2,
   SlidersHorizontal,
+  Globe,
 } from 'lucide-react'
 import { useSettingsStore } from '@/features/editor/deps/settings'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import type { MediaTranscriptModel } from '@/types/storage'
 import {
   useTimelineStore,
   useItemsStore,
@@ -342,6 +351,28 @@ export const ActionPanel = memo(function ActionPanel() {
   const [transcribeDialogOpen, setTranscribeDialogOpen] = useState(false)
   const [isBatchTranscribing, setIsBatchTranscribing] = useState(false)
   const [batchProgress, setBatchProgress] = useState<BatchCaptionProgress | null>(null)
+  const [captionModel, setCaptionModel] = useState<MediaTranscriptModel>(() => {
+    const defaultM = useSettingsStore.getState().defaultWhisperModel
+    return defaultM && defaultM !== 'parakeet-tdt-v3' ? defaultM : 'whisper-base'
+  })
+  const [captionLanguage, setCaptionLanguage] = useState<string>(() => {
+    const settingsLang = useSettingsStore.getState().defaultWhisperLanguage
+    if (settingsLang && settingsLang !== 'auto') return settingsLang
+    if (typeof document !== 'undefined' && document.documentElement?.lang?.startsWith('vi')) {
+      return 'vi'
+    }
+    return 'vi'
+  })
+
+  const handleModelChange = useCallback((val: MediaTranscriptModel) => {
+    setCaptionModel(val)
+    useSettingsStore.getState().setSetting('defaultWhisperModel', val)
+  }, [])
+
+  const handleLanguageChange = useCallback((val: string) => {
+    setCaptionLanguage(val)
+    useSettingsStore.getState().setSetting('defaultWhisperLanguage', val === 'auto' ? '' : val)
+  }, [])
 
   const items = useTimelineStore((s) => s.items)
   const transitions = useTimelineStore((s) => s.transitions)
@@ -380,10 +411,16 @@ export const ActionPanel = memo(function ActionPanel() {
         model: values.model,
         quantization: values.quantization,
         language: values.language,
+        force: true,
         onProgress: (p) => {
           setBatchProgress(p)
         },
       })
+
+      setCaptionModel(values.model)
+      if (values.language) {
+        setCaptionLanguage(values.language)
+      }
 
       toast.success(
         `Đã tạo caption word-by-word thành công cho ${result.totalClipsUpdated} clip trên Timeline!`,
@@ -402,13 +439,12 @@ export const ActionPanel = memo(function ActionPanel() {
   }, [])
 
   const handleFastBatchCaptions = useCallback(() => {
-    const settings = useSettingsStore.getState()
     void handleStartBatchCaptions({
-      model: 'whisper-tiny',
+      model: captionModel,
       quantization: 'hybrid',
-      language: settings.defaultWhisperLanguage || '',
+      language: captionLanguage === 'auto' ? '' : captionLanguage,
     })
-  }, [handleStartBatchCaptions])
+  }, [captionModel, captionLanguage, handleStartBatchCaptions])
 
   const handleCancelBatchCaptions = useCallback(() => {
     cancelBatchCaptionGeneration()
@@ -809,22 +845,95 @@ export const ActionPanel = memo(function ActionPanel() {
                       {voiceClipsCount > 0 ? `${voiceClipsCount} đoạn Voice/Audio` : '0 audio'}
                     </strong>
                   </span>
-                  <span className="text-[10px] text-emerald-400 font-medium">
-                    ⚡ Whisper Tiny (39MB · Siêu tốc)
-                  </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                {/* Model & Language Quick Selectors */}
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
+                      <span>Mô hình AI (Model)</span>
+                    </label>
+                    <Select
+                      value={captionModel}
+                      onValueChange={(val) => handleModelChange(val as MediaTranscriptModel)}
+                    >
+                      <SelectTrigger className="h-8 text-xs bg-background/60">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="whisper-tiny">⚡ Tiny (39MB · Siêu tốc)</SelectItem>
+                        <SelectItem value="whisper-base">
+                          🎯 Base (140MB · Cân bằng, khuyên dùng)
+                        </SelectItem>
+                        <SelectItem value="whisper-small">💎 Small (460MB · Chuẩn cao)</SelectItem>
+                        <SelectItem value="whisper-large">
+                          🚀 Large v3 (1.2GB · Cực chuẩn)
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
+                      <Globe className="w-3 h-3 text-muted-foreground" />
+                      <span>Ngôn ngữ giọng nói</span>
+                    </label>
+                    <Select value={captionLanguage} onValueChange={handleLanguageChange}>
+                      <SelectTrigger className="h-8 text-xs bg-background/60 font-medium">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-56">
+                        <SelectItem value="vi">🇻🇳 Tiếng Việt (Khuyên dùng)</SelectItem>
+                        <SelectItem value="en">🇺🇸 Tiếng Anh (English)</SelectItem>
+                        <SelectItem value="zh">🇨🇳 Tiếng Trung (Chinese)</SelectItem>
+                        <SelectItem value="ja">🇯🇵 Tiếng Nhật (Japanese)</SelectItem>
+                        <SelectItem value="ko">🇰🇷 Tiếng Hàn (Korean)</SelectItem>
+                        <SelectItem value="fr">🇫🇷 Tiếng Pháp (French)</SelectItem>
+                        <SelectItem value="de">🇩🇪 Tiếng Đức (German)</SelectItem>
+                        <SelectItem value="es">🇪🇸 Tây Ban Nha (Spanish)</SelectItem>
+                        <SelectItem value="ru">🇷🇺 Tiếng Nga (Russian)</SelectItem>
+                        <SelectItem value="th">🇹🇭 Tiếng Thái (Thai)</SelectItem>
+                        <SelectItem value="pt">🇵🇹 Bồ Đào Nha (Portuguese)</SelectItem>
+                        <SelectItem value="it">🇮🇹 Tiếng Ý (Italian)</SelectItem>
+                        <SelectItem value="id">🇮🇩 Indonesia (Indonesian)</SelectItem>
+                        <SelectItem value="auto">🌐 Tự động nhận diện</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Language Guidance Indicator */}
+                <div className="text-[10px] px-1 py-0.5 rounded bg-background/40 border border-border/40 text-muted-foreground flex items-center justify-between">
+                  <span>
+                    {captionLanguage === 'vi' ? (
+                      <span className="text-emerald-400 font-medium flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> Nhận diện Tiếng Việt có dấu chuẩn xác
+                      </span>
+                    ) : captionLanguage === 'auto' ? (
+                      <span className="text-amber-400 font-medium">
+                        ⚠️ Khuyên chọn cụ thể [🇻🇳 Tiếng Việt] thay vì Tự động
+                      </span>
+                    ) : (
+                      <span className="text-foreground/80 font-medium">
+                        Đã chọn ngôn ngữ:{' '}
+                        <strong className="text-amber-300 uppercase">{captionLanguage}</strong>
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground">Ghi đè phụ đề cũ</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 pt-0.5">
                   <Button
                     variant="outline"
                     size="sm"
                     disabled={voiceClipsCount === 0 || isBatchTranscribing}
                     onClick={handleFastBatchCaptions}
                     className="sm:col-span-3 h-9 text-xs font-semibold gap-1.5 border-amber-500/50 bg-gradient-to-r from-amber-500/25 to-yellow-500/15 hover:from-amber-500/35 hover:to-yellow-500/25 text-amber-200 hover:border-amber-400 shadow-sm transition-all"
-                    title="Tạo caption ngay lập tức bằng Whisper Tiny (siêu nhẹ, chỉ 39MB, tốc độ cao nhất)"
+                    title="Tạo caption ngay lập tức bằng Model & Ngôn ngữ đã chọn (sẽ ghi đè caption cũ)"
                   >
                     <Zap className="w-4 h-4 text-amber-400 fill-amber-400/50 shrink-0" />
-                    <span>⚡ Tạo Siêu Nhanh (Tiny)</span>
+                    <span>⚡ Tạo Caption Ngay</span>
                   </Button>
 
                   <Button
@@ -833,7 +942,7 @@ export const ActionPanel = memo(function ActionPanel() {
                     disabled={voiceClipsCount === 0 || isBatchTranscribing}
                     onClick={() => setTranscribeDialogOpen(true)}
                     className="sm:col-span-2 h-9 text-xs font-medium gap-1.5 border-border/70 bg-secondary/30 hover:bg-secondary/60 text-foreground/80 hover:text-foreground shadow-sm transition-all"
-                    title="Tùy chọn Model Whisper hoặc Ngôn ngữ khác"
+                    title="Tùy chọn Model hoặc Quantization nâng cao"
                   >
                     <SlidersHorizontal className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                     <span>Tùy chọn...</span>

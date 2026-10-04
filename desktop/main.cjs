@@ -440,13 +440,24 @@ app.whenReady().then(async () => {
       responseHeaders['Cross-Origin-Embedder-Policy'] = ['require-corp'];
     } else {
       // For any external requests (CDNs, GenMax, ElevenLabs, MiniMax, Hailuo, audio/video previews, APIs):
-      // Ensure CORS & CORP allow embedding without being blocked by parent window's COEP
+      // Clean existing CORS/CORP/COEP headers case-insensitively before setting clean ones to prevent duplicates
+      for (const key of Object.keys(responseHeaders)) {
+        const lower = key.toLowerCase();
+        if (
+          lower === 'access-control-allow-origin' ||
+          lower === 'access-control-allow-headers' ||
+          lower === 'access-control-allow-methods' ||
+          lower === 'access-control-allow-credentials' ||
+          lower === 'cross-origin-resource-policy' ||
+          lower === 'cross-origin-embedder-policy'
+        ) {
+          delete responseHeaders[key];
+        }
+      }
       responseHeaders['Access-Control-Allow-Origin'] = ['*'];
       responseHeaders['Access-Control-Allow-Headers'] = ['*'];
       responseHeaders['Access-Control-Allow-Methods'] = ['GET, POST, PUT, DELETE, OPTIONS'];
       responseHeaders['Cross-Origin-Resource-Policy'] = ['cross-origin'];
-      delete responseHeaders['cross-origin-embedder-policy'];
-      delete responseHeaders['Cross-Origin-Embedder-Policy'];
     }
     callback({ responseHeaders });
   });

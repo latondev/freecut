@@ -137,13 +137,24 @@ async function processSingleMediaCaption(
     quantization?: MediaTranscriptQuantization
     language?: string
     onProgress?: (stage: string, progress: number) => void
+    force?: boolean
   },
   signal: AbortSignal,
 ): Promise<number> {
   if (signal.aborted) return 0
 
-  let transcript: MediaTranscript | null | undefined =
-    await mediaTranscriptionService.getTranscript(mediaId)
+  let transcript: MediaTranscript | null | undefined = null
+  if (!options.force) {
+    transcript = await mediaTranscriptionService.getTranscript(mediaId)
+    // Invalidate cached transcript if requested model or language is different
+    if (
+      transcript &&
+      ((transcript.model && transcript.model !== options.model) ||
+        (options.language && transcript.language && transcript.language !== options.language))
+    ) {
+      transcript = null
+    }
+  }
 
   if (!transcript && !signal.aborted) {
     transcript = await transcribeMediaJob(mediaId, options)
@@ -161,6 +172,7 @@ export async function generateTimelineCaptionsBatch(options: {
   quantization?: MediaTranscriptQuantization
   language?: string
   targetItemIds?: string[]
+  force?: boolean
   onProgress?: (progress: BatchCaptionProgress) => void
 }): Promise<{ totalClipsUpdated: number; mediaProcessed: number }> {
   cancelBatchCaptionGeneration()
@@ -207,6 +219,7 @@ export async function generateTimelineCaptionsBatch(options: {
         model: options.model,
         quantization: options.quantization,
         language: options.language,
+        force: options.force,
         onProgress: (stage, progress) => {
           const mediaPct = Math.round(progress * 100)
           const basePct = (i / totalMedia) * 100

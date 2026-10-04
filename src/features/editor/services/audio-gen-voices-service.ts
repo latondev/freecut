@@ -14,6 +14,7 @@ export interface AudioGenVoice {
   accent?: string
   tags?: string[]
   voiceIndex?: string
+  isCloned?: boolean
 }
 
 export type AudioGenVoiceCatalog = Record<AudioGenProvider, AudioGenVoice[]>
@@ -48,8 +49,7 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
       id: '362703657091264',
       label: 'Professional Guide — Clear, Informative',
       description: 'Corporate Promotion & Narration. Clear, measured Vietnamese male voice.',
-      previewUrl:
-        'https://cdn.hailuoai.video/open-hailuo-video-web/public_assets/dc8888e4-6091-429b-8111-8f7f1bfa4c9f.mp3',
+      previewUrl: 'https://file.cdn.minimax.io/public/f495ffb8-7c4d-4186-840a-3c8dd3f85c2e.wav',
       language: 'Vietnamese',
       gender: 'Male',
       tags: ['Vietnamese', 'Standard', 'Male', 'Young', 'Corporate Promotion & Narration'],
@@ -58,8 +58,7 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
       id: '273554146070723',
       label: 'Serene Man — Solemn, Cinematic, Captivating',
       description: 'Audiobooks & Novels, Documentary. Warm, cinematic Vietnamese male voice.',
-      previewUrl:
-        'https://cdn.hailuoai.video/open-hailuo-video-web/public_assets/29748991-1b83-428a-9062-b9a967e9b68a.mp3',
+      previewUrl: 'https://file.cdn.minimax.io/public/699648d6-eb59-41b6-a10c-28c09896c650.wav',
       language: 'Vietnamese',
       gender: 'Male',
       tags: ['Vietnamese', 'Male', 'Documentary', 'Audiobooks & Novels'],
@@ -68,8 +67,7 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
       id: '362703657091265',
       label: 'Professional Narrator — Warm, Measured',
       description: 'Online Education, Documentary, Corporate. Warm and balanced delivery.',
-      previewUrl:
-        'https://cdn.hailuoai.video/open-hailuo-video-web/public_assets/dc8888e4-6091-429b-8111-8f7f1bfa4c9f.mp3',
+      previewUrl: 'https://file.cdn.minimax.io/public/f495ffb8-7c4d-4186-840a-3c8dd3f85c2e.wav',
       language: 'Vietnamese',
       gender: 'Male',
       tags: ['Vietnamese', 'Male', 'Documentary', 'Online Education'],
@@ -87,8 +85,7 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
       id: '262184394641600',
       label: 'Friendly Man — Persuasive, Dynamic, High-Energy',
       description: 'Games & RPG, Commercials & Trailers, Podcasts & Social.',
-      previewUrl:
-        'https://cdn.hailuoai.video/open-hailuo-video-web/public_assets/883dfc14-6eaa-49d1-883f-8bead1dae05e.mp3',
+      previewUrl: 'https://file.cdn.minimax.io/public/699648d6-eb59-41b6-a10c-28c09896c650.wav',
       language: 'Vietnamese',
       gender: 'Male',
       tags: ['Vietnamese', 'Male', 'Commercials & Trailers', 'Podcasts & Social'],
@@ -399,7 +396,7 @@ export const DEFAULT_AUDIO_GEN_VOICES: AudioGenVoiceCatalog = {
       gender: 'female',
     },
   ],
-  aidancing: AIDANCING_PRESET_VOICES,
+  aidancing: AIDANCING_PRESET_VOICES.map((v) => ({ ...v, isCloned: true })),
 }
 
 const dbPromise = openDB<AudioGenVoiceCache>(DB_NAME, DB_VERSION, {
@@ -484,6 +481,17 @@ function normalizeVoice(value: Record<string, unknown>): AudioGenVoice | null {
     stringValue(labelsObj.gender) ??
     tagsList.find((tag) => ['male', 'female', 'neutral'].includes(tag.toLowerCase()))
 
+  const isCloned =
+    Boolean(value.is_cloned) ||
+    Boolean(value.isCloned) ||
+    stringValue(value.voice_type) === 'cloned' ||
+    stringValue(value.type) === 'cloned' ||
+    stringValue(value.category) === 'cloned' ||
+    stringValue(value.category) === 'custom' ||
+    tagsList.some((tag) =>
+      ['clone', 'cloned', 'voice clone', 'giọng clone'].includes(tag.toLowerCase()),
+    )
+
   return {
     id,
     label,
@@ -496,6 +504,7 @@ function normalizeVoice(value: Record<string, unknown>): AudioGenVoice | null {
     gender: detectedGender,
     accent: detectedAccent,
     tags: tagsList.length > 0 ? tagsList : undefined,
+    isCloned: isCloned ? true : undefined,
   }
 }
 
@@ -633,13 +642,6 @@ function uniqueVoices(voices: AudioGenVoice[]): AudioGenVoice[] {
 }
 
 function sanitizeVoicePreviewUrl(voice: AudioGenVoice): AudioGenVoice {
-  if (voice.previewUrl && voice.previewUrl.includes('84d2ad4a-14d2-43bb-8ee7-e6f7df2ce47e')) {
-    return {
-      ...voice,
-      previewUrl:
-        'https://cdn.hailuoai.video/open-hailuo-video-web/public_assets/dc8888e4-6091-429b-8111-8f7f1bfa4c9f.mp3',
-    }
-  }
   return voice
 }
 
@@ -761,13 +763,22 @@ export async function loadGenMaxVoiceCatalog(
       {},
       (page, count) => options.onProgress?.(`Loading MiniMax page ${page} (${count} voices)...`),
     )
-    const cloned = await requestGenMax('/v1/minimax/voices', normalizedApiKey).then(async (res) => {
-      const payload = await res.json()
-      return getVoiceArray(payload)
-        .map(normalizeVoice)
-        .filter((voice): voice is AudioGenVoice => Boolean(voice))
-    })
-    await publish('minimax', [...system, ...cloned, ...DEFAULT_AUDIO_GEN_VOICES.minimax])
+    const cloned = await requestGenMax('/v1/minimax/voices', normalizedApiKey)
+      .then(async (res) => {
+        const payload = await res.json()
+        return getVoiceArray(payload)
+          .map(normalizeVoice)
+          .filter((voice): voice is AudioGenVoice => Boolean(voice))
+          .map((v) => ({ ...v, isCloned: true }))
+      })
+      .catch(() => [] as AudioGenVoice[])
+
+    const systemVoices = system.map((v) => ({ ...v, isCloned: false }))
+    const defaultVoices = DEFAULT_AUDIO_GEN_VOICES.minimax.map((v) => ({
+      ...v,
+      isCloned: false,
+    }))
+    await publish('minimax', [...cloned, ...systemVoices, ...defaultVoices])
   } catch (error) {
     lastError = error
     options.onProgress?.('MiniMax failed; continuing with CapCut...')

@@ -127,12 +127,16 @@ export function TranscribeDialog({
   ])
 
   const handleStart = () => {
+    const lang = isParakeetModel(model)
+      ? getWhisperLanguageSettingValue(WHISPER_AUTO_LANGUAGE_VALUE)
+      : getWhisperLanguageSettingValue(languageValue)
+    useSettingsStore.getState().setSetting('defaultWhisperModel', model)
+    useSettingsStore.getState().setSetting('defaultWhisperQuantization', quantization)
+    useSettingsStore.getState().setSetting('defaultWhisperLanguage', lang)
     onStart({
       model,
       quantization,
-      language: isParakeetModel(model)
-        ? getWhisperLanguageSettingValue(WHISPER_AUTO_LANGUAGE_VALUE)
-        : getWhisperLanguageSettingValue(languageValue),
+      language: lang,
     })
   }
 

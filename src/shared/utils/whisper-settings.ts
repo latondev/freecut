@@ -178,6 +178,9 @@ export const WHISPER_LANGUAGE_OPTIONS: ReadonlyArray<{
 export function getWhisperLanguageSelectValue(language: string | undefined): string {
   const normalized = normalizeWhisperLanguage(language)
   if (!normalized) {
+    if (typeof document !== 'undefined' && document.documentElement?.lang?.startsWith('vi')) {
+      return 'vi'
+    }
     return WHISPER_AUTO_LANGUAGE_VALUE
   }
 
@@ -190,5 +193,11 @@ export function getWhisperLanguageSettingValue(value: string): string {
 
 export function normalizeWhisperLanguage(language: string | undefined): string | undefined {
   const trimmed = language?.trim().toLowerCase()
-  return trimmed ? trimmed : undefined
+  if (!trimmed || trimmed === 'auto') {
+    if (typeof document !== 'undefined' && document.documentElement?.lang?.startsWith('vi')) {
+      return 'vi'
+    }
+    return undefined
+  }
+  return trimmed
 }

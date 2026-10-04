@@ -21,7 +21,6 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/compone
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { cn } from '@/shared/ui/cn'
 import {
-  DEFAULT_AUDIO_GEN_VOICES,
   type AudioGenProvider,
   type AudioGenVoice,
   type AudioGenVoiceCatalog,
@@ -175,7 +174,7 @@ function saveStoredFavorites(favs: Set<string>): void {
   }
 }
 
-type SubTab = 'library' | 'favourites' | 'default'
+type SubTab = 'library' | 'favourites' | 'clone'
 
 type ActiveProviderTab = 'all' | AudioGenProvider
 
@@ -429,18 +428,15 @@ export const VoiceLibraryDialog = memo(function VoiceLibraryDialog({
     return voiceCatalog[activeProvider] || []
   }, [activeProvider, allVoices, voiceCatalog])
 
-  // Default voices for current provider
-  const defaultVoices = useMemo(() => {
-    if (activeProvider === 'all') {
-      return [
-        ...(DEFAULT_AUDIO_GEN_VOICES.aidancing || []),
-        ...(DEFAULT_AUDIO_GEN_VOICES.minimax || []),
-        ...(DEFAULT_AUDIO_GEN_VOICES.elevenlabs || []),
-        ...(DEFAULT_AUDIO_GEN_VOICES.capcut || []),
-      ]
-    }
-    return DEFAULT_AUDIO_GEN_VOICES[activeProvider] || []
-  }, [activeProvider])
+  // Thư viện giọng nói: chỉ gồm các giọng hệ thống (không bao gồm voice clone)
+  const libraryVoices = useMemo(() => {
+    return providerVoices.filter((v) => !v.isCloned)
+  }, [providerVoices])
+
+  // Giọng clone: chỉ gồm các voice clone
+  const clonedVoices = useMemo(() => {
+    return providerVoices.filter((v) => Boolean(v.isCloned))
+  }, [providerVoices])
 
   // Favourites list for current provider
   const favouriteVoices = useMemo(() => {
@@ -470,10 +466,10 @@ export const VoiceLibraryDialog = memo(function VoiceLibraryDialog({
 
     if (activeSubTab === 'favourites') {
       list = favouriteVoices
-    } else if (activeSubTab === 'default') {
-      list = defaultVoices
+    } else if (activeSubTab === 'clone') {
+      list = clonedVoices
     } else {
-      list = providerVoices
+      list = libraryVoices
     }
 
     const filtered = filterVoiceList(list)
@@ -488,7 +484,7 @@ export const VoiceLibraryDialog = memo(function VoiceLibraryDialog({
     }
 
     return filtered
-  }, [activeSubTab, favouriteVoices, defaultVoices, providerVoices, filterVoiceList, sortOption])
+  }, [activeSubTab, favouriteVoices, clonedVoices, libraryVoices, filterVoiceList, sortOption])
 
   // Check if other providers have matching voices when current provider has 0 results
   const otherProviderSuggestion = useMemo(() => {
@@ -667,7 +663,7 @@ export const VoiceLibraryDialog = memo(function VoiceLibraryDialog({
           </div>
         </div>
 
-        {/* Sub-tabs Row (Thư viện / Yêu thích / Giọng chọn lọc) */}
+        {/* Sub-tabs Row (Thư viện / Yêu thích / Giọng clone) */}
         <div className="flex shrink-0 items-center justify-between border-b border-zinc-800/60 bg-[#15161a] px-6 py-2">
           <div className="flex items-center gap-2">
             <button
@@ -681,7 +677,7 @@ export const VoiceLibraryDialog = memo(function VoiceLibraryDialog({
               )}
             >
               <span>📚 Thư viện giọng nói</span>
-              <span className="text-[10px] opacity-80">({providerVoices.length})</span>
+              <span className="text-[10px] opacity-80">({libraryVoices.length})</span>
             </button>
 
             <button
@@ -703,17 +699,17 @@ export const VoiceLibraryDialog = memo(function VoiceLibraryDialog({
 
             <button
               type="button"
-              onClick={() => setActiveSubTab('default')}
+              onClick={() => setActiveSubTab('clone')}
               className={cn(
                 'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all',
-                activeSubTab === 'default'
+                activeSubTab === 'clone'
                   ? 'bg-orange-500 text-white shadow-xs'
                   : 'text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-200',
               )}
             >
               <Sparkles className="h-3.5 w-3.5" />
-              <span>Giọng chọn lọc</span>
-              <span className="text-[10px] opacity-80">({defaultVoices.length})</span>
+              <span>Giọng clone</span>
+              <span className="text-[10px] opacity-80">({clonedVoices.length})</span>
             </button>
           </div>
 
@@ -940,60 +936,76 @@ export const VoiceLibraryDialog = memo(function VoiceLibraryDialog({
           className="flex-1 overflow-y-auto bg-[#0d0e11] p-5"
         >
           {displayedVoices.length === 0 ? (
-            <div className="flex h-64 flex-col items-center justify-center text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-800/80 text-zinc-500 mb-3">
-                <Mic className="h-6 w-6" />
-              </div>
-              <h3 className="text-sm font-semibold text-zinc-200">
-                Không tìm thấy giọng nói phù hợp{' '}
-                {activeProvider !== 'all' ? `trong ${ALL_PROVIDER_LABELS[activeProvider]}` : ''}
-              </h3>
-
-              {otherProviderSuggestion ? (
-                <div className="mt-3 flex flex-col items-center gap-2">
-                  <p className="text-xs text-amber-400">
-                    Tìm thấy <strong>{otherProviderSuggestion.count}</strong> giọng phù hợp trong{' '}
-                    <strong>{otherProviderSuggestion.label}</strong>!
-                  </p>
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => setActiveProvider(otherProviderSuggestion.provider)}
-                    className="h-8 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-4 shadow-sm"
-                  >
-                    Chuyển sang {otherProviderSuggestion.label} ({otherProviderSuggestion.count}{' '}
-                    giọng)
-                  </Button>
+            activeSubTab === 'clone' ? (
+              <div className="flex h-64 flex-col items-center justify-center text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-950/40 text-purple-400 border border-purple-500/30 mb-3">
+                  <Sparkles className="h-6 w-6" />
                 </div>
-              ) : (
+                <h3 className="text-sm font-semibold text-zinc-200">
+                  Chưa có giọng clone nào{' '}
+                  {activeProvider !== 'all' ? `cho ${ALL_PROVIDER_LABELS[activeProvider]}` : ''}
+                </h3>
                 <p className="mt-1 max-w-sm text-xs text-zinc-500">
-                  Thử chọn tab "Tất cả", thay đổi từ khóa tìm kiếm hoặc đặt lại bộ lọc.
+                  Các giọng clone tạo trên GenMax / MiniMax API hoặc AI Dancing sẽ hiển thị tại đây
+                  khi đồng bộ.
                 </p>
-              )}
+              </div>
+            ) : (
+              <div className="flex h-64 flex-col items-center justify-center text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-800/80 text-zinc-500 mb-3">
+                  <Mic className="h-6 w-6" />
+                </div>
+                <h3 className="text-sm font-semibold text-zinc-200">
+                  Không tìm thấy giọng nói phù hợp{' '}
+                  {activeProvider !== 'all' ? `trong ${ALL_PROVIDER_LABELS[activeProvider]}` : ''}
+                </h3>
 
-              <div className="mt-3.5 flex items-center gap-2">
-                {activeProvider !== 'all' && (
+                {otherProviderSuggestion ? (
+                  <div className="mt-3 flex flex-col items-center gap-2">
+                    <p className="text-xs text-amber-400">
+                      Tìm thấy <strong>{otherProviderSuggestion.count}</strong> giọng phù hợp trong{' '}
+                      <strong>{otherProviderSuggestion.label}</strong>!
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => setActiveProvider(otherProviderSuggestion.provider)}
+                      className="h-8 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-4 shadow-sm"
+                    >
+                      Chuyển sang {otherProviderSuggestion.label} ({otherProviderSuggestion.count}{' '}
+                      giọng)
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="mt-1 max-w-sm text-xs text-zinc-500">
+                    Thử chọn tab "Tất cả", thay đổi từ khóa tìm kiếm hoặc đặt lại bộ lọc.
+                  </p>
+                )}
+
+                <div className="mt-3.5 flex items-center gap-2">
+                  {activeProvider !== 'all' && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 border-orange-500/50 bg-orange-950/20 text-xs text-orange-300 hover:bg-orange-900/30"
+                      onClick={() => setActiveProvider('all')}
+                    >
+                      Tìm trong Tất cả ({allVoices.length} giọng)
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-8 border-orange-500/50 bg-orange-950/20 text-xs text-orange-300 hover:bg-orange-900/30"
-                    onClick={() => setActiveProvider('all')}
+                    className="h-8 border-zinc-700 bg-zinc-800 text-xs text-zinc-300 hover:bg-zinc-700 shadow-xs"
+                    onClick={handleResetFilters}
                   >
-                    Tìm trong Tất cả ({allVoices.length} giọng)
+                    Đặt lại bộ lọc
                   </Button>
-                )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 border-zinc-700 bg-zinc-800 text-xs text-zinc-300 hover:bg-zinc-700 shadow-xs"
-                  onClick={handleResetFilters}
-                >
-                  Đặt lại bộ lọc
-                </Button>
+                </div>
               </div>
-            </div>
+            )
           ) : (
             <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
               {visibleVoices.map((voice) => (
@@ -1128,6 +1140,11 @@ const VoiceCardItem = memo(function VoiceCardItem({
 
         {/* Pills / Badges: Accent, Gender, Age, Provider */}
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          {voice.isCloned && (
+            <span className="rounded-full bg-purple-950/60 border border-purple-500/50 px-2 py-0.5 text-[9px] font-semibold text-purple-300">
+              Clone
+            </span>
+          )}
           {providerLabel && (
             <span className="rounded-full bg-orange-950/40 border border-orange-500/40 px-2 py-0.5 text-[9px] font-semibold text-orange-400">
               {providerLabel}
