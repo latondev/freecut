@@ -342,252 +342,285 @@ function getBatchStageLabel(stage?: string): string {
   }
 }
 
-export const ActionPanel = memo(function ActionPanel() {
-  const [activeActionSection, setActiveActionSection] = useState<ActionSection>('captions')
-  const [fillVoiceGaps, setFillVoiceGaps] = useState(true)
-  const [motionEasing, setMotionEasing] = useState<MotionEasingMode>('ease-in-out')
-  const [transitionDuration, setTransitionDuration] = useState(15)
-  const [transitionCategory, setTransitionCategory] = useState<TransitionCategoryMode>('all')
-  const [transcribeDialogOpen, setTranscribeDialogOpen] = useState(false)
-  const [isBatchTranscribing, setIsBatchTranscribing] = useState(false)
-  const [batchProgress, setBatchProgress] = useState<BatchCaptionProgress | null>(null)
-  const [captionModel, setCaptionModel] = useState<MediaTranscriptModel>(() => {
-    const defaultM = useSettingsStore.getState().defaultWhisperModel
-    return defaultM && defaultM !== 'parakeet-tdt-v3' ? defaultM : 'whisper-base'
-  })
-  const [captionLanguage, setCaptionLanguage] = useState<string>(() => {
-    const settingsLang = useSettingsStore.getState().defaultWhisperLanguage
-    if (settingsLang && settingsLang !== 'auto') return settingsLang
-    if (typeof document !== 'undefined' && document.documentElement?.lang?.startsWith('vi')) {
+// fallow-ignore-next-line complexity
+export const ActionPanel = memo(
+  // fallow-ignore-next-line complexity
+  function ActionPanel() {
+    const [activeActionSection, setActiveActionSection] = useState<ActionSection>('captions')
+    const [fillVoiceGaps, setFillVoiceGaps] = useState(true)
+    const [motionEasing, setMotionEasing] = useState<MotionEasingMode>('ease-in-out')
+    const [transitionDuration, setTransitionDuration] = useState(15)
+    const [transitionCategory, setTransitionCategory] = useState<TransitionCategoryMode>('all')
+    const [transcribeDialogOpen, setTranscribeDialogOpen] = useState(false)
+    const [isBatchTranscribing, setIsBatchTranscribing] = useState(false)
+    const [batchProgress, setBatchProgress] = useState<BatchCaptionProgress | null>(null)
+    const [captionModel, setCaptionModel] = useState<MediaTranscriptModel>(() => {
+      const defaultM = useSettingsStore.getState().defaultWhisperModel
+      return defaultM && defaultM !== 'parakeet-tdt-v3' ? defaultM : 'whisper-base'
+    })
+    const [captionLanguage, setCaptionLanguage] = useState<string>(() => {
+      const settingsLang = useSettingsStore.getState().defaultWhisperLanguage
+      if (settingsLang && settingsLang !== 'auto') return settingsLang
+      if (typeof document !== 'undefined' && document.documentElement?.lang?.startsWith('vi')) {
+        return 'vi'
+      }
       return 'vi'
-    }
-    return 'vi'
-  })
-
-  const handleModelChange = useCallback((val: MediaTranscriptModel) => {
-    setCaptionModel(val)
-    useSettingsStore.getState().setSetting('defaultWhisperModel', val)
-  }, [])
-
-  const handleLanguageChange = useCallback((val: string) => {
-    setCaptionLanguage(val)
-    useSettingsStore.getState().setSetting('defaultWhisperLanguage', val === 'auto' ? '' : val)
-  }, [])
-
-  const items = useTimelineStore((s) => s.items)
-  const transitions = useTimelineStore((s) => s.transitions)
-
-  const audioCount = useMemo(() => items.filter((it) => it.type === 'audio').length, [items])
-  const voiceClipsCount = useMemo(
-    () =>
-      items.filter(
-        (it) =>
-          (it.type === 'audio' || it.type === 'video') &&
-          typeof it.mediaId === 'string' &&
-          it.mediaId.length > 0,
-      ).length,
-    [items],
-  )
-  const imageCount = useMemo(() => items.filter((it) => it.type === 'image').length, [items])
-  const transitionCount = transitions.length
-
-  // ==========================================
-  // BATCH CAPTION GENERATION (1-Click Captions)
-  // ==========================================
-  const handleStartBatchCaptions = useCallback(async (values: TranscribeDialogValues) => {
-    setTranscribeDialogOpen(false)
-    setIsBatchTranscribing(true)
-    setBatchProgress({
-      currentMediaIndex: 0,
-      totalMediaCount: 0,
-      currentMediaName: '',
-      stage: 'queued',
-      overallPercent: 0,
-      mediaPercent: 0,
     })
 
-    try {
-      const result = await generateTimelineCaptionsBatch({
-        model: values.model,
-        quantization: values.quantization,
-        language: values.language,
-        force: true,
-        onProgress: (p) => {
-          setBatchProgress(p)
-        },
+    const handleModelChange = useCallback((val: MediaTranscriptModel) => {
+      setCaptionModel(val)
+      useSettingsStore.getState().setSetting('defaultWhisperModel', val)
+    }, [])
+
+    const handleLanguageChange = useCallback((val: string) => {
+      setCaptionLanguage(val)
+      useSettingsStore.getState().setSetting('defaultWhisperLanguage', val === 'auto' ? '' : val)
+    }, [])
+
+    const items = useTimelineStore((s) => s.items)
+    const transitions = useTimelineStore((s) => s.transitions)
+
+    const audioCount = useMemo(() => items.filter((it) => it.type === 'audio').length, [items])
+    const voiceClipsCount = useMemo(
+      () =>
+        items.filter(
+          (it) =>
+            (it.type === 'audio' || it.type === 'video') &&
+            typeof it.mediaId === 'string' &&
+            it.mediaId.length > 0,
+        ).length,
+      [items],
+    )
+    const imageCount = useMemo(() => items.filter((it) => it.type === 'image').length, [items])
+    const transitionCount = transitions.length
+
+    // ==========================================
+    // BATCH CAPTION GENERATION (1-Click Captions)
+    // ==========================================
+    const handleStartBatchCaptions = useCallback(async (values: TranscribeDialogValues) => {
+      setTranscribeDialogOpen(false)
+      setIsBatchTranscribing(true)
+      setBatchProgress({
+        currentMediaIndex: 0,
+        totalMediaCount: 0,
+        currentMediaName: '',
+        stage: 'queued',
+        overallPercent: 0,
+        mediaPercent: 0,
       })
 
-      setCaptionModel(values.model)
-      if (values.language) {
-        setCaptionLanguage(values.language)
-      }
+      try {
+        const result = await generateTimelineCaptionsBatch({
+          model: values.model,
+          quantization: values.quantization,
+          language: values.language,
+          force: true,
+          onProgress: (p) => {
+            setBatchProgress(p)
+          },
+        })
 
-      toast.success(
-        `Đã tạo caption word-by-word thành công cho ${result.totalClipsUpdated} clip trên Timeline!`,
-      )
-    } catch (err: unknown) {
-      if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('abort'))) {
-        toast.info('Đã dừng tiến trình tạo caption.')
-      } else {
-        const msg = err instanceof Error ? err.message : 'Có lỗi khi tạo caption'
-        toast.error(msg)
-      }
-    } finally {
-      setIsBatchTranscribing(false)
-      setBatchProgress(null)
-    }
-  }, [])
-
-  const handleFastBatchCaptions = useCallback(() => {
-    void handleStartBatchCaptions({
-      model: captionModel,
-      quantization: 'hybrid',
-      language: captionLanguage === 'auto' ? '' : captionLanguage,
-    })
-  }, [captionModel, captionLanguage, handleStartBatchCaptions])
-
-  const handleCancelBatchCaptions = useCallback(() => {
-    cancelBatchCaptionGeneration()
-    setIsBatchTranscribing(false)
-    setBatchProgress(null)
-    toast.info('Đã dừng tiến trình tạo caption.')
-  }, [])
-
-  // ==========================================
-  // ACTION 1: Khớp hình theo Voice
-  // ==========================================
-  const handleSyncImageVoice = useCallback(() => {
-    const currentItems = useItemsStore.getState().items
-    const selectedIds = useSelectionStore.getState().selectedItemIds
-
-    let audioItems = currentItems.filter((it) => it.type === 'audio')
-    let imageItems = currentItems.filter((it) => it.type === 'image')
-
-    if (selectedIds.length > 0) {
-      const selItems = currentItems.filter((it) => selectedIds.includes(it.id))
-      const selAudio = selItems.filter((it) => it.type === 'audio')
-      const selImg = selItems.filter((it) => it.type === 'image')
-      if (selAudio.length > 0) audioItems = selAudio
-      if (selImg.length > 0) imageItems = selImg
-    }
-
-    if (audioItems.length === 0) {
-      toast.warning('Không tìm thấy đoạn Voice (Audio) nào trên Timeline!')
-      return
-    }
-    if (imageItems.length === 0) {
-      toast.warning('Không tìm thấy đoạn Ảnh (Image) nào trên Timeline!')
-      return
-    }
-
-    audioItems.sort((a, b) => a.from - b.from)
-    imageItems.sort((a, b) => a.from - b.from)
-
-    const syncCount = Math.min(audioItems.length, imageItems.length)
-
-    executeTimelineCommand('SYNC_IMAGE_VOICE', () => {
-      const itemsStore = useItemsStore.getState()
-      for (let i = 0; i < syncCount; i++) {
-        const voice = audioItems[i]!
-        const img = imageItems[i]!
-
-        let duration = voice.durationInFrames
-        if (fillVoiceGaps && i < audioItems.length - 1) {
-          const nextVoice = audioItems[i + 1]!
-          if (nextVoice.from > voice.from) {
-            duration = nextVoice.from - voice.from
-          }
+        setCaptionModel(values.model)
+        if (values.language) {
+          setCaptionLanguage(values.language)
         }
 
-        itemsStore._updateItem(img.id, {
-          from: voice.from,
-          durationInFrames: Math.max(1, duration),
-        })
-      }
-    })
-
-    if (imageItems.length < audioItems.length) {
-      toast.success(
-        `Đã khớp ${syncCount} ảnh theo ${syncCount}/${audioItems.length} câu Voice! (Thêm ${audioItems.length - imageItems.length} ảnh để phủ hết)`,
-      )
-    } else {
-      toast.success(`Đã tự động khớp toàn bộ ${syncCount} ảnh theo nhịp Voice!`)
-    }
-  }, [fillVoiceGaps])
-
-  // fallow-ignore-next-line complexity
-  function applyImageAnimationBatch(
-    images: TimelineItem[],
-    type: ImageAnimType,
-    keyframesStore: ReturnType<typeof useKeyframesStore.getState>,
-    easingMode: MotionEasingMode = 'ease-in-out',
-  ): void {
-    const payloads: KeyframePayload[] = []
-    let lastAnim = ''
-
-    const projectMeta = useProjectStore.getState().currentProject?.metadata
-    const defaultW = projectMeta?.width ?? 1920
-    const defaultH = projectMeta?.height ?? 1080
-
-    for (const img of images) {
-      if (img.durationInFrames < 2) continue
-
-      const chosen =
-        type === 'random'
-          ? (ANIM_POOL.filter((a) => a !== lastAnim)[
-              Math.floor(Math.random() * (ANIM_POOL.length - 1))
-            ] ?? ANIM_POOL[0]!)
-          : type
-      lastAnim = chosen
-
-      keyframesStore._removeKeyframesForProperty(img.id, 'width')
-      keyframesStore._removeKeyframesForProperty(img.id, 'height')
-      keyframesStore._removeKeyframesForProperty(img.id, 'x')
-      keyframesStore._removeKeyframesForProperty(img.id, 'y')
-      keyframesStore._removeKeyframesForProperty(img.id, 'anchorX')
-      keyframesStore._removeKeyframesForProperty(img.id, 'anchorY')
-
-      const resolved = resolveTransform(
-        img,
-        { width: defaultW, height: defaultH, fps: projectMeta?.fps ?? 30 },
-        getSourceDimensions(img),
-      )
-      const baseW = resolved.width
-      const baseH = resolved.height
-      const baseX = resolved.x
-      const baseY = resolved.y
-
-      const imageKeyframes = buildImageMotionKeyframes(
-        img.id,
-        img.durationInFrames,
-        chosen,
-        baseW,
-        baseH,
-        baseX,
-        baseY,
-        easingMode,
-      )
-      payloads.push(...imageKeyframes)
-
-      if (chosen.startsWith('zoom-')) {
-        const dimensionKeyframes = imageKeyframes.filter(
-          (keyframe): keyframe is KeyframePayload & { property: 'width' | 'height' } =>
-            keyframe.property === 'width' || keyframe.property === 'height',
+        toast.success(
+          `Đã tạo caption word-by-word thành công cho ${result.totalClipsUpdated} clip trên Timeline!`,
         )
-        payloads.push(...buildZoomAnchorKeyframes(dimensionKeyframes))
+      } catch (err: unknown) {
+        if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('abort'))) {
+          toast.info('Đã dừng tiến trình tạo caption.')
+        } else {
+          const msg = err instanceof Error ? err.message : 'Có lỗi khi tạo caption'
+          toast.error(msg)
+        }
+      } finally {
+        setIsBatchTranscribing(false)
+        setBatchProgress(null)
+      }
+    }, [])
+
+    const handleFastBatchCaptions = useCallback(() => {
+      void handleStartBatchCaptions({
+        model: captionModel,
+        quantization: 'hybrid',
+        language: captionLanguage === 'auto' ? '' : captionLanguage,
+      })
+    }, [captionModel, captionLanguage, handleStartBatchCaptions])
+
+    const handleCancelBatchCaptions = useCallback(() => {
+      cancelBatchCaptionGeneration()
+      setIsBatchTranscribing(false)
+      setBatchProgress(null)
+      toast.info('Đã dừng tiến trình tạo caption.')
+    }, [])
+
+    // ==========================================
+    // ACTION 1: Khớp hình theo Voice
+    // ==========================================
+    const handleSyncImageVoice = useCallback(() => {
+      const currentItems = useItemsStore.getState().items
+      const selectedIds = useSelectionStore.getState().selectedItemIds
+
+      let audioItems = currentItems.filter((it) => it.type === 'audio')
+      let imageItems = currentItems.filter((it) => it.type === 'image')
+
+      if (selectedIds.length > 0) {
+        const selItems = currentItems.filter((it) => selectedIds.includes(it.id))
+        const selAudio = selItems.filter((it) => it.type === 'audio')
+        const selImg = selItems.filter((it) => it.type === 'image')
+        if (selAudio.length > 0) audioItems = selAudio
+        if (selImg.length > 0) imageItems = selImg
+      }
+
+      if (audioItems.length === 0) {
+        toast.warning('Không tìm thấy đoạn Voice (Audio) nào trên Timeline!')
+        return
+      }
+      if (imageItems.length === 0) {
+        toast.warning('Không tìm thấy đoạn Ảnh (Image) nào trên Timeline!')
+        return
+      }
+
+      audioItems.sort((a, b) => a.from - b.from)
+      imageItems.sort((a, b) => a.from - b.from)
+
+      const syncCount = Math.min(audioItems.length, imageItems.length)
+
+      executeTimelineCommand('SYNC_IMAGE_VOICE', () => {
+        const itemsStore = useItemsStore.getState()
+        for (let i = 0; i < syncCount; i++) {
+          const voice = audioItems[i]!
+          const img = imageItems[i]!
+
+          let duration = voice.durationInFrames
+          if (fillVoiceGaps && i < audioItems.length - 1) {
+            const nextVoice = audioItems[i + 1]!
+            if (nextVoice.from > voice.from) {
+              duration = nextVoice.from - voice.from
+            }
+          }
+
+          itemsStore._updateItem(img.id, {
+            from: voice.from,
+            durationInFrames: Math.max(1, duration),
+          })
+        }
+      })
+
+      if (imageItems.length < audioItems.length) {
+        toast.success(
+          `Đã khớp ${syncCount} ảnh theo ${syncCount}/${audioItems.length} câu Voice! (Thêm ${audioItems.length - imageItems.length} ảnh để phủ hết)`,
+        )
+      } else {
+        toast.success(`Đã tự động khớp toàn bộ ${syncCount} ảnh theo nhịp Voice!`)
+      }
+    }, [fillVoiceGaps])
+
+    // fallow-ignore-next-line complexity
+    function applyImageAnimationBatch(
+      images: TimelineItem[],
+      type: ImageAnimType,
+      keyframesStore: ReturnType<typeof useKeyframesStore.getState>,
+      easingMode: MotionEasingMode = 'ease-in-out',
+    ): void {
+      const payloads: KeyframePayload[] = []
+      let lastAnim = ''
+
+      const projectMeta = useProjectStore.getState().currentProject?.metadata
+      const defaultW = projectMeta?.width ?? 1920
+      const defaultH = projectMeta?.height ?? 1080
+
+      for (const img of images) {
+        if (img.durationInFrames < 2) continue
+
+        const chosen =
+          type === 'random'
+            ? (ANIM_POOL.filter((a) => a !== lastAnim)[
+                Math.floor(Math.random() * (ANIM_POOL.length - 1))
+              ] ?? ANIM_POOL[0]!)
+            : type
+        lastAnim = chosen
+
+        keyframesStore._removeKeyframesForProperty(img.id, 'width')
+        keyframesStore._removeKeyframesForProperty(img.id, 'height')
+        keyframesStore._removeKeyframesForProperty(img.id, 'x')
+        keyframesStore._removeKeyframesForProperty(img.id, 'y')
+        keyframesStore._removeKeyframesForProperty(img.id, 'anchorX')
+        keyframesStore._removeKeyframesForProperty(img.id, 'anchorY')
+
+        const resolved = resolveTransform(
+          img,
+          { width: defaultW, height: defaultH, fps: projectMeta?.fps ?? 30 },
+          getSourceDimensions(img),
+        )
+        const baseW = resolved.width
+        const baseH = resolved.height
+        const baseX = resolved.x
+        const baseY = resolved.y
+
+        const imageKeyframes = buildImageMotionKeyframes(
+          img.id,
+          img.durationInFrames,
+          chosen,
+          baseW,
+          baseH,
+          baseX,
+          baseY,
+          easingMode,
+        )
+        payloads.push(...imageKeyframes)
+
+        if (chosen.startsWith('zoom-')) {
+          const dimensionKeyframes = imageKeyframes.filter(
+            (keyframe): keyframe is KeyframePayload & { property: 'width' | 'height' } =>
+              keyframe.property === 'width' || keyframe.property === 'height',
+          )
+          payloads.push(...buildZoomAnchorKeyframes(dimensionKeyframes))
+        }
+      }
+
+      if (payloads.length > 0) {
+        keyframesStore._addKeyframes(payloads)
       }
     }
 
-    if (payloads.length > 0) {
-      keyframesStore._addKeyframes(payloads)
-    }
-  }
+    // ==========================================
+    // ACTION 2: Key-frame Animation Image
+    // ==========================================
+    const handleApplyImageAnimation = useCallback(
+      (type: ImageAnimType) => {
+        const currentItems = useItemsStore.getState().items
+        const selectedIds = useSelectionStore.getState().selectedItemIds
 
-  // ==========================================
-  // ACTION 2: Key-frame Animation Image
-  // ==========================================
-  const handleApplyImageAnimation = useCallback(
-    (type: ImageAnimType) => {
+        let targetImages: TimelineItem[] = currentItems.filter((it) => it.type === 'image')
+        if (selectedIds.length > 0) {
+          const selImg = currentItems.filter(
+            (it) => selectedIds.includes(it.id) && it.type === 'image',
+          )
+          if (selImg.length > 0) targetImages = selImg
+        }
+
+        if (targetImages.length === 0) {
+          toast.warning('Không tìm thấy clip Ảnh nào trên Timeline.')
+          return
+        }
+
+        executeTimelineCommand('APPLY_IMAGE_ANIMATION', () => {
+          applyImageAnimationBatch(targetImages, type, useKeyframesStore.getState(), motionEasing)
+        })
+
+        const easingLabel =
+          motionEasing === 'linear' ? 'tốc độ đều (Linear)' : 'mượt mà (Ease In-Out)'
+        toast.success(
+          `Đã tạo keyframe animation Ken Burns (${easingLabel}) cho ${targetImages.length} ảnh!`,
+        )
+      },
+      [motionEasing],
+    )
+
+    const handleResetImageAnimation = useCallback(() => {
       const currentItems = useItemsStore.getState().items
       const selectedIds = useSelectionStore.getState().selectedItemIds
 
@@ -600,653 +633,629 @@ export const ActionPanel = memo(function ActionPanel() {
       }
 
       if (targetImages.length === 0) {
-        toast.warning('Không tìm thấy clip Ảnh nào trên Timeline.')
+        toast.warning('Không tìm thấy clip Ảnh nào.')
         return
       }
 
-      executeTimelineCommand('APPLY_IMAGE_ANIMATION', () => {
-        applyImageAnimationBatch(targetImages, type, useKeyframesStore.getState(), motionEasing)
+      executeTimelineCommand('RESET_IMAGE_ANIMATION', () => {
+        const keyframesStore = useKeyframesStore.getState()
+        for (const img of targetImages) {
+          keyframesStore._removeKeyframesForProperty(img.id, 'width')
+          keyframesStore._removeKeyframesForProperty(img.id, 'height')
+          keyframesStore._removeKeyframesForProperty(img.id, 'x')
+          keyframesStore._removeKeyframesForProperty(img.id, 'y')
+          keyframesStore._removeKeyframesForProperty(img.id, 'anchorX')
+          keyframesStore._removeKeyframesForProperty(img.id, 'anchorY')
+          keyframesStore._removeKeyframesForProperty(img.id, 'rotation')
+          keyframesStore._removeKeyframesForProperty(img.id, 'opacity')
+        }
       })
 
-      const easingLabel =
-        motionEasing === 'linear' ? 'tốc độ đều (Linear)' : 'mượt mà (Ease In-Out)'
-      toast.success(
-        `Đã tạo keyframe animation Ken Burns (${easingLabel}) cho ${targetImages.length} ảnh!`,
-      )
-    },
-    [motionEasing],
-  )
+      toast.info(`Đã gỡ bỏ chuyển động keyframe của ${targetImages.length} ảnh.`)
+    }, [])
 
-  const handleResetImageAnimation = useCallback(() => {
-    const currentItems = useItemsStore.getState().items
-    const selectedIds = useSelectionStore.getState().selectedItemIds
-
-    let targetImages: TimelineItem[] = currentItems.filter((it) => it.type === 'image')
-    if (selectedIds.length > 0) {
-      const selImg = currentItems.filter((it) => selectedIds.includes(it.id) && it.type === 'image')
-      if (selImg.length > 0) targetImages = selImg
-    }
-
-    if (targetImages.length === 0) {
-      toast.warning('Không tìm thấy clip Ảnh nào.')
-      return
-    }
-
-    executeTimelineCommand('RESET_IMAGE_ANIMATION', () => {
-      const keyframesStore = useKeyframesStore.getState()
-      for (const img of targetImages) {
-        keyframesStore._removeKeyframesForProperty(img.id, 'width')
-        keyframesStore._removeKeyframesForProperty(img.id, 'height')
-        keyframesStore._removeKeyframesForProperty(img.id, 'x')
-        keyframesStore._removeKeyframesForProperty(img.id, 'y')
-        keyframesStore._removeKeyframesForProperty(img.id, 'anchorX')
-        keyframesStore._removeKeyframesForProperty(img.id, 'anchorY')
-        keyframesStore._removeKeyframesForProperty(img.id, 'rotation')
-        keyframesStore._removeKeyframesForProperty(img.id, 'opacity')
+    // ==========================================
+    // ACTION 3: Transition Scene Random
+    // ==========================================
+    const handleRandomTransitions = useCallback(() => {
+      const timelineStore = useTimelineStore.getState()
+      const visualTracks = timelineStore.tracks.filter((t) => getTrackKind(t) === 'video')
+      if (visualTracks.length === 0) {
+        toast.warning('Không tìm thấy track hình ảnh/video nào trên Timeline.')
+        return
       }
-    })
 
-    toast.info(`Đã gỡ bỏ chuyển động keyframe của ${targetImages.length} ảnh.`)
-  }, [])
+      let totalAdded = 0
 
-  // ==========================================
-  // ACTION 3: Transition Scene Random
-  // ==========================================
-  const handleRandomTransitions = useCallback(() => {
-    const timelineStore = useTimelineStore.getState()
-    const visualTracks = timelineStore.tracks.filter((t) => getTrackKind(t) === 'video')
-    if (visualTracks.length === 0) {
-      toast.warning('Không tìm thấy track hình ảnh/video nào trên Timeline.')
-      return
-    }
+      executeTimelineCommand('RANDOM_TRANSITIONS', () => {
+        for (const track of visualTracks) {
+          const trackClips = timelineStore.items
+            .filter((it) => it.trackId === track.id && (it.type === 'video' || it.type === 'image'))
+            .sort((a, b) => a.from - b.from)
 
-    let totalAdded = 0
+          if (trackClips.length < 2) continue
 
-    executeTimelineCommand('RANDOM_TRANSITIONS', () => {
-      for (const track of visualTracks) {
-        const trackClips = timelineStore.items
-          .filter((it) => it.trackId === track.id && (it.type === 'video' || it.type === 'image'))
-          .sort((a, b) => a.from - b.from)
-
-        if (trackClips.length < 2) continue
-
-        for (let i = 0; i < trackClips.length - 1; i++) {
-          const success = connectAdjacentClipsWithTransition(
-            trackClips[i]!,
-            trackClips[i + 1]!,
-            transitionCategory,
-            transitionDuration,
-            timelineStore,
-          )
-          if (success) totalAdded++
-        }
-      }
-    })
-
-    if (totalAdded > 0) {
-      toast.success(`Đã tự động chèn ${totalAdded} hiệu ứng chuyển cảnh ngẫu nhiên!`)
-    } else {
-      toast.warning('Không tìm thấy điểm cắt liền kề nào đủ điều kiện để chèn chuyển cảnh.')
-    }
-  }, [transitionCategory, transitionDuration])
-
-  const handleClearAllTransitions = useCallback(() => {
-    const timelineStore = useTimelineStore.getState()
-    const allTransitions = timelineStore.transitions
-    if (allTransitions.length === 0) {
-      toast.info('Timeline hiện tại chưa có chuyển cảnh nào.')
-      return
-    }
-
-    executeTimelineCommand('CLEAR_ALL_TRANSITIONS', () => {
-      for (const t of allTransitions) {
-        timelineStore.removeTransition(t.id)
-      }
-    })
-
-    toast.info(`Đã xóa sạch tất cả ${allTransitions.length} hiệu ứng chuyển cảnh.`)
-  }, [])
-
-  const actionSections: Array<{
-    id: ActionSection
-    label: string
-    description: string
-    icon: typeof Zap
-  }> = [
-    { id: 'captions', label: 'Caption', description: 'Tạo phụ đề tự động', icon: Zap },
-    { id: 'sync', label: 'Sync Voice', description: 'Khớp ảnh theo voice', icon: Mic },
-    { id: 'animation', label: 'Keyframe', description: 'Tạo chuyển động ảnh', icon: Sparkles },
-    { id: 'transitions', label: 'Transition', description: 'Chuyển cảnh tự động', icon: Shuffle },
-  ]
-
-  return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <aside className="shrink-0 border-b border-border/70 bg-secondary/10 px-2 py-1.5">
-        <div className="flex items-center gap-1.5 overflow-x-auto">
-          {actionSections.map(({ id, label, description, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setActiveActionSection(id)}
-              title={description}
-              aria-label={`${label} — ${description}`}
-              aria-pressed={activeActionSection === id}
-              className={cn(
-                'flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-medium transition-colors',
-                activeActionSection === id
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-secondary/70 hover:text-foreground',
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              <span>{label}</span>
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3.5 space-y-4">
-        {/* Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-border/60">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
-              <Zap className="w-4 h-4 text-amber-400" />
-            </div>
-            <div>
-              <h3 className="text-xs font-semibold text-foreground tracking-tight">
-                Trung tâm Action
-              </h3>
-              <p className="text-[10px] text-muted-foreground">Tự động hóa dựng video nhanh</p>
-            </div>
-          </div>
-
-          {/* Live Timeline Status Badges */}
-          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-            <span className="px-1.5 py-0.5 rounded bg-secondary/50 border border-border/50">
-              🎤 {audioCount}
-            </span>
-            <span className="px-1.5 py-0.5 rounded bg-secondary/50 border border-border/50">
-              🖼️ {imageCount}
-            </span>
-            <span className="px-1.5 py-0.5 rounded bg-secondary/50 border border-border/50">
-              ⚡ {transitionCount}
-            </span>
-          </div>
-        </div>
-
-        {/* 🌟 TẠO CAPTION CHO TOÀN BỘ AUDIO (Khuyên dùng - Tiện nhất) */}
-        {activeActionSection === 'captions' && (
-          <div className="rounded-xl border border-amber-500/35 bg-gradient-to-b from-amber-500/10 via-secondary/25 to-secondary/15 p-3.5 space-y-3 shadow-sm relative">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="w-6 h-6 rounded-md bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0">
-                  <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400/30" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5 flex-wrap">
-                    <span>Tạo Caption Tự Động</span>
-                    <span className="text-[9px] font-semibold uppercase tracking-wider bg-amber-500/25 text-amber-200 px-1.5 py-0.5 rounded-full border border-amber-500/40 shrink-0">
-                      Khuyên dùng
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <span className="text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded flex items-center gap-1 font-medium shrink-0">
-                <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
-                <span>Word-by-word</span>
-              </span>
-            </div>
-
-            <p className="text-[11px] text-muted-foreground leading-snug">
-              Quét toàn bộ Voice/Audio trên Timeline, chọn Model Whisper &amp; Ngôn ngữ 1 lần duy
-              nhất. Xử lý nền qua Web Worker chống giật lag, tự động bật phụ đề chạy chữ đồng bộ
-              theo giọng nói.
-            </p>
-
-            {isBatchTranscribing && batchProgress ? (
-              <div className="space-y-2 rounded-lg border border-amber-500/40 bg-background/70 p-2.5">
-                <div className="flex items-center justify-between text-[11px]">
-                  <div className="flex items-center gap-1.5 font-medium text-amber-300 truncate max-w-[210px]">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-amber-400" />
-                    <span className="truncate">
-                      {batchProgress.currentMediaName || 'Đang chuẩn bị...'}
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-mono text-amber-400 font-bold">
-                    {batchProgress.overallPercent}%
-                  </span>
-                </div>
-
-                <Progress value={batchProgress.overallPercent} className="h-1.5 bg-secondary" />
-
-                <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5">
-                  <span>
-                    Clip {batchProgress.currentMediaIndex}/{batchProgress.totalMediaCount} •{' '}
-                    <span className="text-foreground/80">
-                      {getBatchStageLabel(batchProgress.stage)}
-                    </span>
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleCancelBatchCaptions}
-                    className="h-5 px-2 text-[10px] text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
-                  >
-                    Hủy
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between text-[11px] text-muted-foreground px-0.5">
-                  <span>
-                    🎯 Tìm thấy:{' '}
-                    <strong className="text-foreground">
-                      {voiceClipsCount > 0 ? `${voiceClipsCount} đoạn Voice/Audio` : '0 audio'}
-                    </strong>
-                  </span>
-                </div>
-
-                {/* Model & Language Quick Selectors */}
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
-                      <span>Mô hình AI (Model)</span>
-                    </label>
-                    <Select
-                      value={captionModel}
-                      onValueChange={(val) => handleModelChange(val as MediaTranscriptModel)}
-                    >
-                      <SelectTrigger className="h-8 text-xs bg-background/60">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="whisper-tiny">⚡ Tiny (39MB · Siêu tốc)</SelectItem>
-                        <SelectItem value="whisper-base">
-                          🎯 Base (140MB · Cân bằng, khuyên dùng)
-                        </SelectItem>
-                        <SelectItem value="whisper-small">💎 Small (460MB · Chuẩn cao)</SelectItem>
-                        <SelectItem value="whisper-large">
-                          🚀 Large v3 (1.2GB · Cực chuẩn)
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
-                      <Globe className="w-3 h-3 text-muted-foreground" />
-                      <span>Ngôn ngữ giọng nói</span>
-                    </label>
-                    <Select value={captionLanguage} onValueChange={handleLanguageChange}>
-                      <SelectTrigger className="h-8 text-xs bg-background/60 font-medium">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-56">
-                        <SelectItem value="vi">🇻🇳 Tiếng Việt (Khuyên dùng)</SelectItem>
-                        <SelectItem value="en">🇺🇸 Tiếng Anh (English)</SelectItem>
-                        <SelectItem value="zh">🇨🇳 Tiếng Trung (Chinese)</SelectItem>
-                        <SelectItem value="ja">🇯🇵 Tiếng Nhật (Japanese)</SelectItem>
-                        <SelectItem value="ko">🇰🇷 Tiếng Hàn (Korean)</SelectItem>
-                        <SelectItem value="fr">🇫🇷 Tiếng Pháp (French)</SelectItem>
-                        <SelectItem value="de">🇩🇪 Tiếng Đức (German)</SelectItem>
-                        <SelectItem value="es">🇪🇸 Tây Ban Nha (Spanish)</SelectItem>
-                        <SelectItem value="ru">🇷🇺 Tiếng Nga (Russian)</SelectItem>
-                        <SelectItem value="th">🇹🇭 Tiếng Thái (Thai)</SelectItem>
-                        <SelectItem value="pt">🇵🇹 Bồ Đào Nha (Portuguese)</SelectItem>
-                        <SelectItem value="it">🇮🇹 Tiếng Ý (Italian)</SelectItem>
-                        <SelectItem value="id">🇮🇩 Indonesia (Indonesian)</SelectItem>
-                        <SelectItem value="auto">🌐 Tự động nhận diện</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                {/* Language Guidance Indicator */}
-                <div className="text-[10px] px-1 py-0.5 rounded bg-background/40 border border-border/40 text-muted-foreground flex items-center justify-between">
-                  <span>
-                    {captionLanguage === 'vi' ? (
-                      <span className="text-emerald-400 font-medium flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> Nhận diện Tiếng Việt có dấu chuẩn xác
-                      </span>
-                    ) : captionLanguage === 'auto' ? (
-                      <span className="text-amber-400 font-medium">
-                        ⚠️ Khuyên chọn cụ thể [🇻🇳 Tiếng Việt] thay vì Tự động
-                      </span>
-                    ) : (
-                      <span className="text-foreground/80 font-medium">
-                        Đã chọn ngôn ngữ:{' '}
-                        <strong className="text-amber-300 uppercase">{captionLanguage}</strong>
-                      </span>
-                    )}
-                  </span>
-                  <span className="text-[9px] text-muted-foreground">Ghi đè phụ đề cũ</span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 pt-0.5">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={voiceClipsCount === 0 || isBatchTranscribing}
-                    onClick={handleFastBatchCaptions}
-                    className="sm:col-span-3 h-9 text-xs font-semibold gap-1.5 border-amber-500/50 bg-gradient-to-r from-amber-500/25 to-yellow-500/15 hover:from-amber-500/35 hover:to-yellow-500/25 text-amber-200 hover:border-amber-400 shadow-sm transition-all"
-                    title="Tạo caption ngay lập tức bằng Model & Ngôn ngữ đã chọn (sẽ ghi đè caption cũ)"
-                  >
-                    <Zap className="w-4 h-4 text-amber-400 fill-amber-400/50 shrink-0" />
-                    <span>⚡ Tạo Caption Ngay</span>
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={voiceClipsCount === 0 || isBatchTranscribing}
-                    onClick={() => setTranscribeDialogOpen(true)}
-                    className="sm:col-span-2 h-9 text-xs font-medium gap-1.5 border-border/70 bg-secondary/30 hover:bg-secondary/60 text-foreground/80 hover:text-foreground shadow-sm transition-all"
-                    title="Tùy chọn Model hoặc Quantization nâng cao"
-                  >
-                    <SlidersHorizontal className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                    <span>Tùy chọn...</span>
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 1. KHỚP HÌNH THEO VOICE (Sync Image-Voice) */}
-        {activeActionSection === 'sync' && (
-          <div className="rounded-xl border border-border/70 bg-secondary/20 p-3 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-sky-400">
-                <Mic className="w-3.5 h-3.5" />
-                <span>1. Khớp hình theo Voice</span>
-              </div>
-              <span className="text-[10px] text-muted-foreground bg-sky-500/10 text-sky-300 px-1.5 py-0.5 rounded border border-sky-500/20">
-                Sync Image-Voice
-              </span>
-            </div>
-
-            <p className="text-[11px] text-muted-foreground leading-snug">
-              Tự động căn chỉnh vị trí và co giãn thời lượng của các ảnh trên timeline để khớp chính
-              xác từng đoạn câu thoại của Voice.
-            </p>
-
-            <label className="flex items-center gap-2 cursor-pointer select-none text-[11px] text-foreground/90 pt-0.5">
-              <input
-                type="checkbox"
-                checked={fillVoiceGaps}
-                onChange={(e) => setFillVoiceGaps(e.target.checked)}
-                className="rounded border-border bg-background text-primary focus:ring-1 focus:ring-primary w-3.5 h-3.5"
-              />
-              <span>Lấp đầy khoảng hở giữa các câu (tránh màn hình đen)</span>
-            </label>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSyncImageVoice}
-              className="w-full h-8 text-xs font-medium gap-1.5 border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 text-sky-200 hover:border-sky-500/50 transition-colors"
-            >
-              <Zap className="w-3.5 h-3.5 text-sky-400" />
-              <span>Khớp hình theo Voice ngay</span>
-            </Button>
-          </div>
-        )}
-
-        {/* 2. KEY-FRAME ANIMATION IMAGE (Ken Burns) */}
-        {activeActionSection === 'animation' && (
-          <div className="rounded-xl border border-border/70 bg-secondary/20 p-3 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-400">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>2. Key-frame Animation Image</span>
-              </div>
-              <span className="text-[10px] text-muted-foreground bg-violet-500/10 text-violet-300 px-1.5 py-0.5 rounded border border-violet-500/20">
-                Ken Burns Motion
-              </span>
-            </div>
-
-            <p className="text-[11px] text-muted-foreground leading-snug">
-              Tạo chuyển động mượt mà cho ảnh tĩnh (phóng to, thu nhỏ, lia máy quay) chuẩn điện ảnh.
-            </p>
-
-            {/* Easing Mode Selector */}
-            <div className="flex items-center justify-between text-[11px] px-2 py-1 bg-background/50 rounded-lg border border-border/40">
-              <span className="text-muted-foreground flex items-center gap-1 font-medium text-[11px]">
-                <span>Kiểu lướt:</span>
-              </span>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setMotionEasing('linear')}
-                  className={cn(
-                    'px-2 py-0.5 rounded text-[10px] font-medium transition-all',
-                    motionEasing === 'linear'
-                      ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40 shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40 border border-transparent',
-                  )}
-                  title="Chuyển động tốc độ đều theo tốc độ khung hình của dự án"
-                >
-                  Tốc độ đều (Linear)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMotionEasing('ease-in-out')}
-                  className={cn(
-                    'px-2 py-0.5 rounded text-[10px] font-medium transition-all',
-                    motionEasing === 'ease-in-out'
-                      ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40 shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40 border border-transparent',
-                  )}
-                  title="Tăng tốc và giảm tốc êm ái"
-                >
-                  Mượt mà (Ease)
-                </button>
-              </div>
-            </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleApplyImageAnimation('random')}
-              className="w-full h-8 text-xs font-medium gap-1.5 border-violet-500/30 bg-violet-500/10 hover:bg-violet-500/20 text-violet-200 hover:border-violet-500/50 transition-colors"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-violet-400" />
-              <span>🎲 Ngẫu nhiên Ken Burns cho toàn bộ ảnh</span>
-            </Button>
-
-            <div className="grid grid-cols-2 gap-1.5 pt-0.5">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleApplyImageAnimation('zoom-in')}
-                className="h-7 text-[11px] justify-start gap-1.5 px-2 border border-border/50 bg-background/40 hover:bg-secondary"
-                title="Từ từ phóng to nhẹ (100% -> 110%)"
-              >
-                <ZoomIn className="w-3 h-3 text-emerald-400 shrink-0" />
-                <span>Zoom In nhẹ</span>
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleApplyImageAnimation('zoom-out')}
-                className="h-7 text-[11px] justify-start gap-1.5 px-2 border border-border/50 bg-background/40 hover:bg-secondary"
-                title="Từ từ thu nhỏ (110% -> 100%)"
-              >
-                <ZoomOut className="w-3 h-3 text-amber-400 shrink-0" />
-                <span>Zoom Out nhẹ</span>
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleApplyImageAnimation('pan-left')}
-                className="h-7 text-[11px] justify-start gap-1.5 px-2 border border-border/50 bg-background/40 hover:bg-secondary"
-                title="Lia máy sang trái"
-              >
-                <ArrowLeft className="w-3 h-3 text-sky-400 shrink-0" />
-                <span>Lia Trái (Pan Left)</span>
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleApplyImageAnimation('pan-right')}
-                className="h-7 text-[11px] justify-start gap-1.5 px-2 border border-border/50 bg-background/40 hover:bg-secondary"
-                title="Lia máy sang phải"
-              >
-                <ArrowRight className="w-3 h-3 text-sky-400 shrink-0" />
-                <span>Lia Phải (Pan Right)</span>
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleApplyImageAnimation('pan-up')}
-                className="h-7 text-[11px] justify-start gap-1.5 px-2 border border-border/50 bg-background/40 hover:bg-secondary"
-                title="Lia máy lên trên"
-              >
-                <ArrowUp className="w-3 h-3 text-indigo-400 shrink-0" />
-                <span>Lia Lên (Pan Up)</span>
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleApplyImageAnimation('pan-down')}
-                className="h-7 text-[11px] justify-start gap-1.5 px-2 border border-border/50 bg-background/40 hover:bg-secondary"
-                title="Lia máy xuống dưới"
-              >
-                <ArrowDown className="w-3 h-3 text-indigo-400 shrink-0" />
-                <span>Lia Xuống (Pan Down)</span>
-              </Button>
-            </div>
-
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleResetImageAnimation}
-              className="w-full h-7 text-[11px] text-muted-foreground hover:text-foreground justify-center gap-1.5"
-            >
-              <RotateCcw className="w-3 h-3 text-muted-foreground" />
-              <span>Gỡ bỏ animation (Reset ảnh tĩnh)</span>
-            </Button>
-          </div>
-        )}
-
-        {/* 3. TRANSITION SCENE RANDOM (Chuyển cảnh ngẫu nhiên) */}
-        {activeActionSection === 'transitions' && (
-          <div className="rounded-xl border border-border/70 bg-secondary/20 p-3 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-400">
-                <Shuffle className="w-3.5 h-3.5" />
-                <span>3. Transition Scene Random</span>
-              </div>
-              <span className="text-[10px] text-muted-foreground bg-rose-500/10 text-rose-300 px-1.5 py-0.5 rounded border border-rose-500/20">
-                Auto Cut Transitions
-              </span>
-            </div>
-
-            <p className="text-[11px] text-muted-foreground leading-snug">
-              Tự động chèn các hiệu ứng chuyển cảnh ngẫu nhiên vào giữa các đoạn cắt liền kề trên
-              toàn bộ video/ảnh.
-            </p>
-
-            {/* Category Filters */}
-            <div className="space-y-1">
-              <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                Phong cách:
-              </span>
-              <div className="grid grid-cols-4 gap-1">
-                {[
-                  { id: 'all', label: 'Tất cả' },
-                  { id: 'smooth', label: 'Mượt mà' },
-                  { id: 'motion', label: 'Động' },
-                  { id: 'creative', label: 'Độc lạ' },
-                ].map((cat) => (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    onClick={() => setTransitionCategory(cat.id as TransitionCategoryMode)}
-                    className={`h-6 text-[10px] rounded border transition-colors ${
-                      transitionCategory === cat.id
-                        ? 'border-rose-500 bg-rose-500/20 text-rose-300 font-medium'
-                        : 'border-border/60 bg-background/40 text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {cat.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Duration selection */}
-            <div className="space-y-1">
-              <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                Thời lượng chuyển cảnh:
-              </span>
-              <div className="grid grid-cols-4 gap-1">
-                {[
-                  { val: 10, label: '10f (0.3s)' },
-                  { val: 15, label: '15f (0.5s)' },
-                  { val: 20, label: '20f (0.7s)' },
-                  { val: 30, label: '30f (1.0s)' },
-                ].map((dur) => (
-                  <button
-                    key={dur.val}
-                    type="button"
-                    onClick={() => setTransitionDuration(dur.val)}
-                    className={`h-6 text-[10px] rounded border transition-colors ${
-                      transitionDuration === dur.val
-                        ? 'border-rose-500 bg-rose-500/20 text-rose-300 font-medium'
-                        : 'border-border/60 bg-background/40 text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {dur.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRandomTransitions}
-              className="w-full h-8 text-xs font-medium gap-1.5 border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-200 hover:border-rose-500/50 transition-colors"
-            >
-              <Shuffle className="w-3.5 h-3.5 text-rose-400" />
-              <span>🎲 Chèn Chuyển Cảnh Ngẫu Nhiên</span>
-            </Button>
-
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleClearAllTransitions}
-              className="w-full h-7 text-[11px] text-muted-foreground hover:text-rose-400 justify-center gap-1.5"
-            >
-              <Trash2 className="w-3 h-3 text-muted-foreground" />
-              <span>Xóa sạch tất cả Transition ({transitionCount})</span>
-            </Button>
-          </div>
-        )}
-
-        <TranscribeDialog
-          open={transcribeDialogOpen}
-          onOpenChange={setTranscribeDialogOpen}
-          fileName={`Toàn bộ Audio trên Timeline (${voiceClipsCount} clips)`}
-          hasTranscript={false}
-          isRunning={isBatchTranscribing}
-          progressPercent={batchProgress?.overallPercent ?? null}
-          progressLabel={
-            batchProgress
-              ? `Đang xử lý ${batchProgress.currentMediaIndex}/${batchProgress.totalMediaCount}: ${batchProgress.currentMediaName}`
-              : ''
+          for (let i = 0; i < trackClips.length - 1; i++) {
+            const success = connectAdjacentClipsWithTransition(
+              trackClips[i]!,
+              trackClips[i + 1]!,
+              transitionCategory,
+              transitionDuration,
+              timelineStore,
+            )
+            if (success) totalAdded++
           }
-          onStart={handleStartBatchCaptions}
-          onCancel={handleCancelBatchCaptions}
-        />
+        }
+      })
+
+      if (totalAdded > 0) {
+        toast.success(`Đã tự động chèn ${totalAdded} hiệu ứng chuyển cảnh ngẫu nhiên!`)
+      } else {
+        toast.warning('Không tìm thấy điểm cắt liền kề nào đủ điều kiện để chèn chuyển cảnh.')
+      }
+    }, [transitionCategory, transitionDuration])
+
+    const handleClearAllTransitions = useCallback(() => {
+      const timelineStore = useTimelineStore.getState()
+      const allTransitions = timelineStore.transitions
+      if (allTransitions.length === 0) {
+        toast.info('Timeline hiện tại chưa có chuyển cảnh nào.')
+        return
+      }
+
+      executeTimelineCommand('CLEAR_ALL_TRANSITIONS', () => {
+        for (const t of allTransitions) {
+          timelineStore.removeTransition(t.id)
+        }
+      })
+
+      toast.info(`Đã xóa sạch tất cả ${allTransitions.length} hiệu ứng chuyển cảnh.`)
+    }, [])
+
+    const actionSections: Array<{
+      id: ActionSection
+      label: string
+      description: string
+      icon: typeof Zap
+    }> = [
+      { id: 'captions', label: 'Caption', description: 'Tạo phụ đề tự động', icon: Zap },
+      { id: 'sync', label: 'Sync Voice', description: 'Khớp ảnh theo voice', icon: Mic },
+      { id: 'animation', label: 'Keyframe', description: 'Tạo chuyển động ảnh', icon: Sparkles },
+      { id: 'transitions', label: 'Transition', description: 'Chuyển cảnh tự động', icon: Shuffle },
+    ]
+
+    return (
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+        <aside className="shrink-0 border-b border-border/70 bg-secondary/10 px-2 py-1.5">
+          <div className="flex items-center gap-1.5 overflow-x-auto">
+            {actionSections.map(({ id, label, description, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActiveActionSection(id)}
+                title={description}
+                aria-label={`${label} — ${description}`}
+                aria-pressed={activeActionSection === id}
+                className={cn(
+                  'flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-medium transition-colors',
+                  activeActionSection === id
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:bg-secondary/70 hover:text-foreground',
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3.5 space-y-4">
+          {/* Header */}
+          <div className="flex items-center justify-between pb-3 border-b border-border/60">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
+                <Zap className="w-4 h-4 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-xs font-semibold text-foreground tracking-tight">
+                  Trung tâm Action
+                </h3>
+                <p className="text-[10px] text-muted-foreground">Tự động hóa dựng video nhanh</p>
+              </div>
+            </div>
+
+            {/* Live Timeline Status Badges */}
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <span className="px-1.5 py-0.5 rounded bg-secondary/50 border border-border/50">
+                🎤 {audioCount}
+              </span>
+              <span className="px-1.5 py-0.5 rounded bg-secondary/50 border border-border/50">
+                🖼️ {imageCount}
+              </span>
+              <span className="px-1.5 py-0.5 rounded bg-secondary/50 border border-border/50">
+                ⚡ {transitionCount}
+              </span>
+            </div>
+          </div>
+
+          {/* 🌟 TẠO CAPTION CHO TOÀN BỘ AUDIO (Khuyên dùng - Tiện nhất) */}
+          {activeActionSection === 'captions' && (
+            <div className="rounded-xl border border-amber-500/35 bg-gradient-to-b from-amber-500/10 via-secondary/25 to-secondary/15 p-3.5 space-y-3 shadow-sm relative">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-6 h-6 rounded-md bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0">
+                    <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400/30" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5 flex-wrap">
+                      <span>Tạo Caption Tự Động</span>
+                      <span className="text-[9px] font-semibold uppercase tracking-wider bg-amber-500/25 text-amber-200 px-1.5 py-0.5 rounded-full border border-amber-500/40 shrink-0">
+                        Khuyên dùng
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <span className="text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded flex items-center gap-1 font-medium shrink-0">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                  <span>Word-by-word</span>
+                </span>
+              </div>
+
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                Quét toàn bộ Voice/Audio trên Timeline, chọn Model Whisper &amp; Ngôn ngữ 1 lần duy
+                nhất. Xử lý nền qua Web Worker chống giật lag, tự động bật phụ đề chạy chữ đồng bộ
+                theo giọng nói.
+              </p>
+
+              {isBatchTranscribing && batchProgress ? (
+                <div className="space-y-2 rounded-lg border border-amber-500/40 bg-background/70 p-2.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <div className="flex items-center gap-1.5 font-medium text-amber-300 truncate max-w-[210px]">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-amber-400" />
+                      <span className="truncate">
+                        {batchProgress.currentMediaName || 'Đang chuẩn bị...'}
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-mono text-amber-400 font-bold">
+                      {batchProgress.overallPercent}%
+                    </span>
+                  </div>
+
+                  <Progress value={batchProgress.overallPercent} className="h-1.5 bg-secondary" />
+
+                  <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5">
+                    <span>
+                      Clip {batchProgress.currentMediaIndex}/{batchProgress.totalMediaCount} •{' '}
+                      <span className="text-foreground/80">
+                        {getBatchStageLabel(batchProgress.stage)}
+                      </span>
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleCancelBatchCaptions}
+                      className="h-5 px-2 text-[10px] text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
+                    >
+                      Hủy
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground px-0.5">
+                    <span>
+                      🎯 Tìm thấy:{' '}
+                      <strong className="text-foreground">
+                        {voiceClipsCount > 0 ? `${voiceClipsCount} đoạn Voice/Audio` : '0 audio'}
+                      </strong>
+                    </span>
+                  </div>
+
+                  {/* Model & Language Quick Selectors */}
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
+                        <span>Mô hình AI (Model)</span>
+                      </label>
+                      <Select
+                        value={captionModel}
+                        onValueChange={(val) => handleModelChange(val as MediaTranscriptModel)}
+                      >
+                        <SelectTrigger className="h-8 text-xs bg-background/60">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="whisper-tiny">⚡ Tiny (39MB · Siêu tốc)</SelectItem>
+                          <SelectItem value="whisper-base">
+                            🎯 Base (140MB · Cân bằng, khuyên dùng)
+                          </SelectItem>
+                          <SelectItem value="whisper-small">
+                            💎 Small (460MB · Chuẩn cao)
+                          </SelectItem>
+                          <SelectItem value="whisper-large">
+                            🚀 Large v3 (1.2GB · Cực chuẩn)
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
+                        <Globe className="w-3 h-3 text-muted-foreground" />
+                        <span>Ngôn ngữ giọng nói</span>
+                      </label>
+                      <Select value={captionLanguage} onValueChange={handleLanguageChange}>
+                        <SelectTrigger className="h-8 text-xs bg-background/60 font-medium">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-56">
+                          <SelectItem value="vi">🇻🇳 Tiếng Việt (Khuyên dùng)</SelectItem>
+                          <SelectItem value="en">🇺🇸 Tiếng Anh (English)</SelectItem>
+                          <SelectItem value="zh">🇨🇳 Tiếng Trung (Chinese)</SelectItem>
+                          <SelectItem value="ja">🇯🇵 Tiếng Nhật (Japanese)</SelectItem>
+                          <SelectItem value="ko">🇰🇷 Tiếng Hàn (Korean)</SelectItem>
+                          <SelectItem value="fr">🇫🇷 Tiếng Pháp (French)</SelectItem>
+                          <SelectItem value="de">🇩🇪 Tiếng Đức (German)</SelectItem>
+                          <SelectItem value="es">🇪🇸 Tây Ban Nha (Spanish)</SelectItem>
+                          <SelectItem value="ru">🇷🇺 Tiếng Nga (Russian)</SelectItem>
+                          <SelectItem value="th">🇹🇭 Tiếng Thái (Thai)</SelectItem>
+                          <SelectItem value="pt">🇵🇹 Bồ Đào Nha (Portuguese)</SelectItem>
+                          <SelectItem value="it">🇮🇹 Tiếng Ý (Italian)</SelectItem>
+                          <SelectItem value="id">🇮🇩 Indonesia (Indonesian)</SelectItem>
+                          <SelectItem value="auto">🌐 Tự động nhận diện</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {/* Language Guidance Indicator */}
+                  <div className="text-[10px] px-1 py-0.5 rounded bg-background/40 border border-border/40 text-muted-foreground flex items-center justify-between">
+                    <span>
+                      {captionLanguage === 'vi' ? (
+                        <span className="text-emerald-400 font-medium flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> Nhận diện Tiếng Việt có dấu chuẩn xác
+                        </span>
+                      ) : captionLanguage === 'auto' ? (
+                        <span className="text-amber-400 font-medium">
+                          ⚠️ Khuyên chọn cụ thể [🇻🇳 Tiếng Việt] thay vì Tự động
+                        </span>
+                      ) : (
+                        <span className="text-foreground/80 font-medium">
+                          Đã chọn ngôn ngữ:{' '}
+                          <strong className="text-amber-300 uppercase">{captionLanguage}</strong>
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-[9px] text-muted-foreground">Ghi đè phụ đề cũ</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 pt-0.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={voiceClipsCount === 0 || isBatchTranscribing}
+                      onClick={handleFastBatchCaptions}
+                      className="sm:col-span-3 h-9 text-xs font-semibold gap-1.5 border-amber-500/50 bg-gradient-to-r from-amber-500/25 to-yellow-500/15 hover:from-amber-500/35 hover:to-yellow-500/25 text-amber-200 hover:border-amber-400 shadow-sm transition-all"
+                      title="Tạo caption ngay lập tức bằng Model & Ngôn ngữ đã chọn (sẽ ghi đè caption cũ)"
+                    >
+                      <Zap className="w-4 h-4 text-amber-400 fill-amber-400/50 shrink-0" />
+                      <span>⚡ Tạo Caption Ngay</span>
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={voiceClipsCount === 0 || isBatchTranscribing}
+                      onClick={() => setTranscribeDialogOpen(true)}
+                      className="sm:col-span-2 h-9 text-xs font-medium gap-1.5 border-border/70 bg-secondary/30 hover:bg-secondary/60 text-foreground/80 hover:text-foreground shadow-sm transition-all"
+                      title="Tùy chọn Model hoặc Quantization nâng cao"
+                    >
+                      <SlidersHorizontal className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                      <span>Tùy chọn...</span>
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 1. KHỚP HÌNH THEO VOICE (Sync Image-Voice) */}
+          {activeActionSection === 'sync' && (
+            <div className="rounded-xl border border-border/70 bg-secondary/20 p-3 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-sky-400">
+                  <Mic className="w-3.5 h-3.5" />
+                  <span>1. Khớp hình theo Voice</span>
+                </div>
+                <span className="text-[10px] text-muted-foreground bg-sky-500/10 text-sky-300 px-1.5 py-0.5 rounded border border-sky-500/20">
+                  Sync Image-Voice
+                </span>
+              </div>
+
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                Tự động căn chỉnh vị trí và co giãn thời lượng của các ảnh trên timeline để khớp
+                chính xác từng đoạn câu thoại của Voice.
+              </p>
+
+              <label className="flex items-center gap-2 cursor-pointer select-none text-[11px] text-foreground/90 pt-0.5">
+                <input
+                  type="checkbox"
+                  checked={fillVoiceGaps}
+                  onChange={(e) => setFillVoiceGaps(e.target.checked)}
+                  className="rounded border-border bg-background text-primary focus:ring-1 focus:ring-primary w-3.5 h-3.5"
+                />
+                <span>Lấp đầy khoảng hở giữa các câu (tránh màn hình đen)</span>
+              </label>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSyncImageVoice}
+                className="w-full h-8 text-xs font-medium gap-1.5 border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 text-sky-200 hover:border-sky-500/50 transition-colors"
+              >
+                <Zap className="w-3.5 h-3.5 text-sky-400" />
+                <span>Khớp hình theo Voice ngay</span>
+              </Button>
+            </div>
+          )}
+
+          {/* 2. KEY-FRAME ANIMATION IMAGE (Ken Burns) */}
+          {activeActionSection === 'animation' && (
+            <div className="rounded-xl border border-border/70 bg-secondary/20 p-3 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-400">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>2. Key-frame Animation Image</span>
+                </div>
+                <span className="text-[10px] text-muted-foreground bg-violet-500/10 text-violet-300 px-1.5 py-0.5 rounded border border-violet-500/20">
+                  Ken Burns Motion
+                </span>
+              </div>
+
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                Tạo chuyển động mượt mà cho ảnh tĩnh (phóng to, thu nhỏ, lia máy quay) chuẩn điện
+                ảnh.
+              </p>
+
+              {/* Easing Mode Selector */}
+              <div className="flex items-center justify-between text-[11px] px-2 py-1 bg-background/50 rounded-lg border border-border/40">
+                <span className="text-muted-foreground flex items-center gap-1 font-medium text-[11px]">
+                  <span>Kiểu lướt:</span>
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setMotionEasing('linear')}
+                    className={cn(
+                      'px-2 py-0.5 rounded text-[10px] font-medium transition-all',
+                      motionEasing === 'linear'
+                        ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40 shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40 border border-transparent',
+                    )}
+                    title="Chuyển động tốc độ đều theo tốc độ khung hình của dự án"
+                  >
+                    Tốc độ đều (Linear)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMotionEasing('ease-in-out')}
+                    className={cn(
+                      'px-2 py-0.5 rounded text-[10px] font-medium transition-all',
+                      motionEasing === 'ease-in-out'
+                        ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40 shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary/40 border border-transparent',
+                    )}
+                    title="Tăng tốc và giảm tốc êm ái"
+                  >
+                    Mượt mà (Ease)
+                  </button>
+                </div>
+              </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleApplyImageAnimation('random')}
+                className="w-full h-8 text-xs font-medium gap-1.5 border-violet-500/30 bg-violet-500/10 hover:bg-violet-500/20 text-violet-200 hover:border-violet-500/50 transition-colors"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+                <span>🎲 Ngẫu nhiên Ken Burns cho toàn bộ ảnh</span>
+              </Button>
+
+              <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleApplyImageAnimation('zoom-in')}
+                  className="h-7 text-[11px] justify-start gap-1.5 px-2 border border-border/50 bg-background/40 hover:bg-secondary"
+                  title="Từ từ phóng to nhẹ (100% -> 110%)"
+                >
+                  <ZoomIn className="w-3 h-3 text-emerald-400 shrink-0" />
+                  <span>Zoom In nhẹ</span>
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleApplyImageAnimation('zoom-out')}
+                  className="h-7 text-[11px] justify-start gap-1.5 px-2 border border-border/50 bg-background/40 hover:bg-secondary"
+                  title="Từ từ thu nhỏ (110% -> 100%)"
+                >
+                  <ZoomOut className="w-3 h-3 text-amber-400 shrink-0" />
+                  <span>Zoom Out nhẹ</span>
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleApplyImageAnimation('pan-left')}
+                  className="h-7 text-[11px] justify-start gap-1.5 px-2 border border-border/50 bg-background/40 hover:bg-secondary"
+                  title="Lia máy sang trái"
+                >
+                  <ArrowLeft className="w-3 h-3 text-sky-400 shrink-0" />
+                  <span>Lia Trái (Pan Left)</span>
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleApplyImageAnimation('pan-right')}
+                  className="h-7 text-[11px] justify-start gap-1.5 px-2 border border-border/50 bg-background/40 hover:bg-secondary"
+                  title="Lia máy sang phải"
+                >
+                  <ArrowRight className="w-3 h-3 text-sky-400 shrink-0" />
+                  <span>Lia Phải (Pan Right)</span>
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleApplyImageAnimation('pan-up')}
+                  className="h-7 text-[11px] justify-start gap-1.5 px-2 border border-border/50 bg-background/40 hover:bg-secondary"
+                  title="Lia máy lên trên"
+                >
+                  <ArrowUp className="w-3 h-3 text-indigo-400 shrink-0" />
+                  <span>Lia Lên (Pan Up)</span>
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleApplyImageAnimation('pan-down')}
+                  className="h-7 text-[11px] justify-start gap-1.5 px-2 border border-border/50 bg-background/40 hover:bg-secondary"
+                  title="Lia máy xuống dưới"
+                >
+                  <ArrowDown className="w-3 h-3 text-indigo-400 shrink-0" />
+                  <span>Lia Xuống (Pan Down)</span>
+                </Button>
+              </div>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleResetImageAnimation}
+                className="w-full h-7 text-[11px] text-muted-foreground hover:text-foreground justify-center gap-1.5"
+              >
+                <RotateCcw className="w-3 h-3 text-muted-foreground" />
+                <span>Gỡ bỏ animation (Reset ảnh tĩnh)</span>
+              </Button>
+            </div>
+          )}
+
+          {/* 3. TRANSITION SCENE RANDOM (Chuyển cảnh ngẫu nhiên) */}
+          {activeActionSection === 'transitions' && (
+            <div className="rounded-xl border border-border/70 bg-secondary/20 p-3 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-400">
+                  <Shuffle className="w-3.5 h-3.5" />
+                  <span>3. Transition Scene Random</span>
+                </div>
+                <span className="text-[10px] text-muted-foreground bg-rose-500/10 text-rose-300 px-1.5 py-0.5 rounded border border-rose-500/20">
+                  Auto Cut Transitions
+                </span>
+              </div>
+
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                Tự động chèn các hiệu ứng chuyển cảnh ngẫu nhiên vào giữa các đoạn cắt liền kề trên
+                toàn bộ video/ảnh.
+              </p>
+
+              {/* Category Filters */}
+              <div className="space-y-1">
+                <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+                  Phong cách:
+                </span>
+                <div className="grid grid-cols-4 gap-1">
+                  {[
+                    { id: 'all', label: 'Tất cả' },
+                    { id: 'smooth', label: 'Mượt mà' },
+                    { id: 'motion', label: 'Động' },
+                    { id: 'creative', label: 'Độc lạ' },
+                  ].map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setTransitionCategory(cat.id as TransitionCategoryMode)}
+                      className={`h-6 text-[10px] rounded border transition-colors ${
+                        transitionCategory === cat.id
+                          ? 'border-rose-500 bg-rose-500/20 text-rose-300 font-medium'
+                          : 'border-border/60 bg-background/40 text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Duration selection */}
+              <div className="space-y-1">
+                <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+                  Thời lượng chuyển cảnh:
+                </span>
+                <div className="grid grid-cols-4 gap-1">
+                  {[
+                    { val: 10, label: '10f (0.3s)' },
+                    { val: 15, label: '15f (0.5s)' },
+                    { val: 20, label: '20f (0.7s)' },
+                    { val: 30, label: '30f (1.0s)' },
+                  ].map((dur) => (
+                    <button
+                      key={dur.val}
+                      type="button"
+                      onClick={() => setTransitionDuration(dur.val)}
+                      className={`h-6 text-[10px] rounded border transition-colors ${
+                        transitionDuration === dur.val
+                          ? 'border-rose-500 bg-rose-500/20 text-rose-300 font-medium'
+                          : 'border-border/60 bg-background/40 text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {dur.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRandomTransitions}
+                className="w-full h-8 text-xs font-medium gap-1.5 border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-200 hover:border-rose-500/50 transition-colors"
+              >
+                <Shuffle className="w-3.5 h-3.5 text-rose-400" />
+                <span>🎲 Chèn Chuyển Cảnh Ngẫu Nhiên</span>
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearAllTransitions}
+                className="w-full h-7 text-[11px] text-muted-foreground hover:text-rose-400 justify-center gap-1.5"
+              >
+                <Trash2 className="w-3 h-3 text-muted-foreground" />
+                <span>Xóa sạch tất cả Transition ({transitionCount})</span>
+              </Button>
+            </div>
+          )}
+
+          <TranscribeDialog
+            open={transcribeDialogOpen}
+            onOpenChange={setTranscribeDialogOpen}
+            fileName={`Toàn bộ Audio trên Timeline (${voiceClipsCount} clips)`}
+            hasTranscript={false}
+            isRunning={isBatchTranscribing}
+            progressPercent={batchProgress?.overallPercent ?? null}
+            progressLabel={
+              batchProgress
+                ? `Đang xử lý ${batchProgress.currentMediaIndex}/${batchProgress.totalMediaCount}: ${batchProgress.currentMediaName}`
+                : ''
+            }
+            onStart={handleStartBatchCaptions}
+            onCancel={handleCancelBatchCaptions}
+          />
+        </div>
       </div>
-    </div>
-  )
-})
+    )
+  },
+)

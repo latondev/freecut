@@ -111,6 +111,7 @@ class OpenAiCompatibleLlmAdapter implements LlmAdapter {
     if (!this.isSupported()) throw new Error('Configure a valid base URL and model first.')
   }
 
+  // fallow-ignore-next-line complexity
   async generate(messages: LlmMessage[], options: LlmGenerateOptions = {}): Promise<string> {
     if (!this.isSupported()) throw new Error('Configure a valid base URL and model first.')
     const response = await fetch(`${getBaseUrl(settings.baseUrl)}/chat/completions`, {

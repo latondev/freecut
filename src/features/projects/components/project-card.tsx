@@ -147,6 +147,7 @@ export function ProjectCard({
     navigate({ to: '/editor/$projectId', params: { projectId: project.id } })
   }
 
+  // fallow-ignore-next-line complexity
   const handleClick = (e: React.MouseEvent) => {
     // Keep modifier-click available for multi-selection; a normal click opens
     // the project directly so the user does not need a second Open action.

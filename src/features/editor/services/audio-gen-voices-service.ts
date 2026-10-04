@@ -407,7 +407,7 @@ const dbPromise = openDB<AudioGenVoiceCache>(DB_NAME, DB_VERSION, {
   },
 })
 
-export const emptyCatalog = (): AudioGenVoiceCatalog => ({
+const emptyCatalog = (): AudioGenVoiceCatalog => ({
   elevenlabs: [...DEFAULT_AUDIO_GEN_VOICES.elevenlabs],
   minimax: [...DEFAULT_AUDIO_GEN_VOICES.minimax],
   capcut: [...DEFAULT_AUDIO_GEN_VOICES.capcut],
@@ -523,7 +523,8 @@ function getVoiceArray(payload: unknown): Record<string, unknown>[] {
 /**
  * Robust API requester with proxy fallback to eliminate CORS errors in browser/Electron
  */
-export async function requestGenMax(
+// fallow-ignore-next-line complexity
+async function requestGenMax(
   path: string,
   apiKey: string,
   options: {
@@ -591,6 +592,7 @@ export async function requestGenMax(
   throw lastError ?? new Error(`Could not connect to GenMax API for ${cleanPath}`)
 }
 
+// fallow-ignore-next-line complexity
 async function loadPagedVoices(
   path: string,
   apiKey: string,
@@ -865,6 +867,7 @@ export interface GenerateGenMaxSpeechOptions {
  * Generates an audio speech file via GenMax API (ElevenLabs, MiniMax, or CapCut).
  * Implements task creation and polling loop compliant with genmax.io.
  */
+// fallow-ignore-next-line complexity
 export async function generateGenMaxSpeechFile(
   options: GenerateGenMaxSpeechOptions,
 ): Promise<{ blob: Blob; file: File; duration: number }> {

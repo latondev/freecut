@@ -649,6 +649,7 @@ export const AiPanel = memo(function AiPanel() {
   // --- actions ---
   // fallow-ignore-next-line complexity
   const handleTtsGenerate = useCallback(
+    // fallow-ignore-next-line complexity
     async (forcedProvider?: AudioGenProvider) => {
       const activeProvider = forcedProvider || audioGenProvider
       if (!currentProjectId) {

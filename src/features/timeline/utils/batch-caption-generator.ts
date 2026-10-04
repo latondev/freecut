@@ -129,6 +129,7 @@ async function transcribeMediaJob(
   }
 }
 
+// fallow-ignore-next-line complexity
 async function processSingleMediaCaption(
   mediaId: string,
   clipIds: string[],

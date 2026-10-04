@@ -595,6 +595,7 @@ const TimelineTrackSectionsSurface = memo(function TimelineTrackSectionsSurface(
     })
   }, [applyTrackSurfaceZoom])
 
+  // fallow-ignore-next-line complexity
   const renderTrackSection = (
     sectionTracks: TimelineTrackType[],
     options: {

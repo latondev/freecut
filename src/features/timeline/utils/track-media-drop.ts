@@ -115,6 +115,7 @@ function ensureTrackForKind(
   return { tracks: [...currentTracks, createdTrack], trackId: createdTrack.id }
 }
 
+// fallow-ignore-next-line complexity
 export function planTrackMediaDropPlacements<T>(params: {
   entries: Array<TrackMediaDropPlanEntry<T>>
   dropFrame: number

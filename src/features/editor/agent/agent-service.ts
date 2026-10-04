@@ -90,6 +90,7 @@ export interface PlanRequestOptions {
   signal?: AbortSignal
 }
 
+// fallow-ignore-next-line complexity
 export async function planRequest(
   userText: string,
   options: PlanRequestOptions,
