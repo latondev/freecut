@@ -78,6 +78,9 @@ export const TextContent: React.FC<{ item: TextItem & { _sequenceFrameOffset?: n
       text: preview?.text ?? resolvedItem.text,
       textSpans: hasTextSpansPreview ? preview?.textSpans : resolvedItem.textSpans,
       fontSize: preview?.fontSize ?? resolvedItem.fontSize,
+      fontFamily: resolvedItem.fontFamily,
+      fontWeight: resolvedItem.fontWeight,
+      fontStyle: resolvedItem.fontStyle,
       letterSpacing: preview?.letterSpacing ?? resolvedItem.letterSpacing,
       lineHeight: preview?.lineHeight ?? resolvedItem.lineHeight,
       color: preview?.color ?? resolvedItem.color,
@@ -86,6 +89,7 @@ export const TextContent: React.FC<{ item: TextItem & { _sequenceFrameOffset?: n
       textPadding: preview?.textPadding ?? resolvedItem.textPadding,
       textShadow: hasTextShadowPreview ? preview?.textShadow : resolvedItem.textShadow,
       stroke: hasStrokePreview ? preview?.stroke : resolvedItem.stroke,
+      textMotion: resolvedItem.textMotion,
     }),
     [hasStrokePreview, hasTextShadowPreview, hasTextSpansPreview, preview, resolvedItem],
   )

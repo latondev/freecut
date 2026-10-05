@@ -25,6 +25,8 @@ import {
   Laptop,
   Search,
   X,
+  ArrowDownToLine,
+  Plus,
 } from 'lucide-react'
 import { useTimelineStore } from '@/features/editor/deps/timeline-store'
 import { usePlaybackStore } from '@/shared/state/playback'
@@ -58,6 +60,7 @@ import {
 import {
   createTextTemplateMotion,
   getCapcutAlphaTextGradient,
+  getTemplateMotionKind,
   getTextTemplateMotionPresetId,
 } from '@/shared/typography/text-template-motion'
 import './text-template-preview.css'
@@ -88,6 +91,9 @@ const ALL_CATALOG_FONTS = [
   'Caveat',
   'Black Ops One',
   'Montserrat',
+  'Bungee',
+  'Rubik Glitch',
+  'Oswald',
 ] as const
 
 const BASE_TEXT_DEFAULTS = {
@@ -131,34 +137,39 @@ function renderCardIcon(icon?: TextTemplateCardItem['icon']): React.ReactNode {
 }
 
 // fallow-ignore-next-line complexity
-function renderTemplatePreview(template: TextTemplateCardItem) {
+function renderTemplatePreview(template: TextTemplateCardItem, isHovered = false) {
   const { stroke, textShadow } = template.patch
-  const fontSize = Math.max(13, Math.min(22, (template.patch.fontSize ?? 60) * 0.28))
-  const strokeWidth = stroke ? Math.min(1.4, Math.max(0.7, stroke.width * 0.4)) : 0
+  const fontSize = Math.max(7, Math.min(10, (template.patch.fontSize ?? 60) * 0.14))
+  const strokeWidth = stroke ? Math.min(0.5, Math.max(0.2, stroke.width * 0.18)) : 0
   const webkitStroke = stroke ? `${strokeWidth}px ${stroke.color}` : undefined
   const shadow = textShadow
-    ? `${textShadow.offsetX * 0.5}px ${textShadow.offsetY * 0.5}px ${textShadow.blur * 0.5}px ${textShadow.color}`
+    ? `${textShadow.offsetX * 0.2}px ${textShadow.offsetY * 0.2}px ${textShadow.blur * 0.2}px ${textShadow.color}`
     : undefined
-  const textGradient = getCapcutAlphaTextGradient(template.patch.color)
+  const textGradient = getCapcutAlphaTextGradient(template)
+  const motionKind = getTemplateMotionKind(template)
 
   return (
-    <div className="capcut-alpha-canvas relative flex min-h-[72px] flex-1 items-center justify-center overflow-hidden p-2 w-full">
-      {/* Specular light sweep on hover */}
+    <div className="capcut-alpha-canvas relative flex h-full flex-1 items-center justify-center overflow-hidden p-1 w-full">
       <div className="capcut-template-preview__shine" />
       <div
-        className="capcut-template-preview__copy relative z-1 flex max-w-full flex-col items-center text-center"
+        className="capcut-template-preview__copy relative z-1 flex max-w-full flex-col items-center text-center px-0.5"
         data-template-motion={getTextTemplateMotionPresetId(template)}
       >
-        {template.sample.tag && (
-          <div className="mb-0.5 flex items-center gap-1">
-            {!template.badge && renderCardIcon(template.icon)}
-            <span className="text-[7.5px] font-bold uppercase tracking-wider text-zinc-300/80 drop-shadow-sm">
-              {template.sample.tag}
-            </span>
+        {(template.sample.tag || template.icon) && (
+          <div className="mb-0.5 flex items-center justify-center gap-0.5">
+            {renderCardIcon(template.icon)}
+            {template.sample.tag && (
+              <span className="text-[5.5px] font-bold uppercase tracking-wider text-zinc-300/80 drop-shadow-sm line-clamp-1">
+                {template.sample.tag}
+              </span>
+            )}
           </div>
         )}
         <span
-          className="capcut-alpha-text line-clamp-2 max-w-full text-balance font-extrabold leading-snug antialiased"
+          className={cn(
+            'capcut-alpha-text line-clamp-2 max-w-full text-balance font-extrabold leading-tight antialiased',
+            isHovered && `capcut-motion-${motionKind}`,
+          )}
           style={{
             backgroundImage: textGradient,
             WebkitBackgroundClip: 'text',
@@ -166,18 +177,19 @@ function renderTemplatePreview(template: TextTemplateCardItem) {
             WebkitTextFillColor: 'transparent',
             color: 'transparent',
             WebkitTextStroke: webkitStroke,
+            paintOrder: 'stroke fill',
             filter: shadow ? `drop-shadow(${shadow})` : undefined,
             fontFamily: `"${template.patch.fontFamily}", "CapCut Sans Text", sans-serif`,
             fontSize: `${fontSize}px`,
             fontWeight: template.patch.fontWeight,
             fontStyle: template.patch.fontStyle,
-            letterSpacing: `${(template.patch.letterSpacing ?? 0) * 0.3}px`,
+            letterSpacing: `${(template.patch.letterSpacing ?? 0) * 0.15}px`,
           }}
         >
           {template.sample.title}
         </span>
         {template.sample.subtitle && (
-          <span className="mt-0.5 max-w-full truncate text-[7.5px] font-semibold text-zinc-300/90 drop-shadow-sm">
+          <span className="mt-0.5 max-w-full truncate text-[5.5px] font-semibold text-zinc-300/90 drop-shadow-sm">
             {template.sample.subtitle}
           </span>
         )}
@@ -201,36 +213,87 @@ const TextTemplateCard = memo(function TextTemplateCard({
   onDragStart,
   onDragEnd,
 }: TemplateCardProps) {
+  const [isDownloaded, setIsDownloaded] = useState(false)
+  const [isHovered, setIsHovered] = useState(false)
+  const isPro = template.isPro || template.badge === 'PRO'
+
   return (
     <button
       type="button"
       draggable={true}
+      title={template.label}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       onDragStart={onDragStart(template)}
       onDragEnd={onDragEnd}
-      onClick={() => onApply(template)}
+      onClick={() => {
+        setIsDownloaded(true)
+        onApply(template)
+      }}
       className={cn(
-        'group relative flex flex-col justify-between p-2 rounded-xl border border-zinc-800/80',
-        'bg-zinc-900/80 hover:bg-zinc-900 hover:border-primary/60 hover:shadow-lg hover:shadow-primary/5',
+        'group relative aspect-square w-full rounded-md border border-white/[0.06]',
+        'bg-[#1a1a21] hover:bg-[#252530] hover:border-white/[0.14] hover:shadow-md',
         'transition-[transform,border-color,background-color,box-shadow]',
-        'active:scale-[0.97] text-left overflow-hidden min-h-[110px]',
+        'active:scale-[0.95] text-left overflow-hidden flex items-center justify-center p-0 cursor-pointer select-none',
       )}
     >
-      {/* Decorative Badge */}
-      {template.badge && (
-        <span className="absolute top-1.5 right-1.5 z-10 px-1.5 py-0.5 rounded text-[8px] font-black tracking-wider bg-rose-500 text-white shadow-sm flex items-center gap-0.5">
-          {renderCardIcon(template.icon)}
-          {template.badge}
+      {/* Top Left: CapCut Pro Diamond Badge */}
+      {isPro && (
+        <span
+          className="absolute top-1 left-1 z-10 text-[7px] leading-none font-bold text-violet-400 drop-shadow-[0_0_2px_rgba(167,139,250,0.6)]"
+          title="PRO"
+        >
+          ◆
         </span>
       )}
 
-      {renderTemplatePreview(template)}
+      {/* Main Visual Preview */}
+      {template.previewImage ? (
+        <div className="w-full h-full flex items-center justify-center p-1 relative">
+          <img
+            src={template.previewImage}
+            alt={template.label}
+            className="max-w-[82%] max-h-[82%] object-contain pointer-events-none select-none transition-transform duration-200 group-hover:scale-105 drop-shadow-sm"
+            loading="lazy"
+            onError={(e) => {
+              const target = e.currentTarget as HTMLImageElement
+              target.style.display = 'none'
+            }}
+          />
+          {isHovered && template.animatedPreviewImage && (
+            <img
+              src={template.animatedPreviewImage}
+              alt={template.label}
+              className="absolute inset-0 m-auto max-w-[82%] max-h-[82%] object-contain pointer-events-none select-none transition-transform duration-200 group-hover:scale-105 drop-shadow-sm"
+            />
+          )}
+        </div>
+      ) : (
+        <div className="w-full h-full flex items-center justify-center p-1">
+          {renderTemplatePreview(template, isHovered)}
+        </div>
+      )}
 
-      {/* Card Footer Bar */}
-      <div className="pt-1.5 border-t border-zinc-800/60 flex items-center justify-between text-[9px] text-zinc-400 group-hover:text-zinc-200">
-        <span className="truncate font-medium">{template.label}</span>
-        <span className="text-primary font-bold opacity-0 group-hover:opacity-100 transition-opacity text-[10px]">
-          + Add
-        </span>
+      {/* Bottom Right: Circular Download / Add Button */}
+      <div
+        className={cn(
+          'absolute bottom-1 right-1 z-10 w-3.5 h-3.5 rounded-full flex items-center justify-center transition-all shadow-sm',
+          isDownloaded
+            ? 'bg-primary text-primary-foreground group-hover:scale-110'
+            : 'bg-black/60 text-white/90 group-hover:bg-black/85 group-hover:text-white',
+        )}
+        onClick={(e) => {
+          e.stopPropagation()
+          setIsDownloaded(true)
+          onApply(template)
+        }}
+        title={isDownloaded ? 'Add to track (+)' : 'Download & Add (↓)'}
+      >
+        {isDownloaded ? (
+          <Plus className="w-2 h-2 stroke-[2.5]" />
+        ) : (
+          <ArrowDownToLine className="w-1.5 h-1.5 stroke-[2.2]" />
+        )}
       </div>
     </button>
   )
@@ -251,38 +314,75 @@ const TextEffectTile = memo(function TextEffectTile({
   onDragStart,
   onDragEnd,
 }: EffectTileProps) {
+  const [isHovered, setIsHovered] = useState(false)
+  const isPro = effect.isPro || effect.badge === 'PRO'
+
   return (
     <button
       type="button"
       draggable={true}
+      title={effect.label}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       onDragStart={onDragStart(effect)}
       onDragEnd={onDragEnd}
       onClick={() => onApply(effect)}
       className={cn(
-        'group relative flex flex-col items-center justify-between p-2 rounded-xl border transition-[transform,background-color,border-color,box-shadow] active:scale-95 text-center min-h-[84px]',
+        'group relative flex flex-col items-center justify-center rounded-md border transition-[transform,background-color,border-color,box-shadow] active:scale-95 text-center overflow-hidden aspect-square select-none cursor-pointer p-0',
         isApplied
           ? 'border-emerald-500 bg-emerald-950/40 shadow-sm shadow-emerald-500/20'
-          : 'border-zinc-800/80 bg-zinc-900/80 hover:bg-zinc-900 hover:border-primary/60 hover:shadow-md',
+          : 'border-white/[0.06] bg-[#1a1a21] hover:bg-[#252530] hover:border-white/[0.14] hover:shadow-md',
       )}
     >
-      {isApplied && (
-        <span className="absolute top-1 right-1 z-10 p-0.5 rounded-full bg-emerald-500 text-white animate-in zoom-in-50">
-          <Check className="w-2.5 h-2.5" />
+      {/* CapCut Pro / Diamond Badge at top-left */}
+      {isPro && (
+        <span className="absolute top-1 left-1 z-10 text-[7px] text-violet-400 select-none leading-none drop-shadow">
+          ◆
         </span>
       )}
 
-      <div className="capcut-alpha-canvas flex-1 flex items-center justify-center py-2 px-1 w-full min-h-[50px]">
-        <span
-          className="text-lg font-bold tracking-wider select-none leading-none max-w-full truncate px-1 transition-transform group-hover:scale-110"
-          style={effect.previewStyle}
-        >
-          {effect.previewText || 'Ag'}
+      {/* Applied indicator or Download icon at bottom-right */}
+      {isApplied ? (
+        <span className="absolute top-1 right-1 z-10 p-0.5 rounded-full bg-emerald-500 text-white animate-in zoom-in-50">
+          <Check className="w-2 h-2" />
         </span>
-      </div>
+      ) : (
+        <span className="absolute bottom-1 right-1 z-10 w-3.5 h-3.5 rounded-full bg-black/60 flex items-center justify-center text-zinc-300 group-hover:text-white transition-colors">
+          <ArrowDownToLine className="w-1.5 h-1.5" />
+        </span>
+      )}
 
-      <span className="text-[9px] font-medium text-zinc-400 group-hover:text-zinc-200 truncate w-full pt-1.5 border-t border-zinc-800/50">
-        {effect.label}
-      </span>
+      {/* Main preview */}
+      {effect.previewImage ? (
+        <div className="w-full h-full flex items-center justify-center p-1 relative">
+          <img
+            src={effect.previewImage}
+            alt={effect.label}
+            className="max-w-[82%] max-h-[82%] object-contain pointer-events-none select-none transition-transform duration-200 group-hover:scale-105 drop-shadow-sm"
+            loading="lazy"
+            onError={(e) => {
+              const target = e.currentTarget as HTMLImageElement
+              target.style.display = 'none'
+            }}
+          />
+          {isHovered && effect.animatedPreviewImage && (
+            <img
+              src={effect.animatedPreviewImage}
+              alt={effect.label}
+              className="absolute inset-0 m-auto max-w-[82%] max-h-[82%] object-contain pointer-events-none select-none transition-transform duration-200 group-hover:scale-105 drop-shadow-sm"
+            />
+          )}
+        </div>
+      ) : (
+        <div className="flex-1 flex items-center justify-center p-1 w-full h-full overflow-hidden">
+          <span
+            className="text-xs sm:text-sm font-black tracking-wider select-none leading-none transition-transform duration-150 group-hover:scale-105"
+            style={effect.previewStyle}
+          >
+            {effect.previewText || 'ART'}
+          </span>
+        </div>
+      )}
     </button>
   )
 })
@@ -317,7 +417,13 @@ export const TextTabPanel = memo(function TextTabPanel({ onSuppressClick }: Text
   const templateCategoryCounts = useMemo(() => {
     const counts: Record<string, number> = { all: TEXT_TEMPLATES_CATALOG.length }
     for (const item of TEXT_TEMPLATES_CATALOG) {
-      counts[item.category] = (counts[item.category] || 0) + 1
+      if (item.categories && item.categories.length > 0) {
+        for (const cat of item.categories) {
+          counts[cat] = (counts[cat] || 0) + 1
+        }
+      } else {
+        counts[item.category] = (counts[item.category] || 0) + 1
+      }
     }
     return counts
   }, [])
@@ -325,15 +431,24 @@ export const TextTabPanel = memo(function TextTabPanel({ onSuppressClick }: Text
   const effectCategoryCounts = useMemo(() => {
     const counts: Record<string, number> = { all: TEXT_EFFECTS_CATALOG.length }
     for (const item of TEXT_EFFECTS_CATALOG) {
-      counts[item.category] = (counts[item.category] || 0) + 1
+      if (item.categories && item.categories.length > 0) {
+        for (const cat of item.categories) {
+          counts[cat] = (counts[cat] || 0) + 1
+        }
+      } else {
+        counts[item.category] = (counts[item.category] || 0) + 1
+      }
     }
     return counts
   }, [])
 
   const filteredTemplates = useMemo(() => {
-    let list = TEXT_TEMPLATES_CATALOG
+    let list = TEXT_TEMPLATES_CATALOG as readonly TextTemplateCardItem[]
     if (selectedTemplateCat !== 'all') {
-      list = list.filter((item) => item.category === selectedTemplateCat)
+      list = list.filter(
+        (item) =>
+          item.category === selectedTemplateCat || item.categories?.includes(selectedTemplateCat),
+      )
     }
     const query = searchQuery.trim().toLowerCase()
     if (!query) return list
@@ -343,7 +458,10 @@ export const TextTabPanel = memo(function TextTabPanel({ onSuppressClick }: Text
   const filteredEffects = useMemo(() => {
     let list = TEXT_EFFECTS_CATALOG
     if (selectedEffectCat !== 'all') {
-      list = list.filter((item) => item.category === selectedEffectCat)
+      list = list.filter(
+        (item) =>
+          item.category === selectedEffectCat || item.categories?.includes(selectedEffectCat),
+      )
     }
     const query = searchQuery.trim().toLowerCase()
     if (!query) return list
@@ -399,8 +517,26 @@ export const TextTabPanel = memo(function TextTabPanel({ onSuppressClick }: Text
       const selectedTextItem = items.find(
         (item): item is TextItem => item.type === 'text' && selectedItemIds.includes(item.id),
       )
+      const selectedSubtitleItems = items.filter(
+        (item) => item.type === 'subtitle' && selectedItemIds.includes(item.id),
+      )
 
-      if (selectedTextItem) {
+      if (selectedSubtitleItems.length > 0) {
+        for (const sub of selectedSubtitleItems) {
+          updateItem(sub.id, {
+            color: effect.patch.color,
+            fontFamily: effect.patch.fontFamily,
+            fontWeight: effect.patch.fontWeight,
+            stroke: effect.patch.stroke,
+            textShadow: effect.patch.textShadow,
+            backgroundColor: effect.patch.backgroundColor,
+            backgroundRadius: effect.patch.backgroundRadius,
+            letterSpacing: effect.patch.letterSpacing,
+          })
+        }
+        setAppliedEffectId(effect.id)
+        window.setTimeout(() => setAppliedEffectId(null), 1200)
+      } else if (selectedTextItem) {
         updateItem(selectedTextItem.id, {
           color: effect.patch.color,
           fontFamily: effect.patch.fontFamily,
@@ -429,6 +565,34 @@ export const TextTabPanel = memo(function TextTabPanel({ onSuppressClick }: Text
   const handleApplyTemplate = useCallback(
     (template: TextTemplateCardItem) => {
       if (onSuppressClick && onSuppressClick()) return
+
+      const { selectedItemIds } = useSelectionStore.getState()
+      const { items, updateItem } = useTimelineStore.getState()
+
+      const selectedSubtitleItems = items.filter(
+        (item) => item.type === 'subtitle' && selectedItemIds.includes(item.id),
+      )
+      if (selectedSubtitleItems.length > 0) {
+        const textMotion = createTextTemplateMotion(template)
+        for (const sub of selectedSubtitleItems) {
+          updateItem(sub.id, {
+            color: template.patch.color,
+            fontFamily: template.patch.fontFamily,
+            fontWeight: template.patch.fontWeight,
+            fontSize: template.patch.fontSize,
+            fontStyle: template.patch.fontStyle,
+            textAlign: template.patch.textAlign,
+            lineHeight: template.patch.lineHeight,
+            stroke: template.patch.stroke,
+            textShadow: template.patch.textShadow,
+            backgroundColor: template.patch.backgroundColor,
+            backgroundRadius: template.patch.backgroundRadius,
+            letterSpacing: template.patch.letterSpacing,
+            textMotion,
+          })
+        }
+        return
+      }
 
       handleCreateTextItem(
         {
@@ -568,16 +732,16 @@ export const TextTabPanel = memo(function TextTabPanel({ onSuppressClick }: Text
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-4">
+      <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5">
         {activeMainTab === 'templates' ? (
           <>
             {/* Basic Section: Add Heading & Add Body Text */}
-            <div className="space-y-2">
-              <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+            <div className="space-y-1.5">
+              <div className="text-[9.5px] font-bold text-muted-foreground uppercase tracking-wider">
                 Basic
               </div>
 
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <button
                   type="button"
                   draggable={true}
@@ -605,9 +769,9 @@ export const TextTabPanel = memo(function TextTabPanel({ onSuppressClick }: Text
                       'Heading',
                     )
                   }
-                  className="w-full py-2.5 px-3 rounded-lg bg-secondary/60 hover:bg-secondary border border-border/80 hover:border-primary/50 text-foreground font-black text-sm tracking-wide transition-[transform,background-color,border-color] active:scale-[0.98] flex items-center justify-center gap-2 group shadow-sm"
+                  className="w-full py-1.5 px-2.5 rounded-md bg-secondary/60 hover:bg-secondary border border-border/80 hover:border-primary/50 text-foreground font-black text-xs tracking-wide transition-[transform,background-color,border-color] active:scale-[0.98] flex items-center justify-center gap-1.5 group shadow-sm"
                 >
-                  <Heading className="w-4 h-4 text-primary group-hover:scale-110 transition-transform" />
+                  <Heading className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition-transform" />
                   <span className="font-['Anton'] tracking-wider">Add heading</span>
                 </button>
 
@@ -636,30 +800,30 @@ export const TextTabPanel = memo(function TextTabPanel({ onSuppressClick }: Text
                       'Body text',
                     )
                   }
-                  className="w-full py-2 px-3 rounded-lg bg-secondary/30 hover:bg-secondary/60 border border-border/50 hover:border-border text-muted-foreground hover:text-foreground font-medium text-xs tracking-normal transition-[transform,background-color,border-color] active:scale-[0.98] flex items-center justify-center gap-2 group"
+                  className="w-full py-1 px-2.5 rounded-md bg-secondary/30 hover:bg-secondary/60 border border-border/50 hover:border-border text-muted-foreground hover:text-foreground font-medium text-[11px] tracking-normal transition-[transform,background-color,border-color] active:scale-[0.98] flex items-center justify-center gap-1.5 group"
                 >
-                  <Type className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
+                  <Type className="w-3 h-3 text-muted-foreground group-hover:text-primary transition-colors" />
                   <span>Add body text</span>
                 </button>
               </div>
             </div>
 
             {/* Template Category Chips */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+            <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-md py-1 flex items-center gap-1 overflow-x-auto scrollbar-none border-b border-border/30">
               {TEXT_TEMPLATE_CATEGORIES.map((cat) => (
                 <button
                   key={cat.id}
                   type="button"
                   onClick={() => setSelectedTemplateCat(cat.id)}
                   className={cn(
-                    'px-2.5 py-1 rounded-full text-[11px] whitespace-nowrap transition-colors font-semibold border flex items-center gap-1',
+                    'px-2 py-0.5 rounded-full text-[10px] whitespace-nowrap transition-colors font-semibold border flex items-center gap-1',
                     selectedTemplateCat === cat.id
                       ? 'bg-primary text-primary-foreground border-primary shadow-sm'
                       : 'bg-secondary/40 text-muted-foreground border-border/60 hover:bg-secondary/80 hover:text-foreground',
                   )}
                 >
                   <span>{cat.label}</span>
-                  <span className="text-[9px] opacity-75">
+                  <span className="text-[8.5px] opacity-75">
                     ({templateCategoryCounts[cat.id] || 0})
                   </span>
                 </button>
@@ -672,7 +836,7 @@ export const TextTabPanel = memo(function TextTabPanel({ onSuppressClick }: Text
                 No templates found matching &quot;{searchQuery}&quot;
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-1.5">
                 {filteredTemplates.map((template) => (
                   <TextTemplateCard
                     key={template.id}
@@ -686,43 +850,43 @@ export const TextTabPanel = memo(function TextTabPanel({ onSuppressClick }: Text
             )}
           </>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+              <span className="text-[9.5px] font-bold text-muted-foreground uppercase tracking-wider">
                 Styles & Effects
               </span>
-              <span className="text-[9px] text-muted-foreground">Click to apply to clip</span>
+              <span className="text-[8.5px] text-muted-foreground">Click to apply to clip</span>
             </div>
 
             {/* Effects Category Filter Chips */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+            <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-md py-1 flex items-center gap-1 overflow-x-auto scrollbar-none border-b border-border/30">
               {TEXT_EFFECT_CATEGORIES.map((cat) => (
                 <button
                   key={cat.id}
                   type="button"
                   onClick={() => setSelectedEffectCat(cat.id)}
                   className={cn(
-                    'px-2.5 py-1 rounded-full text-[11px] whitespace-nowrap transition-colors font-semibold border flex items-center gap-1',
+                    'px-2 py-0.5 rounded-full text-[10px] whitespace-nowrap transition-colors font-semibold border flex items-center gap-1',
                     selectedEffectCat === cat.id
                       ? 'bg-primary text-primary-foreground border-primary shadow-sm'
                       : 'bg-secondary/40 text-muted-foreground border-border/60 hover:bg-secondary/80 hover:text-foreground',
                   )}
                 >
                   <span>{cat.label}</span>
-                  <span className="text-[9px] opacity-75">
+                  <span className="text-[8.5px] opacity-75">
                     ({effectCategoryCounts[cat.id] || 0})
                   </span>
                 </button>
               ))}
             </div>
 
-            {/* 3-Column Effects Grid */}
+            {/* Effects Grid */}
             {filteredEffects.length === 0 ? (
               <div className="py-8 text-center text-xs text-muted-foreground">
                 No effects found matching &quot;{searchQuery}&quot;
               </div>
             ) : (
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-1.5">
                 {filteredEffects.map((effect) => (
                   <TextEffectTile
                     key={effect.id}

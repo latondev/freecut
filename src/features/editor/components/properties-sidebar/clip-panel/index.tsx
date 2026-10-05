@@ -3,6 +3,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useRef,
   useSyncExternalStore,
   memo,
   lazy,
@@ -19,6 +20,7 @@ import {
   Type,
   WandSparkles,
   Shapes,
+  Captions,
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/shared/ui/cn'
@@ -56,6 +58,14 @@ const LazyAudioSection = lazy(() =>
 )
 const LazySubtitleSection = lazy(() =>
   import('./subtitle-section').then((module) => ({ default: module.SubtitleSection })),
+)
+const LazyCaptionsTabContent = lazy(() =>
+  import('./captions-tab-content').then((module) => ({ default: module.CaptionsTabContent })),
+)
+const LazySubtitleTextTabContent = lazy(() =>
+  import('./subtitle-text-tab-content').then((module) => ({
+    default: module.SubtitleTextTabContent,
+  })),
 )
 const LazyTextContentSection = lazy(() =>
   import('./text-section').then((module) => ({ default: module.TextContentSection })),
@@ -538,6 +548,8 @@ const ClipPanelCore = memo(function ClipPanelCore({
 
   const availableTabs = useMemo(() => {
     const tabs: ClipInspectorTab[] = []
+    if (hasSubtitleItems || hasVirtualSubtitleItems) tabs.push('captions')
+    if (hasSubtitleItems || hasVirtualSubtitleItems) tabs.push('text')
     if (showVideoTab) tabs.push('video')
     if (showSecondTab) tabs.push('audio')
     if (workspace === 'motion') {
@@ -548,7 +560,25 @@ const ClipPanelCore = memo(function ClipPanelCore({
       if (showMotionTab) tabs.push('motion')
     }
     return tabs
-  }, [showMotionTab, showSecondTab, showEffectsTab, showVideoTab, workspace])
+  }, [
+    hasSubtitleItems,
+    hasVirtualSubtitleItems,
+    showMotionTab,
+    showSecondTab,
+    showEffectsTab,
+    showVideoTab,
+    workspace,
+  ])
+
+  const prevIsSubtitleRef = useRef(false)
+  const isSubtitleSelected = hasSubtitleItems || hasVirtualSubtitleItems
+
+  useEffect(() => {
+    if (isSubtitleSelected && !prevIsSubtitleRef.current) {
+      setClipInspectorTab('captions')
+    }
+    prevIsSubtitleRef.current = isSubtitleSelected
+  }, [isSubtitleSelected, setClipInspectorTab])
 
   const fallbackTab = availableTabs[0] ?? 'video'
   const activeTab = availableTabs.includes(clipInspectorTab) ? clipInspectorTab : fallbackTab
@@ -576,6 +606,18 @@ const ClipPanelCore = memo(function ClipPanelCore({
   // Per-tab label + icon. Motion presents base properties, animation authoring,
   // then effects; Edit retains its media-first inspector ordering.
   const getTabMeta = (value: ClipInspectorTab): { label: string; icon: LucideIcon } => {
+    if (value === 'captions') {
+      return {
+        label: t('editor.clipPanel.tabCaptions', { defaultValue: 'Captions' }),
+        icon: Captions,
+      }
+    }
+    if (value === 'text') {
+      return {
+        label: t('editor.clipPanel.tabText', { defaultValue: 'Text' }),
+        icon: Type,
+      }
+    }
     if (value === 'video') {
       if (workspace === 'motion') {
         return {
@@ -614,7 +656,11 @@ const ClipPanelCore = memo(function ClipPanelCore({
         ? 'grid-cols-2'
         : availableTabs.length === 3
           ? 'grid-cols-3'
-          : 'grid-cols-4'
+          : availableTabs.length === 4
+            ? 'grid-cols-4'
+            : availableTabs.length === 5
+              ? 'grid-cols-5'
+              : 'grid-cols-6'
 
   if (selectedItems.length === 0) {
     return null
@@ -634,13 +680,35 @@ const ClipPanelCore = memo(function ClipPanelCore({
           {availableTabs.map((value) => {
             const { label, icon: Icon } = getTabMeta(value)
             return (
-              <TabsTrigger key={value} value={value} className="text-xs gap-1 px-2">
-                <Icon className="h-3 w-3" />
-                {label}
+              <TabsTrigger
+                key={value}
+                value={value}
+                className="text-xs gap-1 px-1.5 min-w-0 truncate"
+              >
+                <Icon className="h-3 w-3 shrink-0" />
+                <span className="truncate">{label}</span>
               </TabsTrigger>
             )
           })}
         </TabsList>
+
+        {/* Captions Tab - list of all captions in video, jump to timeline and preview */}
+        <TabsContent value="captions" className="mt-3 min-h-0 flex-1">
+          {(hasSubtitleItems || hasVirtualSubtitleItems) && (
+            <Suspense fallback={null}>
+              <LazyCaptionsTabContent />
+            </Suspense>
+          )}
+        </TabsContent>
+
+        {/* Text Tab - text templates, text effects, typography styling for captions */}
+        <TabsContent value="text" className="mt-3 min-h-0 flex-1">
+          {(hasSubtitleItems || hasVirtualSubtitleItems) && (
+            <Suspense fallback={null}>
+              <LazySubtitleTextTabContent items={selectedItems} canvas={canvas} />
+            </Suspense>
+          )}
+        </TabsContent>
 
         {/* Video Tab - visual layout, content, and clip-specific controls */}
         <TabsContent value="video" className="mt-3">

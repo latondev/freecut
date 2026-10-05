@@ -1,9 +1,21 @@
 import type { TextMotionInPresetId } from './text-motion/text-motion-preset-ids'
 import type { TextItem } from '@/types/timeline'
+import capcutTemplatesRaw from './capcut-text-templates.json'
 
 export type TextTemplateCategory =
   | 'all'
   | 'trending'
+  | 'bduck'
+  | 'blackfriday'
+  | 'whimsical'
+  | 'pixelbead'
+  | 'classic'
+  | 'new'
+  | 'hits'
+  | 'freefire'
+  | 'nailoong'
+  | 'icons'
+  | 'daily'
   | 'vietnamese'
   | 'titles'
   | 'subtitles'
@@ -18,7 +30,6 @@ export type TextTemplateCategory =
   | 'cute'
   | 'retro'
   | 'celebration'
-  | 'whimsical'
 
 export interface TextTemplateCategoryOption {
   id: TextTemplateCategory
@@ -28,28 +39,40 @@ export interface TextTemplateCategoryOption {
 export const TEXT_TEMPLATE_CATEGORIES: readonly TextTemplateCategoryOption[] = [
   { id: 'all', label: 'All' },
   { id: 'trending', label: 'Trending' },
-  { id: 'vietnamese', label: 'Tiếng Việt Viral' },
+  { id: 'bduck', label: 'B.Duck 🐥' },
+  { id: 'blackfriday', label: 'Black Friday' },
+  { id: 'whimsical', label: 'Whimsical' },
+  { id: 'pixelbead', label: 'Pixel Bead 👾' },
+  { id: 'classic', label: 'Classic' },
+  { id: 'new', label: 'NEW' },
+  { id: 'hits', label: 'Hits' },
+  { id: 'freefire', label: 'Free Fire 🔥' },
+  { id: 'nailoong', label: 'Nailoong 💛' },
+  { id: 'icons', label: 'Icons' },
   { id: 'titles', label: 'Titles' },
+  { id: 'vietnamese', label: 'Tiếng Việt Viral' },
   { id: 'subtitles', label: 'Phụ đề & Captions' },
   { id: 'sale', label: 'Sale & Promo' },
   { id: 'social', label: 'Social & Hooks' },
-  { id: 'food', label: 'Ẩm thực Review' },
+  { id: 'daily', label: 'Daily & Life' },
+  { id: 'vlog', label: 'Vlog' },
   { id: 'travel', label: 'Du lịch Check-in' },
+  { id: 'food', label: 'Ẩm thực Review' },
+  { id: 'retro', label: 'Retro & 90s' },
+  { id: 'cute', label: 'Cute & Cartoon' },
+  { id: 'celebration', label: 'Celebration' },
   { id: 'fitness', label: 'Gym & Thể thao' },
   { id: 'tech', label: 'Công nghệ & AI' },
-  { id: 'vlog', label: 'Vlog & Life' },
   { id: 'gaming', label: 'Gaming & Cyber' },
-  { id: 'cute', label: 'Cute & Cartoon' },
-  { id: 'retro', label: 'Retro & 90s' },
-  { id: 'celebration', label: 'Celebration' },
-  { id: 'whimsical', label: 'Whimsical' },
 ] as const
 
 export interface TextTemplateCardItem {
   id: string
   label: string
   category: Exclude<TextTemplateCategory, 'all'>
+  categories?: readonly string[]
   badge?: string
+  isPro?: boolean
   motionPresetId?: TextMotionInPresetId
   icon?:
     | 'sparkle'
@@ -74,6 +97,7 @@ export interface TextTemplateCardItem {
     | 'fitness'
     | 'tech'
   previewImage?: string
+  animatedPreviewImage?: string
   cardBgClass?: string
   sample: {
     tag?: string
@@ -100,7 +124,7 @@ export interface TextTemplateCardItem {
     >
 }
 
-export const TEXT_TEMPLATES_CATALOG: readonly TextTemplateCardItem[] = [
+const BASE_TEXT_TEMPLATES_CATALOG: readonly TextTemplateCardItem[] = [
   // ==========================================
   // --- 1. TRENDING (THỊNH HÀNH - 16 ITEMS) ---
   // ==========================================
@@ -6303,4 +6327,9 @@ export const TEXT_TEMPLATES_CATALOG: readonly TextTemplateCardItem[] = [
       textAlign: 'center',
     },
   },
-] as const
+]
+
+export const TEXT_TEMPLATES_CATALOG: readonly TextTemplateCardItem[] = [
+  ...(capcutTemplatesRaw as unknown as TextTemplateCardItem[]),
+  ...BASE_TEXT_TEMPLATES_CATALOG,
+]

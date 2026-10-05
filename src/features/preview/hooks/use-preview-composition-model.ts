@@ -136,14 +136,19 @@ export function mergeLiveItemPresentation(
       ? ({ ...item, transform: liveItem.transform } as TimelineItem)
       : item
 
-  if (item.type !== 'text' || liveItem.type !== 'text') return itemWithLiveTransform
+  if (
+    (item.type !== 'text' && item.type !== 'subtitle') ||
+    (liveItem.type !== 'text' && liveItem.type !== 'subtitle')
+  ) {
+    return itemWithLiveTransform
+  }
 
   return {
     ...itemWithLiveTransform,
-    text: liveItem.text,
-    textSpans: liveItem.textSpans,
-    spanLayout: liveItem.spanLayout,
-    textStyleScale: liveItem.textStyleScale,
+    ...('text' in liveItem ? { text: liveItem.text } : {}),
+    ...('textSpans' in liveItem ? { textSpans: liveItem.textSpans } : {}),
+    ...('spanLayout' in liveItem ? { spanLayout: liveItem.spanLayout } : {}),
+    ...('textStyleScale' in liveItem ? { textStyleScale: liveItem.textStyleScale } : {}),
     textMotion: liveItem.textMotion,
     color: liveItem.color,
     fontSize: liveItem.fontSize,

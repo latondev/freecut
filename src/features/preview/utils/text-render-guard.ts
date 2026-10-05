@@ -7,14 +7,14 @@ function hasVisibleText(track: TimelineTrack): boolean {
   // DOM/CSS is the at-rest reference renderer. Canvas 2D has subtly
   // different baseline metrics and downscale sampling even for plain text,
   // so keep every non-motion text item on the Player while scrubbing.
-  return track.items.some((item) => item.type === 'text')
+  return track.items.some((item) => item.type === 'text' || item.type === 'subtitle')
 }
 
 function hasVisibleMotionText(track: TimelineTrack): boolean {
   if (!track.visible) return false
 
   for (const item of track.items) {
-    if (item.type !== 'text') continue
+    if (item.type !== 'text' && item.type !== 'subtitle') continue
 
     // Motion-text clips animate per-glyph and can only render correctly via
     // the canvas/GPU preview path, so never prefer the Player while one is visible.

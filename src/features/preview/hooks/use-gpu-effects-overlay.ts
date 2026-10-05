@@ -36,7 +36,7 @@ function hasRenderableBlendMode(item: TimelineItem): boolean {
  */
 function hasTextMotionSpec(item: TimelineItem): boolean {
   return (
-    item.type === 'text' &&
+    (item.type === 'text' || item.type === 'subtitle') &&
     item.textMotion !== undefined &&
     (item.textMotion.in !== undefined ||
       item.textMotion.out !== undefined ||
@@ -135,7 +135,7 @@ function rangesOverlap(
 }
 
 function isTextMotionActiveInWindow(
-  item: Extract<TimelineItem, { type: 'text' }>,
+  item: Extract<TimelineItem, { type: 'text' | 'subtitle' }>,
   startFrame: number,
   endFrameExclusive: number,
 ): boolean {
@@ -147,7 +147,18 @@ function isTextMotionActiveInWindow(
     Math.ceil(endFrameExclusive),
   )
   for (let frame = firstFrame; frame < lastFrameExclusive; frame += 1) {
-    if (isTextMotionActive(textMotion, frame - item.from, 0, item.durationInFrames)) {
+    if (item.type === 'subtitle' && item.cues && item.cues.length > 0) {
+      const sec = (frame - item.from) / 30
+      for (const cue of item.cues) {
+        if (sec >= cue.startSeconds && sec < cue.endSeconds) {
+          const cueRelFrame = frame - item.from - Math.round(cue.startSeconds * 30)
+          const cueDur = Math.max(1, Math.round((cue.endSeconds - cue.startSeconds) * 30))
+          if (isTextMotionActive(textMotion, cueRelFrame, 0, cueDur)) {
+            return true
+          }
+        }
+      }
+    } else if (isTextMotionActive(textMotion, frame - item.from, 0, item.durationInFrames)) {
       return true
     }
   }
@@ -222,12 +233,7 @@ export function shouldForceContinuousPreviewOverlayFromIndex(
 
   return index.candidateItems.some((item) => {
     if (
-      !rangesOverlap(
-        startFrame,
-        endFrameExclusive,
-        item.from,
-        item.from + item.durationInFrames,
-      )
+      !rangesOverlap(startFrame, endFrameExclusive, item.from, item.from + item.durationInFrames)
     ) {
       return false
     }
@@ -236,7 +242,7 @@ export function shouldForceContinuousPreviewOverlayFromIndex(
     if (hasRenderableBlendMode(item)) return true
     if (hasCornerPin(item.cornerPin)) return true
     if (
-      item.type === 'text' &&
+      (item.type === 'text' || item.type === 'subtitle') &&
       item.textMotion !== undefined &&
       isTextMotionActiveInWindow(item, startFrame, endFrameExclusive)
     ) {
@@ -370,7 +376,7 @@ export function shouldForceContinuousPreviewOverlayInWindow(
     // active — otherwise playback falls to the DOM Player, which cannot render
     // per-glyph motion (fps is unused by isTextMotionActive).
     if (
-      item.type === 'text' &&
+      (item.type === 'text' || item.type === 'subtitle') &&
       item.textMotion !== undefined &&
       isTextMotionActiveInWindow(item, startFrame, endFrameExclusive)
     ) {

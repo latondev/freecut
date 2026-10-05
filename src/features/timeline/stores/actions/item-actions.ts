@@ -733,6 +733,18 @@ export function updateItem(id: string, updates: Partial<TimelineItem>): void {
   )
 }
 
+export function updateItems(updates: Array<{ id: string; changes: Partial<TimelineItem> }>): void {
+  if (updates.length === 0) return
+  execute(
+    'UPDATE_ITEMS',
+    () => {
+      useItemsStore.getState()._updateItems(updates)
+      useTimelineSettingsStore.getState().markDirty()
+    },
+    { count: updates.length },
+  )
+}
+
 export function unlinkItems(ids: string[]): void {
   const items = useItemsStore.getState().items
   const unlinkIds = new Set<string>()

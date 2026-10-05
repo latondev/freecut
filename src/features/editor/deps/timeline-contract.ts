@@ -101,6 +101,7 @@ export {
   useTimelineShortcuts,
   useTimelineStore,
   updateItem,
+  updateItems,
   updateKeyframe,
   updateKeyframes,
   useTransitionBreakageNotifications,

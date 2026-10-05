@@ -16,6 +16,12 @@ import {
   CheckCircle2,
   SlidersHorizontal,
   Globe,
+  Cloud,
+  Cpu,
+  Eye,
+  EyeOff,
+  ExternalLink,
+  Key,
 } from 'lucide-react'
 import { useSettingsStore } from '@/features/editor/deps/settings'
 import { Button } from '@/components/ui/button'
@@ -335,8 +341,12 @@ function getBatchStageLabel(stage?: string): string {
       return 'Khởi tạo AI Engine'
     case 'extracting-audio':
       return 'Tách âm thanh'
+    case 'uploading':
+      return 'Tải lên Groq AI'
     case 'transcribing':
-      return 'Đang nhận diện giọng'
+      return 'AI đang nhận diện...'
+    case 'completed':
+      return 'Hoàn tất'
     default:
       return 'Đang xử lý'
   }
@@ -354,6 +364,29 @@ export const ActionPanel = memo(
     const [transcribeDialogOpen, setTranscribeDialogOpen] = useState(false)
     const [isBatchTranscribing, setIsBatchTranscribing] = useState(false)
     const [batchProgress, setBatchProgress] = useState<BatchCaptionProgress | null>(null)
+    const [captionEngine, setCaptionEngine] = useState<'groq' | 'local'>(() => {
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('freecut_caption_engine')
+        if (saved === 'groq' || saved === 'local') return saved
+      }
+      return 'groq'
+    })
+    const [groqApiKey, setGroqApiKey] = useState<string>(() => {
+      if (typeof window !== 'undefined') {
+        return localStorage.getItem('freecut_groq_api_key') || ''
+      }
+      return ''
+    })
+    const [showApiKey, setShowApiKey] = useState(false)
+    const [groqModel, setGroqModel] = useState<
+      'whisper-large-v3-turbo' | 'whisper-large-v3' | 'distil-whisper-large-v3-en'
+    >(() => {
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('freecut_groq_model')
+        if (saved === 'whisper-large-v3' || saved === 'distil-whisper-large-v3-en') return saved
+      }
+      return 'whisper-large-v3-turbo'
+    })
     const [captionModel, setCaptionModel] = useState<MediaTranscriptModel>(() => {
       const defaultM = useSettingsStore.getState().defaultWhisperModel
       return defaultM && defaultM !== 'parakeet-tdt-v3' ? defaultM : 'whisper-base'
@@ -366,6 +399,30 @@ export const ActionPanel = memo(
       }
       return 'vi'
     })
+
+    const handleEngineChange = useCallback((mode: 'groq' | 'local') => {
+      setCaptionEngine(mode)
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('freecut_caption_engine', mode)
+      }
+    }, [])
+
+    const handleGroqApiKeyChange = useCallback((key: string) => {
+      setGroqApiKey(key)
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('freecut_groq_api_key', key.trim())
+      }
+    }, [])
+
+    const handleGroqModelChange = useCallback(
+      (model: 'whisper-large-v3-turbo' | 'whisper-large-v3' | 'distil-whisper-large-v3-en') => {
+        setGroqModel(model)
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('freecut_groq_model', model)
+        }
+      },
+      [],
+    )
 
     const handleModelChange = useCallback((val: MediaTranscriptModel) => {
       setCaptionModel(val)
@@ -441,13 +498,71 @@ export const ActionPanel = memo(
       }
     }, [])
 
-    const handleFastBatchCaptions = useCallback(() => {
+    const handleFastBatchCaptions = useCallback(async () => {
+      if (captionEngine === 'groq') {
+        const key = groqApiKey.trim()
+        if (!key) {
+          toast.error('Vui lòng dán Groq API Key vào ô nhập bên dưới để dùng chế độ Siêu tốc 2s!')
+          return
+        }
+
+        setTranscribeDialogOpen(false)
+        setIsBatchTranscribing(true)
+        setBatchProgress({
+          currentMediaIndex: 0,
+          totalMediaCount: 0,
+          currentMediaName: '',
+          stage: 'uploading',
+          overallPercent: 0,
+          mediaPercent: 0,
+        })
+
+        try {
+          const result = await generateTimelineCaptionsBatch({
+            engine: 'groq',
+            groqApiKey: key,
+            groqModel,
+            model: 'whisper-large',
+            language: captionLanguage === 'auto' ? '' : captionLanguage,
+            force: true,
+            onProgress: (p) => {
+              setBatchProgress(p)
+            },
+          })
+
+          toast.success(
+            `⚡ Siêu tốc! Đã tạo caption word-by-word thành công cho ${result.totalClipsUpdated} clip qua Groq AI!`,
+          )
+        } catch (err: unknown) {
+          if (
+            err instanceof Error &&
+            (err.name === 'AbortError' || err.message.includes('abort'))
+          ) {
+            toast.info('Đã dừng tiến trình tạo caption.')
+          } else {
+            const msg = err instanceof Error ? err.message : 'Có lỗi khi tạo caption qua Groq'
+            toast.error(msg)
+          }
+        } finally {
+          setIsBatchTranscribing(false)
+          setBatchProgress(null)
+        }
+        return
+      }
+
       void handleStartBatchCaptions({
         model: captionModel,
         quantization: 'hybrid',
         language: captionLanguage === 'auto' ? '' : captionLanguage,
       })
-    }, [captionModel, captionLanguage, handleStartBatchCaptions])
+    }, [
+      captionEngine,
+      groqApiKey,
+      groqModel,
+      captionModel,
+      captionLanguage,
+      handleStartBatchCaptions,
+    ])
 
     const handleCancelBatchCaptions = useCallback(() => {
       cancelBatchCaptionGeneration()
@@ -850,64 +965,202 @@ export const ActionPanel = memo(
                         {voiceClipsCount > 0 ? `${voiceClipsCount} đoạn Voice/Audio` : '0 audio'}
                       </strong>
                     </span>
+                    <span className="text-[10px] text-amber-300/80 font-medium">
+                      {captionEngine === 'groq'
+                        ? '⚡ Groq Cloud (Siêu tốc 2s)'
+                        : '💻 Local Whisper'}
+                    </span>
                   </div>
 
-                  {/* Model & Language Quick Selectors */}
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
-                        <span>Mô hình AI (Model)</span>
-                      </label>
-                      <Select
-                        value={captionModel}
-                        onValueChange={(val) => handleModelChange(val as MediaTranscriptModel)}
-                      >
-                        <SelectTrigger className="h-8 text-xs bg-background/60">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="whisper-tiny">⚡ Tiny (39MB · Siêu tốc)</SelectItem>
-                          <SelectItem value="whisper-base">
-                            🎯 Base (140MB · Cân bằng, khuyên dùng)
-                          </SelectItem>
-                          <SelectItem value="whisper-small">
-                            💎 Small (460MB · Chuẩn cao)
-                          </SelectItem>
-                          <SelectItem value="whisper-large">
-                            🚀 Large v3 (1.2GB · Cực chuẩn)
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
-                        <Globe className="w-3 h-3 text-muted-foreground" />
-                        <span>Ngôn ngữ giọng nói</span>
-                      </label>
-                      <Select value={captionLanguage} onValueChange={handleLanguageChange}>
-                        <SelectTrigger className="h-8 text-xs bg-background/60 font-medium">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-56">
-                          <SelectItem value="vi">🇻🇳 Tiếng Việt (Khuyên dùng)</SelectItem>
-                          <SelectItem value="en">🇺🇸 Tiếng Anh (English)</SelectItem>
-                          <SelectItem value="zh">🇨🇳 Tiếng Trung (Chinese)</SelectItem>
-                          <SelectItem value="ja">🇯🇵 Tiếng Nhật (Japanese)</SelectItem>
-                          <SelectItem value="ko">🇰🇷 Tiếng Hàn (Korean)</SelectItem>
-                          <SelectItem value="fr">🇫🇷 Tiếng Pháp (French)</SelectItem>
-                          <SelectItem value="de">🇩🇪 Tiếng Đức (German)</SelectItem>
-                          <SelectItem value="es">🇪🇸 Tây Ban Nha (Spanish)</SelectItem>
-                          <SelectItem value="ru">🇷🇺 Tiếng Nga (Russian)</SelectItem>
-                          <SelectItem value="th">🇹🇭 Tiếng Thái (Thai)</SelectItem>
-                          <SelectItem value="pt">🇵🇹 Bồ Đào Nha (Portuguese)</SelectItem>
-                          <SelectItem value="it">🇮🇹 Tiếng Ý (Italian)</SelectItem>
-                          <SelectItem value="id">🇮🇩 Indonesia (Indonesian)</SelectItem>
-                          <SelectItem value="auto">🌐 Tự động nhận diện</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                  {/* Engine Toggle Pills */}
+                  <div className="flex items-center p-0.5 rounded-lg bg-background/80 border border-border/70">
+                    <button
+                      type="button"
+                      onClick={() => handleEngineChange('groq')}
+                      className={cn(
+                        'flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-semibold transition-all cursor-pointer',
+                        captionEngine === 'groq'
+                          ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-black shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      <Cloud className="w-3.5 h-3.5" />
+                      <span>Groq Cloud (⚡ Siêu tốc 2s)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleEngineChange('local')}
+                      className={cn(
+                        'flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition-all cursor-pointer',
+                        captionEngine === 'local'
+                          ? 'bg-secondary text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      <Cpu className="w-3.5 h-3.5" />
+                      <span>Local AI (Offline)</span>
+                    </button>
                   </div>
+
+                  {/* If Groq Cloud Mode */}
+                  {captionEngine === 'groq' ? (
+                    <div className="space-y-2 rounded-lg bg-background/50 border border-amber-500/25 p-2.5">
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-semibold text-amber-300 flex items-center gap-1">
+                            <Key className="w-3 h-3 text-amber-400" />
+                            <span>Groq API Key (Miễn phí)</span>
+                          </label>
+                          <a
+                            href="https://console.groq.com/keys"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[10px] text-amber-400 hover:text-amber-300 hover:underline flex items-center gap-0.5"
+                            title="Mở trang lấy key miễn phí của Groq (chỉ cần Google account)"
+                          >
+                            <span>Lấy key miễn phí (30s)</span>
+                            <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                        </div>
+                        <div className="relative flex items-center">
+                          <input
+                            type={showApiKey ? 'text' : 'password'}
+                            value={groqApiKey}
+                            onChange={(e) => handleGroqApiKeyChange(e.target.value)}
+                            placeholder="Dán API Key bắt đầu bằng gsk_..."
+                            className="w-full pl-2.5 pr-8 py-1.5 text-xs bg-secondary/60 focus:bg-secondary border border-border/70 focus:border-amber-500/70 rounded-md font-mono text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowApiKey(!showApiKey)}
+                            className="absolute right-2 p-1 text-muted-foreground hover:text-foreground cursor-pointer"
+                            title={showApiKey ? 'Ẩn API Key' : 'Hiện API Key'}
+                          >
+                            {showApiKey ? (
+                              <EyeOff className="w-3.5 h-3.5" />
+                            ) : (
+                              <Eye className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
+                        <p className="text-[9px] text-muted-foreground/80 leading-normal">
+                          * Lưu trên máy bạn. Tốc độ ~2 giây cho cả video 15-30 phút mà không tốn
+                          phần cứng máy.
+                        </p>
+                      </div>
+
+                      {/* Language & Model info */}
+                      <div className="grid grid-cols-2 gap-2 text-xs pt-0.5">
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-muted-foreground font-medium">
+                            Mô hình Groq AI
+                          </label>
+                          <Select
+                            value={groqModel}
+                            onValueChange={(val) =>
+                              handleGroqModelChange(
+                                val as
+                                  | 'whisper-large-v3-turbo'
+                                  | 'whisper-large-v3'
+                                  | 'distil-whisper-large-v3-en',
+                              )
+                            }
+                          >
+                            <SelectTrigger className="h-8 text-xs bg-background/60 font-medium">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="whisper-large-v3-turbo">
+                                ⚡ Large-v3 Turbo (Nhanh nhất)
+                              </SelectItem>
+                              <SelectItem value="whisper-large-v3">
+                                🎯 Large-v3 (Chuẩn xác nhất)
+                              </SelectItem>
+                              <SelectItem value="distil-whisper-large-v3-en">
+                                🇺🇸 Distil-Whisper (Chuyên English)
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
+                            <Globe className="w-3 h-3 text-muted-foreground" />
+                            <span>Ngôn ngữ giọng nói</span>
+                          </label>
+                          <Select value={captionLanguage} onValueChange={handleLanguageChange}>
+                            <SelectTrigger className="h-8 text-xs bg-background/60 font-medium">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="max-h-56">
+                              <SelectItem value="vi">🇻🇳 Tiếng Việt (Khuyên dùng)</SelectItem>
+                              <SelectItem value="en">🇺🇸 Tiếng Anh (English)</SelectItem>
+                              <SelectItem value="zh">🇨🇳 Tiếng Trung (Chinese)</SelectItem>
+                              <SelectItem value="ja">🇯🇵 Tiếng Nhật (Japanese)</SelectItem>
+                              <SelectItem value="ko">🇰🇷 Tiếng Hàn (Korean)</SelectItem>
+                              <SelectItem value="fr">🇫🇷 Tiếng Pháp (French)</SelectItem>
+                              <SelectItem value="de">🇩🇪 Tiếng Đức (German)</SelectItem>
+                              <SelectItem value="es">🇪🇸 Tây Ban Nha (Spanish)</SelectItem>
+                              <SelectItem value="ru">🇷🇺 Tiếng Nga (Russian)</SelectItem>
+                              <SelectItem value="th">🇹🇭 Tiếng Thái (Thai)</SelectItem>
+                              <SelectItem value="auto">🌐 Tự động nhận diện</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Local Engine Selectors */
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
+                          <span>Mô hình AI Local</span>
+                        </label>
+                        <Select
+                          value={captionModel}
+                          onValueChange={(val) => handleModelChange(val as MediaTranscriptModel)}
+                        >
+                          <SelectTrigger className="h-8 text-xs bg-background/60">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="whisper-tiny">⚡ Tiny (39MB · Siêu tốc)</SelectItem>
+                            <SelectItem value="whisper-base">🎯 Base (140MB · Cân bằng)</SelectItem>
+                            <SelectItem value="whisper-small">
+                              💎 Small (460MB · Chuẩn cao)
+                            </SelectItem>
+                            <SelectItem value="whisper-large">
+                              🚀 Large v3 (1.2GB · Nặng)
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
+                          <Globe className="w-3 h-3 text-muted-foreground" />
+                          <span>Ngôn ngữ giọng nói</span>
+                        </label>
+                        <Select value={captionLanguage} onValueChange={handleLanguageChange}>
+                          <SelectTrigger className="h-8 text-xs bg-background/60 font-medium">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-56">
+                            <SelectItem value="vi">🇻🇳 Tiếng Việt (Khuyên dùng)</SelectItem>
+                            <SelectItem value="en">🇺🇸 Tiếng Anh (English)</SelectItem>
+                            <SelectItem value="zh">🇨🇳 Tiếng Trung (Chinese)</SelectItem>
+                            <SelectItem value="ja">🇯🇵 Tiếng Nhật (Japanese)</SelectItem>
+                            <SelectItem value="ko">🇰🇷 Tiếng Hàn (Korean)</SelectItem>
+                            <SelectItem value="fr">🇫🇷 Tiếng Pháp (French)</SelectItem>
+                            <SelectItem value="de">🇩🇪 Tiếng Đức (German)</SelectItem>
+                            <SelectItem value="es">🇪🇸 Tây Ban Nha (Spanish)</SelectItem>
+                            <SelectItem value="ru">🇷🇺 Tiếng Nga (Russian)</SelectItem>
+                            <SelectItem value="th">🇹🇭 Tiếng Thái (Thai)</SelectItem>
+                            <SelectItem value="auto">🌐 Tự động nhận diện</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Language Guidance Indicator */}
                   <div className="text-[10px] px-1 py-0.5 rounded bg-background/40 border border-border/40 text-muted-foreground flex items-center justify-between">
@@ -936,11 +1189,31 @@ export const ActionPanel = memo(
                       size="sm"
                       disabled={voiceClipsCount === 0 || isBatchTranscribing}
                       onClick={handleFastBatchCaptions}
-                      className="sm:col-span-3 h-9 text-xs font-semibold gap-1.5 border-amber-500/50 bg-gradient-to-r from-amber-500/25 to-yellow-500/15 hover:from-amber-500/35 hover:to-yellow-500/25 text-amber-200 hover:border-amber-400 shadow-sm transition-all"
-                      title="Tạo caption ngay lập tức bằng Model & Ngôn ngữ đã chọn (sẽ ghi đè caption cũ)"
+                      className={cn(
+                        'sm:col-span-3 h-9 text-xs font-semibold gap-1.5 shadow-sm transition-all cursor-pointer',
+                        captionEngine === 'groq'
+                          ? 'border-amber-400 bg-gradient-to-r from-amber-400 to-yellow-400 text-black hover:from-amber-300 hover:to-yellow-300 font-bold'
+                          : 'border-amber-500/50 bg-gradient-to-r from-amber-500/25 to-yellow-500/15 hover:from-amber-500/35 hover:to-yellow-500/25 text-amber-200 hover:border-amber-400',
+                      )}
+                      title={
+                        captionEngine === 'groq'
+                          ? 'Tạo caption siêu tốc trong 2 giây qua Groq Cloud AI'
+                          : 'Tạo caption ngay lập tức bằng Model Local'
+                      }
                     >
-                      <Zap className="w-4 h-4 text-amber-400 fill-amber-400/50 shrink-0" />
-                      <span>⚡ Tạo Caption Ngay</span>
+                      <Zap
+                        className={cn(
+                          'w-4 h-4 shrink-0',
+                          captionEngine === 'groq'
+                            ? 'text-black fill-black'
+                            : 'text-amber-400 fill-amber-400/50',
+                        )}
+                      />
+                      <span>
+                        {captionEngine === 'groq'
+                          ? '⚡ Tạo Caption Groq Siêu Tốc (2s)'
+                          : '⚡ Tạo Caption Local (Offline)'}
+                      </span>
                     </Button>
 
                     <Button

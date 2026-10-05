@@ -22,6 +22,9 @@ import {
   WandSparkles,
   Bot,
   Zap,
+  Heading,
+  Music,
+  Smile,
 } from 'lucide-react'
 import { ActionPanel } from './action-panel'
 import { motion, useReducedMotion } from 'motion/react'
@@ -75,6 +78,9 @@ import {
   getEditorLayout,
 } from '@/config/editor-layout'
 import { TextTabPanel } from './text-tab-panel'
+import { TitleMakerTabPanel } from './title-maker/title-maker-tab-panel'
+import { AudioTabPanel } from './audio-tab-panel'
+import { StickersTabPanel } from './stickers-tab-panel'
 
 const logger = createLogger('MediaSidebar')
 
@@ -276,7 +282,22 @@ export const MediaSidebar = memo(
     // Category items for the vertical nav
     const categories = [
       { id: 'media' as const, icon: Film, label: t('editor.mediaSidebar.media') },
+      {
+        id: 'audio' as const,
+        icon: Music,
+        label: t('editor.mediaSidebar.audio', { defaultValue: 'Audio' }),
+      },
       { id: 'text' as const, icon: Type, label: t('editor.mediaSidebar.text') },
+      {
+        id: 'title-maker' as const,
+        icon: Heading,
+        label: t('editor.mediaSidebar.titleMaker', { defaultValue: 'Title Studio' }),
+      },
+      {
+        id: 'stickers' as const,
+        icon: Smile,
+        label: t('editor.mediaSidebar.stickers', { defaultValue: 'Stickers' }),
+      },
       { id: 'shapes' as const, icon: Pentagon, label: t('editor.mediaSidebar.shapes') },
       { id: 'effects' as const, icon: Layers, label: t('editor.mediaSidebar.effects') },
       { id: 'transitions' as const, icon: Blend, label: t('editor.mediaSidebar.transitions') },
@@ -469,11 +490,32 @@ export const MediaSidebar = memo(
                 <MediaLibrary />
               </div>
 
+              {/* Audio Tab - CapCut Audio & Music */}
+              <div
+                className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'audio' ? 'block' : 'hidden'}`}
+              >
+                {activeTab === 'audio' && <AudioTabPanel />}
+              </div>
+
               {/* Text Tab */}
               <div
                 className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'text' ? 'block' : 'hidden'}`}
               >
                 <TextTabPanel onSuppressClick={shouldSuppressGeneratedItemClick} />
+              </div>
+
+              {/* Title Maker Studio Tab */}
+              <div
+                className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'title-maker' ? 'block' : 'hidden'}`}
+              >
+                {activeTab === 'title-maker' && <TitleMakerTabPanel />}
+              </div>
+
+              {/* Stickers Tab - CapCut Stickers Library */}
+              <div
+                className={`min-h-0 flex-1 overflow-hidden ${activeTab === 'stickers' ? 'block' : 'hidden'}`}
+              >
+                {activeTab === 'stickers' && <StickersTabPanel />}
               </div>
 
               {/* Shapes Tab */}

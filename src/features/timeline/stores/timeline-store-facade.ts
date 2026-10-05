@@ -122,6 +122,7 @@ function getSnapshot(): TimelineState & TimelineActions {
       addItemWithLinkedAudio: timelineActions.addItemWithLinkedAudio,
       addItemOnNewTrack: timelineActions.addItemOnNewTrack,
       updateItem: timelineActions.updateItem,
+      updateItems: timelineActions.updateItems,
       removeItems: timelineActions.removeItems,
       rippleDeleteItems: timelineActions.rippleDeleteItems,
       reverseItems: timelineActions.reverseItems,

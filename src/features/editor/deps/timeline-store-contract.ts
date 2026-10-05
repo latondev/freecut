@@ -6,6 +6,7 @@
 export type { TimelineState, TimelineActions } from '@/features/timeline/types'
 export { useTimelineStore } from '@/features/timeline/stores/timeline-store'
 export { useTimelineSettingsStore } from '@/features/timeline/stores/timeline-settings-store'
+export { useTimelineViewportStore } from '@/features/timeline/stores/timeline-viewport-store'
 export { useItemsStore } from '@/features/timeline/stores/items-store'
 export { useZoomStore } from '@/features/timeline/stores/zoom-store'
 export { useKeyframesStore } from '@/features/timeline/stores/keyframes-store'

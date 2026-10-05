@@ -70,6 +70,7 @@ export const SubtitleSegmentContent: React.FC<{
       textPadding: item.textPadding,
       textShadow: item.textShadow,
       stroke: item.stroke,
+      textMotion: item.textMotion,
       _sequenceFrameOffset: item._sequenceFrameOffset,
     }),
     [parsed, item],

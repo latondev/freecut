@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/button'
 import { Github } from 'lucide-react'
 import { DiscordIcon } from '@/components/brand/discord-icon'
 import { DISCORD_INVITE_URL } from '@/config/community'
+import { Separator } from '@/components/ui/separator'
+import { WorkspaceIndicator } from '@/features/workspace-gate'
 import type { ProjectFormData } from '@/features/projects/utils/validation'
 
 const logger = createLogger('NewProject')
@@ -82,6 +84,8 @@ function NewProject() {
                 <Github className="w-5 h-5" />
               </a>
             </Button>
+            <Separator orientation="vertical" className="h-6" />
+            <WorkspaceIndicator />
           </div>
         </div>
       </div>

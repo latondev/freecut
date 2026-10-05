@@ -11,6 +11,30 @@ export const DEFAULT_TEXT_FONT_FAMILY = 'Inter'
 
 export const FONT_CATALOG: readonly FontCatalogEntry[] = [
   {
+    value: 'Be Vietnam Pro',
+    label: 'Be Vietnam Pro',
+    family: 'Be Vietnam Pro',
+    weights: [300, 400, 500, 600, 700, 800],
+  },
+  {
+    value: 'Patrick Hand',
+    label: 'Patrick Hand',
+    family: 'Patrick Hand',
+    weights: [400],
+  },
+  {
+    value: 'Charm',
+    label: 'Charm',
+    family: 'Charm',
+    weights: [400, 700],
+  },
+  {
+    value: 'Sedgwick Ave',
+    label: 'Sedgwick Ave',
+    family: 'Sedgwick Ave',
+    weights: [400],
+  },
+  {
     value: 'CapCut Sans Text',
     label: 'CapCut Sans Text',
     family: 'CapCut Sans Text',

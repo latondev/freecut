@@ -1181,10 +1181,7 @@ export const TimelineContent = memo(function TimelineContent({
     useTimelineViewportStore.getState().clearScrollToFrame()
 
     const frameX = frameToPixelsRef.current(pendingScrollToFrame)
-    const sl = container.scrollLeft
     const vw = container.clientWidth
-    // Already visible — nothing to do
-    if (frameX >= sl && frameX <= sl + vw) return
 
     // Center the frame in the viewport
     container.scrollLeft = Math.max(0, frameX - vw / 2)

@@ -4,3 +4,4 @@ export {
   runMediaTranscriptionJob,
 } from '@/features/media-library/services/media-transcription-runner'
 export { getMediaTranscriptionModelLabel } from '@/features/media-library/transcription/registry'
+export { transcribeMediaWithGroq } from '@/features/media-library/services/groq-transcription-service'

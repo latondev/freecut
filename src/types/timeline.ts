@@ -435,6 +435,8 @@ export type SubtitleSegmentItem = BaseTimelineItem &
     /** Cue list, sorted by `startSeconds`. Times are segment-relative. */
     cues: SubtitleSegmentCue[]
     color: string
+    /** Optional motion-text animation (in / loop / out effects) */
+    textMotion?: TextMotionSpec
   }
 
 export type SubtitleSegmentSource =

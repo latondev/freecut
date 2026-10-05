@@ -21,6 +21,7 @@ import {
 } from '../utils/validation'
 import { getProjectFpsOptions } from '../utils/project-fps'
 import { ProjectTemplatePicker } from './project-template-picker'
+import { WorkspaceFolderField } from '../deps/workspace-gate-contract'
 
 interface ProjectFormBaseProps {
   onSubmit: (data: ProjectFormData) => Promise<void> | void
@@ -153,6 +154,9 @@ function ProjectFormBase({
                     <p className="mt-1.5 text-sm text-destructive">{errors.name.message}</p>
                   )}
                 </div>
+
+                {/* Save Location (Custom Folder) */}
+                {!isEditing && <WorkspaceFolderField />}
 
                 {/* Description */}
                 <div>

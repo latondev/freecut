@@ -65,6 +65,7 @@ export {
   moveItems,
   removeItems,
   updateItem,
+  updateItems,
 } from '../stores/actions/item-actions'
 export { setTracks } from '../stores/actions/track-actions'
 export {

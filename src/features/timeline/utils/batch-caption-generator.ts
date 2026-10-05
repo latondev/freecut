@@ -129,11 +129,32 @@ async function transcribeMediaJob(
   }
 }
 
+export type CaptionEngineMode = 'local' | 'groq'
+export type GroqWhisperModel =
+  | 'whisper-large-v3-turbo'
+  | 'whisper-large-v3'
+  | 'distil-whisper-large-v3-en'
+
+export interface BatchCaptionOptions {
+  engine?: CaptionEngineMode
+  groqApiKey?: string
+  groqModel?: GroqWhisperModel
+  model: MediaTranscriptModel
+  quantization?: MediaTranscriptQuantization
+  language?: string
+  targetItemIds?: string[]
+  force?: boolean
+  onProgress?: (progress: BatchCaptionProgress) => void
+}
+
 // fallow-ignore-next-line complexity
 async function processSingleMediaCaption(
   mediaId: string,
   clipIds: string[],
   options: {
+    engine?: CaptionEngineMode
+    groqApiKey?: string
+    groqModel?: GroqWhisperModel
     model: MediaTranscriptModel
     quantization?: MediaTranscriptQuantization
     language?: string
@@ -158,7 +179,18 @@ async function processSingleMediaCaption(
   }
 
   if (!transcript && !signal.aborted) {
-    transcript = await transcribeMediaJob(mediaId, options)
+    if (options.engine === 'groq' && options.groqApiKey) {
+      const { transcribeMediaWithGroq } =
+        await import('../deps/media-transcription-service-contract')
+      transcript = await transcribeMediaWithGroq(mediaId, {
+        apiKey: options.groqApiKey,
+        model: options.groqModel || 'whisper-large-v3-turbo',
+        language: options.language,
+        onProgress: options.onProgress,
+      })
+    } else {
+      transcript = await transcribeMediaJob(mediaId, options)
+    }
   }
 
   if (transcript && !signal.aborted) {
@@ -168,14 +200,9 @@ async function processSingleMediaCaption(
   return 0
 }
 
-export async function generateTimelineCaptionsBatch(options: {
-  model: MediaTranscriptModel
-  quantization?: MediaTranscriptQuantization
-  language?: string
-  targetItemIds?: string[]
-  force?: boolean
-  onProgress?: (progress: BatchCaptionProgress) => void
-}): Promise<{ totalClipsUpdated: number; mediaProcessed: number }> {
+export async function generateTimelineCaptionsBatch(
+  options: BatchCaptionOptions,
+): Promise<{ totalClipsUpdated: number; mediaProcessed: number }> {
   cancelBatchCaptionGeneration()
   const abortController = new AbortController()
   activeAbortController = abortController
@@ -217,6 +244,9 @@ export async function generateTimelineCaptionsBatch(options: {
       mediaId,
       clipIds,
       {
+        engine: options.engine,
+        groqApiKey: options.groqApiKey,
+        groqModel: options.groqModel,
         model: options.model,
         quantization: options.quantization,
         language: options.language,

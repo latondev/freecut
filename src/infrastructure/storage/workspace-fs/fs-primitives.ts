@@ -212,8 +212,8 @@ async function commitTmpFile(
       // Logged once per workspace (the set short-circuits later writes). Carries
       // the environment because the error alone cannot say *why* it rejected.
       logger.warn(
-        'writeJsonAtomic: FileSystemFileHandle.move() rejected as unsupported — ' +
-          'falling back to a non-atomic copy+delete for this workspace',
+        'writeJsonAtomic: FileSystemFileHandle.move() failed — ' +
+          'falling back to copy+delete for this workspace',
         { environment: describeStorageEnvironment() },
         error,
       )

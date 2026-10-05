@@ -23,6 +23,7 @@ import {
   evaluateGlyphMotion,
   getActiveTextMotionSlot,
   getTextMotionPreset,
+  isTextMotionActive,
   segmentTextUnits,
   type GlyphMotionState,
 } from '@/shared/typography/text-motion'
@@ -522,8 +523,24 @@ export function renderSubtitleSegmentItem(
     textShadow: item.textShadow,
     stroke: item.stroke,
     transform: item.transform,
+    textMotion: item.textMotion,
   }
-  renderTextItem(ctx, ephemeralText, transform, rctx)
+
+  const cueStartFrame = Math.round(activeCue.startSeconds * fps)
+  const cueEndFrame = Math.round(activeCue.endSeconds * fps)
+  const cueDurationInFrames = Math.max(1, cueEndFrame - cueStartFrame)
+  const relativeFrame = frame - item.from - cueStartFrame
+
+  const motion: TextMotionRenderContext | undefined =
+    item.textMotion && isTextMotionActive(item.textMotion, relativeFrame, fps, cueDurationInFrames)
+      ? {
+          relativeFrame,
+          fps,
+          durationInFrames: cueDurationInFrames,
+        }
+      : undefined
+
+  renderTextItem(ctx, ephemeralText, transform, rctx, motion)
 }
 
 function findActiveSubtitleCue<T extends { startSeconds: number; endSeconds: number }>(
