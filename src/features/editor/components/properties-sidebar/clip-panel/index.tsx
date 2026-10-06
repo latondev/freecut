@@ -548,8 +548,8 @@ const ClipPanelCore = memo(function ClipPanelCore({
 
   const availableTabs = useMemo(() => {
     const tabs: ClipInspectorTab[] = []
-    if (hasSubtitleItems || hasVirtualSubtitleItems) tabs.push('captions')
     if (hasSubtitleItems || hasVirtualSubtitleItems) tabs.push('text')
+    if (hasSubtitleItems || hasVirtualSubtitleItems) tabs.push('captions')
     if (showVideoTab) tabs.push('video')
     if (showSecondTab) tabs.push('audio')
     if (workspace === 'motion') {
@@ -575,7 +575,7 @@ const ClipPanelCore = memo(function ClipPanelCore({
 
   useEffect(() => {
     if (isSubtitleSelected && !prevIsSubtitleRef.current) {
-      setClipInspectorTab('captions')
+      setClipInspectorTab('text')
     }
     prevIsSubtitleRef.current = isSubtitleSelected
   }, [isSubtitleSelected, setClipInspectorTab])

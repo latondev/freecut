@@ -539,6 +539,7 @@ export const TextTabPanel = memo(function TextTabPanel({ onSuppressClick }: Text
       } else if (selectedTextItem) {
         updateItem(selectedTextItem.id, {
           color: effect.patch.color,
+          gradient: (effect.patch as any).gradient ?? undefined,
           fontFamily: effect.patch.fontFamily,
           fontWeight: effect.patch.fontWeight,
           stroke: effect.patch.stroke,
@@ -569,14 +570,20 @@ export const TextTabPanel = memo(function TextTabPanel({ onSuppressClick }: Text
       const { selectedItemIds } = useSelectionStore.getState()
       const { items, updateItem } = useTimelineStore.getState()
 
+      const selectedTextItem = items.find(
+        (item): item is TextItem => item.type === 'text' && selectedItemIds.includes(item.id),
+      )
       const selectedSubtitleItems = items.filter(
         (item) => item.type === 'subtitle' && selectedItemIds.includes(item.id),
       )
+      const textGradient = getCapcutAlphaTextGradient(template)
+      const textMotion = createTextTemplateMotion(template)
+
       if (selectedSubtitleItems.length > 0) {
-        const textMotion = createTextTemplateMotion(template)
         for (const sub of selectedSubtitleItems) {
           updateItem(sub.id, {
             color: template.patch.color,
+            gradient: textGradient,
             fontFamily: template.patch.fontFamily,
             fontWeight: template.patch.fontWeight,
             fontSize: template.patch.fontSize,
@@ -594,11 +601,32 @@ export const TextTabPanel = memo(function TextTabPanel({ onSuppressClick }: Text
         return
       }
 
+      if (selectedTextItem) {
+        updateItem(selectedTextItem.id, {
+          color: template.patch.color,
+          gradient: textGradient,
+          fontFamily: template.patch.fontFamily,
+          fontWeight: template.patch.fontWeight,
+          fontSize: template.patch.fontSize,
+          fontStyle: template.patch.fontStyle,
+          textAlign: template.patch.textAlign,
+          lineHeight: template.patch.lineHeight,
+          stroke: template.patch.stroke,
+          textShadow: template.patch.textShadow,
+          backgroundColor: template.patch.backgroundColor,
+          backgroundRadius: template.patch.backgroundRadius,
+          letterSpacing: template.patch.letterSpacing,
+          textMotion,
+        })
+        return
+      }
+
       handleCreateTextItem(
         {
           text: template.defaultText,
           ...template.patch,
-          textMotion: createTextTemplateMotion(template),
+          gradient: textGradient,
+          textMotion,
         },
         template.label,
       )

@@ -23,10 +23,13 @@ export const SubtitleSegmentContent: React.FC<{
   const relativeFrame = (sequenceContext?.localFrame ?? 0) - (item._sequenceFrameOffset ?? 0)
   const secondsIntoSegment = relativeFrame / fps
 
-  const activeCue = useMemo(
-    () => findActiveCue(item.cues, secondsIntoSegment),
-    [item.cues, secondsIntoSegment],
-  )
+  const activeCue = useMemo(() => {
+    if (item.cues.length === 1) return item.cues[0] ?? null
+    return (
+      findActiveCue(item.cues, secondsIntoSegment) ??
+      (secondsIntoSegment <= (item.cues[0]?.startSeconds ?? 0) ? item.cues[0] : null)
+    )
+  }, [item.cues, secondsIntoSegment])
 
   // Parse inline markup (<i>, <b>, <u>, <font color>) into formatted spans
   // and pull off any ASS `{\anN}` positioning override so the cue can land
@@ -36,11 +39,97 @@ export const SubtitleSegmentContent: React.FC<{
     [activeCue],
   )
 
+  // Word-by-word active highlight (Alex Hormozi / Karaoke style jump)
+  // fallow-ignore-next-line complexity
+  const highlightedSpans = useMemo(() => {
+    if (!activeCue || !parsed || parsed.isEmpty) return undefined
+
+    const highlightColor = item.highlightColor || '#facc15'
+    const wordHighlightEnabled = item.wordHighlightEnabled !== false
+
+    if (!wordHighlightEnabled || !highlightColor) {
+      return parsed.spans
+    }
+
+    const isSingleCue = item.cues.length === 1
+    const clipDurationSec = item.durationInFrames / fps
+    const cueDuration = Math.max(
+      0.08,
+      isSingleCue ? clipDurationSec : activeCue.endSeconds - activeCue.startSeconds,
+    )
+    const elapsed = isSingleCue
+      ? Math.max(0, Math.min(cueDuration, secondsIntoSegment))
+      : Math.max(0, Math.min(cueDuration, secondsIntoSegment - activeCue.startSeconds))
+    // Scale progress slightly so last words complete comfortably within spoken duration
+    const effectiveSpeechDuration = Math.max(0.08, cueDuration * 0.94)
+    const progress = Math.max(0, Math.min(1, elapsed / effectiveSpeechDuration))
+
+    // Tokenize cue plainText into words and whitespace runs
+    const rawTokens = parsed.plainText.match(/\S+|\s+/g) || []
+    const wordTokenIndices: number[] = []
+    rawTokens.forEach((tok, idx) => {
+      if (/\S/.test(tok)) {
+        wordTokenIndices.push(idx)
+      }
+    })
+
+    if (wordTokenIndices.length === 0) {
+      return parsed.spans
+    }
+
+    // Weight word duration by character length so short conjunctions ("và", "là")
+    // don't linger disproportionately compared to multi-syllable phrases.
+    const wordWeights = wordTokenIndices.map((idx) => {
+      const text = rawTokens[idx] ?? ''
+      return Math.max(2, text.length)
+    })
+    const totalWeight = wordWeights.reduce((sum, w) => sum + w, 0)
+
+    let accumulated = 0
+    let activeWordSlot = 0
+    const targetWeight = progress * totalWeight
+    for (let i = 0; i < wordWeights.length; i++) {
+      accumulated += wordWeights[i]!
+      if (targetWeight <= accumulated || i === wordWeights.length - 1) {
+        activeWordSlot = i
+        break
+      }
+    }
+    const activeRawIndex = wordTokenIndices[activeWordSlot] ?? -1
+
+    return rawTokens.map((tok, idx) => {
+      const isWord = /\S/.test(tok)
+      const isActive = isWord && activeRawIndex >= 0 && idx === activeRawIndex
+      return {
+        text: tok,
+        color: isActive ? highlightColor : item.color || '#ffffff',
+        gradient: isActive ? undefined : item.gradient,
+        fontWeight: isActive ? ('bold' as const) : item.fontWeight,
+        textTransform: item.textTransform,
+        isHighlight: isActive,
+      }
+    })
+  }, [
+    activeCue,
+    fps,
+    item.cues.length,
+    item.durationInFrames,
+    item.color,
+    item.gradient,
+    item.textTransform,
+    item.fontWeight,
+    item.highlightColor,
+    item.wordHighlightEnabled,
+    parsed,
+    secondsIntoSegment,
+  ])
+
   // Synthesize an ephemeral TextItem that carries the active cue's text and
   // the segment's typography. Keyframe/gizmo lookups by id will miss (the
   // segment isn't a TextItem) — that's fine for now; segment-level keyframes
   // are a planned follow-up.
   const syntheticTextItem = useMemo<TextItem & { _sequenceFrameOffset?: number }>(
+    // fallow-ignore-next-line complexity
     () => ({
       id: item.id,
       type: 'text',
@@ -51,16 +140,17 @@ export const SubtitleSegmentContent: React.FC<{
       mediaId: item.mediaId,
       transform: item.transform,
       text: parsed?.plainText ?? '',
-      // textSpans drives styled per-run rendering — italic / bold / colored
-      // fragments inside one cue. TextContent prefers spans over `text`
-      // when both are present.
-      textSpans: parsed?.spans,
+      // Inline flow allows individual words to recolor/highlight in real-time
+      spanLayout: 'inline',
+      textSpans: highlightedSpans ?? parsed?.spans,
       fontSize: item.fontSize,
       fontFamily: item.fontFamily,
       fontWeight: item.fontWeight,
       fontStyle: item.fontStyle,
       underline: item.underline,
       color: item.color,
+      gradient: item.gradient,
+      textTransform: item.textTransform,
       backgroundColor: item.backgroundColor,
       backgroundRadius: item.backgroundRadius,
       textAlign: parsed?.alignment?.textAlign ?? item.textAlign,
@@ -69,11 +159,11 @@ export const SubtitleSegmentContent: React.FC<{
       letterSpacing: item.letterSpacing,
       textPadding: item.textPadding,
       textShadow: item.textShadow,
-      stroke: item.stroke,
+      stroke: item.stroke ?? { width: 2.5, color: '#000000' },
       textMotion: item.textMotion,
       _sequenceFrameOffset: item._sequenceFrameOffset,
     }),
-    [parsed, item],
+    [parsed, item, highlightedSpans],
   )
 
   if (!activeCue || !parsed || parsed.isEmpty) return null

@@ -928,6 +928,10 @@ export function buildSubtitleSegmentForClip(
       blur: 10,
       color: 'rgba(0, 0, 0, 0.75)',
     },
+    stroke: {
+      width: 2.5,
+      color: '#000000',
+    },
     transform: {
       x: 0,
       y: Math.round(canvasHeight * 0.32),
@@ -1000,6 +1004,10 @@ export function buildIndividualSubtitleSegmentsForClip(
       offsetY: 3,
       blur: 10,
       color: 'rgba(0, 0, 0, 0.75)',
+    },
+    stroke: {
+      width: 2.5,
+      color: '#000000',
     },
     transform: {
       x: 0,

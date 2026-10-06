@@ -40,6 +40,8 @@ export interface ResolvedTextStyle {
   verticalAlign: TextVerticalAlign
   textPadding: number
   color: string
+  gradient?: string
+  textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize'
   backgroundColor?: string
   backgroundRadius: number
   textShadow?: TextItem['textShadow']
@@ -56,7 +58,10 @@ export interface ResolvedSpanStyle {
   fontWeight: number
   letterSpacing: number
   color: string
+  gradient?: string
+  textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize'
   underline: boolean
+  isHighlight?: boolean
   /** Canvas/CSS `font` shorthand — identical string across all renderers. */
   cssFont: string
 }
@@ -72,6 +77,8 @@ export type TextStyleInput = Pick<
   | 'fontStyle'
   | 'underline'
   | 'color'
+  | 'gradient'
+  | 'textTransform'
   | 'backgroundColor'
   | 'backgroundRadius'
   | 'textAlign'
@@ -105,6 +112,8 @@ export function resolveTextStyle(item: TextStyleInput): ResolvedTextStyle {
     verticalAlign: item.verticalAlign ?? TEXT_DEFAULTS.verticalAlign,
     textPadding: Math.max(0, item.textPadding ?? TEXT_DEFAULTS.textPadding),
     color: item.color ?? TEXT_DEFAULTS.color,
+    gradient: item.gradient,
+    textTransform: item.textTransform,
     backgroundColor: item.backgroundColor,
     backgroundRadius: Math.max(0, item.backgroundRadius ?? 0),
     textShadow: item.textShadow,
@@ -119,6 +128,8 @@ export function resolveSpanStyles(item: TextStyleInput): ResolvedSpanStyle[] {
   const itemFontWeightName = item.fontWeight ?? TEXT_DEFAULTS.fontWeight
   const itemLetterSpacing = item.letterSpacing ?? TEXT_DEFAULTS.letterSpacing
   const itemColor = item.color ?? TEXT_DEFAULTS.color
+  const itemGradient = item.gradient
+  const itemTextTransform = item.textTransform
   const itemUnderline = item.underline ?? TEXT_DEFAULTS.underline
 
   return getTextItemSpans(item).map((span) => {
@@ -136,7 +147,10 @@ export function resolveSpanStyles(item: TextStyleInput): ResolvedSpanStyle[] {
       fontWeight,
       letterSpacing: span.letterSpacing ?? itemLetterSpacing,
       color: span.color ?? itemColor,
+      gradient: span.gradient ?? itemGradient,
+      textTransform: span.textTransform ?? itemTextTransform,
       underline: span.underline ?? itemUnderline,
+      isHighlight: span.isHighlight,
       cssFont: buildCssFont(fontStyle, fontWeight, fontSize, fontFamily),
     }
   })

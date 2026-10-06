@@ -46,6 +46,12 @@ import {
   type TextTemplateCategory,
 } from '@/shared/typography/text-templates-catalog'
 import {
+  CAPTION_TEMPLATES_CATALOG,
+  CAPTION_TEMPLATE_CATEGORIES,
+  type CaptionTemplateCardItem,
+  type CaptionTemplateCategory,
+} from '@/shared/typography/caption-templates-catalog'
+import {
   createTextTemplateMotion,
   getCapcutAlphaTextGradient,
   getTemplateMotionKind,
@@ -66,7 +72,7 @@ interface SubtitleTextTabContentProps {
   }
 }
 
-type SubTab = 'effects' | 'templates' | 'style'
+type SubTab = 'caption_templates' | 'effects' | 'templates' | 'style'
 
 const CARD_ICONS: Record<string, React.ReactNode> = {
   music: <Music className="w-2.5 h-2.5 text-fuchsia-400" />,
@@ -233,6 +239,82 @@ const SubtitleTemplateCard = memo(function SubtitleTemplateCard({
   )
 })
 
+// Interactive Caption Template Card with Hover Preview Animation
+const SubtitleCaptionCard = memo(function SubtitleCaptionCard({
+  template,
+  isApplied,
+  onApply,
+}: {
+  template: CaptionTemplateCardItem
+  isApplied: boolean
+  onApply: (template: CaptionTemplateCardItem) => void
+}) {
+  const [isHovered, setIsHovered] = useState(false)
+  const isPro = template.isPro || template.badge === 'PRO'
+
+  return (
+    <button
+      type="button"
+      title={template.label}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      onClick={() => onApply(template)}
+      className={cn(
+        'group relative aspect-video w-full rounded-md border text-left overflow-hidden flex items-center justify-center p-0 cursor-pointer select-none transition-all active:scale-95',
+        isApplied
+          ? 'border-amber-500 bg-amber-950/40 shadow-sm shadow-amber-500/20'
+          : 'border-white/[0.06] bg-[#1a1a21] hover:bg-[#252530] hover:border-amber-400/50 hover:shadow-md',
+      )}
+    >
+      {/* Pro Badge */}
+      {isPro && (
+        <span className="absolute top-1 left-1 z-10 text-[7px] leading-none font-bold text-violet-400 drop-shadow">
+          ◆
+        </span>
+      )}
+
+      {/* Applied badge */}
+      {isApplied && (
+        <span className="absolute top-1 right-1 z-10 p-0.5 rounded-full bg-amber-500 text-white animate-in zoom-in-50">
+          <Check className="w-2.5 h-2.5" />
+        </span>
+      )}
+
+      {/* Visual Content with Hover Animation */}
+      {template.previewImage ? (
+        <div className="w-full h-full flex items-center justify-center p-1 relative">
+          <img
+            src={template.previewImage}
+            alt={template.label}
+            className="max-w-[90%] max-h-[85%] object-contain pointer-events-none select-none transition-transform duration-200 group-hover:scale-105 drop-shadow-sm"
+            loading="lazy"
+            onError={(e) => {
+              const target = e.currentTarget as HTMLImageElement
+              target.style.display = 'none'
+            }}
+          />
+          {isHovered && template.animatedPreviewImage && (
+            <img
+              src={template.animatedPreviewImage}
+              alt={template.label}
+              className="absolute inset-0 m-auto max-w-[90%] max-h-[85%] object-contain pointer-events-none select-none transition-transform duration-200 group-hover:scale-105 drop-shadow-sm"
+            />
+          )}
+        </div>
+      ) : (
+        <div className="w-full h-full flex items-center justify-center p-1">
+          <span className="text-xs font-semibold text-zinc-300">{template.label}</span>
+        </div>
+      )}
+
+      {/* Label bar */}
+      <span className="absolute bottom-0 inset-x-0 bg-black/75 text-[9px] py-0.5 px-1 truncate text-zinc-300 text-center">
+        {template.label}
+      </span>
+    </button>
+  )
+})
+
 // Interactive Effect Tile with Hover Animation
 const SubtitleEffectTile = memo(function SubtitleEffectTile({
   effect,
@@ -314,15 +396,19 @@ export const SubtitleTextTabContent = memo(function SubtitleTextTabContent({
   const updateItem = useTimelineStore((s) => s.updateItem)
   const updateItems = useTimelineStore((s) => s.updateItems)
 
-  const [activeSubTab, setActiveSubTab] = useState<SubTab>('effects')
+  const [activeSubTab, setActiveSubTab] = useState<SubTab>('caption_templates')
   const [applyToAll, setApplyToAll] = useState(true)
   const [selectedEffectCat, setSelectedEffectCat] = useState<TextEffectCategory | 'all'>('all')
   const [selectedTemplateCat, setSelectedTemplateCat] = useState<TextTemplateCategory | 'all'>(
     'all',
   )
+  const [selectedCaptionTemplateCat, setSelectedCaptionTemplateCat] = useState<
+    CaptionTemplateCategory | 'all'
+  >('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [selectedEffectId, setSelectedEffectId] = useState<string | null>(null)
+  const [selectedCaptionTemplateId, setSelectedCaptionTemplateId] = useState<string | null>(null)
 
   const canvasHeight = canvas?.height ?? DEFAULT_PROJECT_HEIGHT
 
@@ -375,6 +461,7 @@ export const SubtitleTextTabContent = memo(function SubtitleTextTabContent({
 
       applyStylePatch({
         color: effect.patch.color,
+        gradient: (effect.patch as any).gradient ?? undefined,
         fontFamily: effect.patch.fontFamily,
         fontWeight: effect.patch.fontWeight,
         stroke: effect.patch.stroke,
@@ -397,6 +484,7 @@ export const SubtitleTextTabContent = memo(function SubtitleTextTabContent({
       }
 
       const textMotion = createTextTemplateMotion(template)
+      const textGradient = getCapcutAlphaTextGradient(template)
 
       // Script fonts (Dancing Script, Pacifico, Charm, Patrick Hand) are already cursive;
       // forcing fontStyle='italic' causes browser font-matching fallback to sans-serif
@@ -410,11 +498,12 @@ export const SubtitleTextTabContent = memo(function SubtitleTextTabContent({
 
       applyStylePatch({
         color: template.patch.color,
+        gradient: textGradient,
         fontFamily: template.patch.fontFamily,
         fontWeight: template.patch.fontWeight,
-        fontSize: template.patch.fontSize,
+        fontSize: template.patch.fontSize ? Math.min(54, template.patch.fontSize) : 50,
         fontStyle,
-        textAlign: template.patch.textAlign,
+        textAlign: 'center',
         lineHeight: template.patch.lineHeight,
         stroke: template.patch.stroke,
         textShadow: template.patch.textShadow,
@@ -426,6 +515,57 @@ export const SubtitleTextTabContent = memo(function SubtitleTextTabContent({
     },
     [applyStylePatch],
   )
+
+  // Handle clicking a Caption Template
+  const handleApplyCaptionTemplate = useCallback(
+    // fallow-ignore-next-line complexity
+    async (template: CaptionTemplateCardItem) => {
+      setSelectedCaptionTemplateId(template.id)
+
+      if (template.patch.fontFamily) {
+        await ensureFontsLoaded([template.patch.fontFamily], [400, 700])
+      }
+
+      applyStylePatch({
+        color: template.patch.color ?? '#ffffff',
+        gradient: template.patch.gradient ?? undefined,
+        fontFamily: template.patch.fontFamily ?? 'Montserrat',
+        fontWeight: template.patch.fontWeight ?? 'bold',
+        fontSize: template.patch.fontSize ?? 50,
+        fontStyle: template.patch.fontStyle ?? 'normal',
+        textAlign: template.patch.textAlign ?? 'center',
+        lineHeight: template.patch.lineHeight ?? 1.2,
+        letterSpacing: template.patch.letterSpacing ?? 0,
+        stroke: template.patch.stroke ?? { width: 2.5, color: '#000000' },
+        textShadow: template.patch.textShadow ?? {
+          offsetX: 0,
+          offsetY: 2,
+          blur: 4,
+          color: 'rgba(0, 0, 0, 0.6)',
+        },
+        backgroundColor: template.patch.backgroundColor ?? undefined,
+        backgroundRadius: template.patch.backgroundRadius ?? undefined,
+        textPadding: template.patch.textPadding ?? undefined,
+        highlightColor: template.patch.highlightColor ?? '#facc15',
+        textTransform: template.patch.textTransform ?? 'none',
+        wordHighlightEnabled: true,
+      })
+    },
+    [applyStylePatch],
+  )
+
+  // Filtered caption templates
+  const filteredCaptionTemplates = useMemo(() => {
+    let list = CAPTION_TEMPLATES_CATALOG
+    if (selectedCaptionTemplateCat !== 'all') {
+      list = list.filter((item) => item.category === selectedCaptionTemplateCat)
+    }
+    const q = searchQuery.trim().toLowerCase()
+    if (q) {
+      list = list.filter((item) => item.label.toLowerCase().includes(q))
+    }
+    return list
+  }, [searchQuery, selectedCaptionTemplateCat])
 
   // Filtered effects
   const filteredEffects = useMemo(() => {
@@ -457,27 +597,75 @@ export const SubtitleTextTabContent = memo(function SubtitleTextTabContent({
   }, [searchQuery, selectedTemplateCat])
 
   return (
-    <div className="flex flex-col h-full min-h-0 space-y-2.5">
-      {/* Apply to all toggle switch */}
-      <div className="flex items-center justify-between p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs">
-        <label className="flex items-center gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={applyToAll}
-            onChange={(e) => setApplyToAll(e.target.checked)}
-            className="w-3.5 h-3.5 rounded border-amber-500/50 text-amber-500 accent-amber-500 cursor-pointer"
-          />
-          <span className="font-medium text-foreground">Áp dụng cho tất cả phụ đề</span>
-        </label>
-        <span className="text-[10px] font-mono text-amber-400 font-semibold bg-amber-500/20 px-1.5 py-0.5 rounded">
-          {applyToAll
-            ? `Tất cả (${allSubtitleItems.length} câu)`
-            : `Chỉ câu chọn (${selectedSubtitles.length})`}
-        </span>
+    <div className="flex flex-col h-full min-h-0 space-y-2">
+      {/* Controls row: Apply to all & Karaoke highlight */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={applyToAll}
+              onChange={(e) => setApplyToAll(e.target.checked)}
+              className="w-3.5 h-3.5 rounded border-amber-500/50 text-amber-500 accent-amber-500 cursor-pointer"
+            />
+            <span className="font-medium text-foreground">Áp dụng cho tất cả phụ đề</span>
+          </label>
+          <span className="text-[10px] font-mono text-amber-400 font-semibold bg-amber-500/20 px-1.5 py-0.5 rounded">
+            {applyToAll
+              ? `Tất cả (${allSubtitleItems.length} câu)`
+              : `Chỉ câu chọn (${selectedSubtitles.length})`}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-xs">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={activeSample?.wordHighlightEnabled !== false}
+              onChange={(e) => {
+                applyStylePatch({
+                  wordHighlightEnabled: e.target.checked,
+                  highlightColor: activeSample?.highlightColor || '#facc15',
+                })
+              }}
+              className="w-3.5 h-3.5 rounded border-yellow-500/50 text-yellow-500 accent-yellow-500 cursor-pointer"
+            />
+            <span className="font-medium text-foreground">
+              🎤 Nhảy chữ theo giọng đọc (Karaoke)
+            </span>
+          </label>
+          <div className="flex items-center gap-1.5">
+            <span
+              className="w-3.5 h-3.5 rounded-full border border-white/20 shadow-xs"
+              style={{ backgroundColor: activeSample?.highlightColor || '#facc15' }}
+              title="Màu nhảy chữ"
+            />
+            <span className="text-[10px] font-mono text-yellow-400 font-semibold">
+              {activeSample?.wordHighlightEnabled !== false ? 'Bật' : 'Tắt'}
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Sub-tabs header */}
-      <div className="grid grid-cols-3 gap-1 p-1 bg-secondary/50 rounded-lg text-xs shrink-0">
+      <div className="grid grid-cols-4 gap-1 p-1 bg-secondary/50 rounded-lg text-xs shrink-0">
+        <button
+          type="button"
+          onClick={() => {
+            setActiveSubTab('caption_templates')
+            setSearchQuery('')
+          }}
+          className={cn(
+            'flex items-center justify-center gap-1 py-1.5 px-1 rounded-md font-medium transition-all cursor-pointer select-none text-[11px]',
+            activeSubTab === 'caption_templates'
+              ? 'bg-background text-amber-400 shadow-xs'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          <Subtitles className="w-3 h-3 shrink-0" />
+          <span className="truncate">Mẫu Phụ Đề</span>
+        </button>
+
         <button
           type="button"
           onClick={() => {
@@ -485,14 +673,14 @@ export const SubtitleTextTabContent = memo(function SubtitleTextTabContent({
             setSearchQuery('')
           }}
           className={cn(
-            'flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md font-medium transition-all cursor-pointer select-none',
+            'flex items-center justify-center gap-1 py-1.5 px-1 rounded-md font-medium transition-all cursor-pointer select-none text-[11px]',
             activeSubTab === 'effects'
               ? 'bg-background text-amber-400 shadow-xs'
               : 'text-muted-foreground hover:text-foreground',
           )}
         >
-          <Sparkles className="w-3 h-3" />
-          <span>Hiệu Ứng</span>
+          <Sparkles className="w-3 h-3 shrink-0" />
+          <span className="truncate">Hiệu Ứng</span>
         </button>
 
         <button
@@ -502,14 +690,14 @@ export const SubtitleTextTabContent = memo(function SubtitleTextTabContent({
             setSearchQuery('')
           }}
           className={cn(
-            'flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md font-medium transition-all cursor-pointer select-none',
+            'flex items-center justify-center gap-1 py-1.5 px-1 rounded-md font-medium transition-all cursor-pointer select-none text-[11px]',
             activeSubTab === 'templates'
               ? 'bg-background text-amber-400 shadow-xs'
               : 'text-muted-foreground hover:text-foreground',
           )}
         >
-          <WandSparkles className="w-3 h-3" />
-          <span>Mẫu Chữ</span>
+          <WandSparkles className="w-3 h-3 shrink-0" />
+          <span className="truncate">Mẫu Chữ</span>
         </button>
 
         <button
@@ -519,18 +707,18 @@ export const SubtitleTextTabContent = memo(function SubtitleTextTabContent({
             setSearchQuery('')
           }}
           className={cn(
-            'flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md font-medium transition-all cursor-pointer select-none',
+            'flex items-center justify-center gap-1 py-1.5 px-1 rounded-md font-medium transition-all cursor-pointer select-none text-[11px]',
             activeSubTab === 'style'
               ? 'bg-background text-amber-400 shadow-xs'
               : 'text-muted-foreground hover:text-foreground',
           )}
         >
-          <Type className="w-3 h-3" />
-          <span>Kiểu Chữ</span>
+          <Type className="w-3 h-3 shrink-0" />
+          <span className="truncate">Kiểu Chữ</span>
         </button>
       </div>
 
-      {/* Search Input for effects and templates */}
+      {/* Search Input for caption templates, effects and text templates */}
       {activeSubTab !== 'style' && (
         <div className="relative flex items-center">
           <input
@@ -538,9 +726,11 @@ export const SubtitleTextTabContent = memo(function SubtitleTextTabContent({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={
-              activeSubTab === 'effects'
-                ? `Tìm trong ${TEXT_EFFECTS_CATALOG.length} hiệu ứng...`
-                : `Tìm trong ${TEXT_TEMPLATES_CATALOG.length} mẫu chữ...`
+              activeSubTab === 'caption_templates'
+                ? `Tìm trong ${CAPTION_TEMPLATES_CATALOG.length} mẫu phụ đề...`
+                : activeSubTab === 'effects'
+                  ? `Tìm trong ${TEXT_EFFECTS_CATALOG.length} hiệu ứng...`
+                  : `Tìm trong ${TEXT_TEMPLATES_CATALOG.length} mẫu chữ...`
             }
             className="w-full text-xs pl-2.5 pr-6 py-1 rounded bg-secondary/40 border border-border/50 focus:border-amber-500/60 focus:outline-none placeholder:text-muted-foreground/60"
           />
@@ -553,6 +743,44 @@ export const SubtitleTextTabContent = memo(function SubtitleTextTabContent({
               <X className="w-3 h-3" />
             </button>
           )}
+        </div>
+      )}
+
+      {/* TAB 0: CAPTION TEMPLATES */}
+      {activeSubTab === 'caption_templates' && (
+        <div className="flex-1 min-h-0 flex flex-col space-y-2">
+          {/* Categories */}
+          <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none text-[11px]">
+            {CAPTION_TEMPLATE_CATEGORIES.map((cat) => (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => setSelectedCaptionTemplateCat(cat.id)}
+                className={cn(
+                  'px-2 py-0.5 rounded-full shrink-0 transition-colors cursor-pointer',
+                  selectedCaptionTemplateCat === cat.id
+                    ? 'bg-amber-500 text-black font-semibold'
+                    : 'bg-secondary text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Grid of caption templates */}
+          <div className="flex-1 min-h-[300px] max-h-[500px] overflow-y-auto pr-1">
+            <div className="grid grid-cols-2 gap-2">
+              {filteredCaptionTemplates.map((template) => (
+                <SubtitleCaptionCard
+                  key={template.id}
+                  template={template}
+                  isApplied={selectedCaptionTemplateId === template.id}
+                  onApply={handleApplyCaptionTemplate}
+                />
+              ))}
+            </div>
+          </div>
         </div>
       )}
 

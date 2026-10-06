@@ -130,6 +130,7 @@ export interface ItemPropertiesPreview extends Partial<Pick<ShapeItem, ShapePrev
   letterSpacing?: number
   lineHeight?: number
   color?: string
+  gradient?: string
   backgroundColor?: string
   backgroundRadius?: number
   textPadding?: number

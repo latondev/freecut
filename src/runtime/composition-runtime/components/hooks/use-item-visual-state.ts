@@ -303,12 +303,23 @@ export function useItemVisualState(
       resolved = applyTransformOverride(resolved, previewTransform)
     }
 
-    if (item.type === 'text' && !hasCornerPin(item.cornerPin)) {
-      resolved = expandTextTransformToFitContent(
-        resolveAnimatedTextItem(item, itemKeyframes ?? undefined, visualFrame, logicalCanvas),
-        resolved,
-        propertiesPreview,
-      )
+    if ((item.type === 'text' || item.type === 'subtitle') && !hasCornerPin(item.cornerPin)) {
+      if (item.type === 'text') {
+        resolved = expandTextTransformToFitContent(
+          resolveAnimatedTextItem(item, itemKeyframes ?? undefined, visualFrame, logicalCanvas),
+          resolved,
+          propertiesPreview,
+        )
+      } else {
+        const subtitleText = 'cues' in item && item.cues[0] ? item.cues[0].text : ''
+        const syntheticTextItem = {
+          ...item,
+          type: 'text' as const,
+          text: subtitleText,
+          spanLayout: 'inline' as const,
+        } as unknown as import('@/types/timeline').TextItem
+        resolved = expandTextTransformToFitContent(syntheticTextItem, resolved, propertiesPreview)
+      }
     }
 
     // Calculate fade opacity based on fadeIn/fadeOut (in seconds)

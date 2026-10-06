@@ -10,7 +10,10 @@ export type TextInlineStyleFields = {
   fontStyle?: TextFontStyle
   underline?: boolean
   color?: string
+  gradient?: string
+  textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize'
   letterSpacing?: number
+  isHighlight?: boolean
 }
 
 export type TextSpan = TextInlineStyleFields & {
@@ -30,6 +33,7 @@ export type TextShadow = {
   offsetY: number
   blur: number
   color: string
+  raw?: string
 }
 
 export type TextStroke = {
@@ -46,6 +50,10 @@ export type TextVisualStyleFields = {
   textPadding?: number
   textShadow?: TextShadow
   stroke?: TextStroke
+  highlightColor?: string
+  wordHighlightEnabled?: boolean
+  gradient?: string
+  textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize'
 }
 
 export type TextStyleFields = TextInlineStyleFields & TextVisualStyleFields
